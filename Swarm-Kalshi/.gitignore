@@ -1,0 +1,39 @@
+# Kalshi Bot Swarm
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Runtime data
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.json
+logs/*.log
+
+# Config with real credentials — use swarm_config.yaml.example as the template
+config/swarm_config.yaml
+
+# API keys
+keys/
+!keys/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Virtual environments
+venv/
+.venv/
+env/

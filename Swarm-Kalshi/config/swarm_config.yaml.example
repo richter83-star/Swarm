@@ -1,0 +1,151 @@
+# =============================================================================
+# Kalshi Bot Swarm v4.0 -- swarm_config.yaml
+# Copy this file to swarm_config.yaml and fill in your credentials.
+# =============================================================================
+
+# --- API credentials (required) ---
+api:
+  key_id: YOUR_API_KEY_ID_HERE           # From Kalshi dashboard
+  private_key_path: keys/kalshi-private.key
+  base_url: https://api.elections.kalshi.com/trade-api/v2
+  demo_mode: false                        # Set true to use demo environment
+
+# --- Swarm-level settings ---
+swarm:
+  unassigned_market_bot: vanguard         # Which bot handles uncategorised markets
+  global_daily_loss_limit_cents: 15000    # $150 — halts ALL bots if hit
+  global_exposure_limit_cents: 50000      # $500 — max total capital at risk
+  health_check_interval: 30              # seconds between coordinator health checks
+  max_restart_attempts: 3
+  restart_cooldown_seconds: 60
+  conflict_db_path: data/conflict_claims.db   # persistent claim store (v4)
+  stale_claim_hours: 24                        # prune claims older than this
+
+# --- Trading defaults (inherited by all bots unless overridden) ---
+trading:
+  default_order_type: limit               # "limit" or "market"
+  min_confidence_threshold: 65           # 0-100; signals below this are skipped
+  min_liquidity_cents: 1000
+  min_volume_24h: 50
+  min_hours_to_expiry: 2
+  max_hours_to_expiry: 720               # 30 days
+  max_position_pct: 0.05                 # max % of balance per position
+  max_open_positions: 10
+  max_trades_per_day: 20
+  daily_loss_limit_cents: 3000           # per-bot ($30)
+  min_balance_cents: 500                 # stop trading if balance drops below
+  max_drawdown_pct: 0.10                 # 10% peak-to-trough halt
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+  limit_spread_buffer_cents: 1
+  max_signals_per_cycle: 3              # v4: execute up to N signals per scan
+  stale_trade_hours: 48                 # v4: force-resolve trades older than this
+  exit_loss_threshold_cents: -20        # v4: exit position if unrealized loss >= this
+
+# --- Risk overrides (merged with trading section) ---
+risk:
+  daily_loss_limit_cents: 3000
+  max_drawdown_pct: 0.10
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+
+# --- Learning engine ---
+learning:
+  db_path: data/swarm_learning.db       # overridden per-bot to separate DBs
+  rolling_window: 50
+  min_trades_for_review: 10
+  learning_rate: 0.05
+  decay_factor: 0.95
+  min_confidence_threshold: 65
+
+# --- Human-like behavior ---
+human_behavior:
+  action_delay_mean: 8.0                # seconds between actions
+  action_delay_std: 3.0
+  action_delay_min: 2.0
+  action_delay_max: 20.0
+  session_duration_min: 15             # minutes
+  session_duration_max: 90
+  idle_period_min: 30                  # minutes between sessions
+  idle_period_max: 180
+  browse_without_trade_prob: 0.30
+  trade_size_min_multiplier: 0.6
+  trade_size_max_multiplier: 1.4
+  # v4: state_file is set automatically per-bot (data/{bot_name}_behavior_state.json)
+
+# --- External signals ---
+external_signals:
+  enabled: true
+  cache_ttl_seconds: 300
+  news_api_enabled: false
+  news_api_url: ""
+  news_api_key: ""                       # Optional: NewsAPI key
+  consensus_enabled: true
+  resolution_patterns_enabled: true
+  cross_reference_enabled: true
+  sentiment_weight: 0.15
+  consensus_weight: 0.25
+  resolution_pattern_weight: 0.20
+  cross_reference_weight: 0.15
+
+# --- LLM Advisor (v4 NEW) ---
+llm_advisor:
+  enabled: true
+  api_key: ""                            # Anthropic API key — or set ANTHROPIC_API_KEY env var
+  model: claude-haiku-4-5-20251001      # Cheapest/fastest model; change if desired
+  max_tokens: 300
+  temperature: 0.1
+  pre_screen_threshold: 60              # Only call LLM if quant confidence >= this
+  llm_weight: 0.20                      # 20% LLM, 80% quant in final blend
+  cache_ttl_seconds: 300
+  timeout_seconds: 10
+  max_calls_per_cycle: 5               # Hard cap per scan cycle (controls API cost)
+
+# --- Backtester ---
+backtester:
+  max_settled_markets: 200
+  min_volume_24h: 20
+  auto_run_on_empty_db: true
+  recalibrate_after: true
+  backtest_batch_delay: 0.2
+  # v4: weekly_rerun is handled automatically by BotRunner
+
+# --- Prior knowledge ---
+prior_knowledge:
+  prior_strength: 10                    # How many "virtual trades" the prior is worth
+  blend_with_observed: true
+
+# --- Logging ---
+logging:
+  level: INFO
+  file: logs/swarm.log
+  max_bytes: 10485760                   # 10 MB
+  backup_count: 5
+
+# --- Dashboard ---
+dashboard:
+  host: 0.0.0.0
+  port: 8080
+  auth:
+    enabled: false
+    username: admin
+    password: ""                          # use DASHBOARD_PASS env var
+  refresh_interval_seconds: 15
+
+# --- Telegram ---
+# Create a bot at https://t.me/BotFather, then get your chat_id by
+# messaging the bot and calling getUpdates, or use @userinfobot.
+telegram:
+  enabled: false
+  bot_token: ""                           # use TELEGRAM_BOT_TOKEN env var
+  chat_id: ""                             # use TELEGRAM_CHAT_ID env var
+  timeout_seconds: 8
+  notify_signals: true
+  notify_trades: true
+  notify_outcomes: true
+  notify_crashes: true
+  notify_daily_summary: true
+  signal_confidence_threshold: 70
+  commands_enabled: true
+  allowed_user_ids: []                    # e.g. [123456789]
+  poll_interval_seconds: 2
