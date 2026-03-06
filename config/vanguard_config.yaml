@@ -1,0 +1,7 @@
+bot:
+  display_name: Vanguard
+  specialist: general
+  description: General catch-all specialist
+learning:
+  db_path: data/vanguard.db
+excluded_categories: [politics, elections, economics, weather]

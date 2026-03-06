@@ -1,0 +1,7 @@
+bot:
+  display_name: Pulse
+  specialist: weather
+  description: Weather and science specialist
+learning:
+  db_path: data/pulse.db
+category_filters: [weather, climate, science, environment]

@@ -1,0 +1,7 @@
+bot:
+  display_name: Sentinel
+  specialist: politics
+  description: Politics and elections specialist
+learning:
+  db_path: data/sentinel.db
+category_filters: [politics, elections, government, congress]

@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""
+run_swarm.py
+============
+
+Main entry point for the Kalshi Bot Swarm system.
+
+Usage
+-----
+    # Start the full swarm (coordinator + all bots + dashboard)
+    python run_swarm.py
+
+    # Start only the dashboard (for viewing past data)
+    python run_swarm.py --dashboard-only
+
+    # Start a single bot
+    python run_swarm.py --bot sentinel
+
+    # Start without dashboard
+    python run_swarm.py --no-dashboard
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+
+# Ensure project root is on the path
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+logger = logging.getLogger("kalshi_swarm")
+
+
+def setup_logging(level: str = "INFO") -> None:
+    """Configure root logging."""
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(fmt)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+
+def ensure_directories() -> None:
+    """Create required directories if they don't exist."""
+    for d in ["data", "logs", "keys"]:
+        (PROJECT_ROOT / d).mkdir(parents=True, exist_ok=True)
+
+
+def start_dashboard(coordinator=None, host="0.0.0.0", port=8080) -> threading.Thread:
+    """Start the Flask dashboard in a background thread."""
+    from dashboard.dashboard_web import create_app
+
+    app = create_app(
+        project_root=str(PROJECT_ROOT),
+        coordinator=coordinator,
+    )
+
+    def run():
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+
+    t = threading.Thread(target=run, daemon=True, name="dashboard")
+    t.start()
+    logger.info("Dashboard started at http://%s:%d", host, port)
+    return t
+
+
+def run_single_bot(bot_name: str) -> None:
+    """Run a single bot directly (no coordinator)."""
+    from swarm.bot_runner import BotRunner
+
+    config_map = {
+        "sentinel": "config/sentinel_config.yaml",
+        "oracle": "config/oracle_config.yaml",
+        "pulse": "config/pulse_config.yaml",
+        "vanguard": "config/vanguard_config.yaml",
+    }
+
+    if bot_name not in config_map:
+        logger.error("Unknown bot: %s. Choose from: %s", bot_name, list(config_map.keys()))
+        sys.exit(1)
+
+    runner = BotRunner(
+        bot_name=bot_name,
+        swarm_config_path=str(PROJECT_ROOT / "config" / "swarm_config.yaml"),
+        bot_config_path=str(PROJECT_ROOT / config_map[bot_name]),
+        project_root=str(PROJECT_ROOT),
+    )
+    runner.run()
+
+
+def run_full_swarm(
+    no_dashboard: bool = False,
+    dashboard_host: str = "0.0.0.0",
+    dashboard_port: int = 8080,
+) -> None:
+    """Run the full swarm: coordinator + all bots + dashboard."""
+    from swarm.swarm_coordinator import SwarmCoordinator
+
+    coordinator = SwarmCoordinator(
+        config_path="config/swarm_config.yaml",
+        project_root=str(PROJECT_ROOT),
+    )
+
+    if not no_dashboard:
+        start_dashboard(
+            coordinator=coordinator,
+            host=dashboard_host,
+            port=dashboard_port,
+        )
+
+    # Run coordinator (blocks until shutdown)
+    coordinator.run()
+
+
+def run_dashboard_only(host: str = "0.0.0.0", port: int = 8080) -> None:
+    """Run only the dashboard (no bots)."""
+    from dashboard.dashboard_web import create_app
+
+    app = create_app(project_root=str(PROJECT_ROOT))
+    logger.info("Starting dashboard-only mode at http://%s:%d", host, port)
+    app.run(host=host, port=port, debug=False)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Kalshi Bot Swarm -- Main Entry Point",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python run_swarm.py                       # Full swarm + dashboard
+  python run_swarm.py --dashboard-only      # Dashboard only
+  python run_swarm.py --bot sentinel        # Single bot
+  python run_swarm.py --no-dashboard        # Swarm without dashboard
+  python run_swarm.py --port 9090           # Custom dashboard port
+        """,
+    )
+    parser.add_argument(
+        "--bot",
+        choices=["sentinel", "oracle", "pulse", "vanguard"],
+        help="Run a single bot instead of the full swarm.",
+    )
+    parser.add_argument(
+        "--dashboard-only",
+        action="store_true",
+        help="Run only the web dashboard (no bots).",
+    )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Run the swarm without the web dashboard.",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Dashboard host (default: 0.0.0.0).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Dashboard port (default: 8080).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO).",
+    )
+    args = parser.parse_args()
+
+    setup_logging(args.log_level)
+    ensure_directories()
+
+    print(r"""
+    ╔══════════════════════════════════════════════════════════╗
+    ║           🐝  KALSHI BOT SWARM  v3.0.0  🐝             ║
+    ║                                                          ║
+    ║   Sentinel  ·  Oracle  ·  Pulse  ·  Vanguard            ║
+    ║                                                          ║
+    ╚══════════════════════════════════════════════════════════╝
+    """)
+
+    if args.dashboard_only:
+        run_dashboard_only(host=args.host, port=args.port)
+    elif args.bot:
+        run_single_bot(args.bot)
+    else:
+        run_full_swarm(
+            no_dashboard=args.no_dashboard,
+            dashboard_host=args.host,
+            dashboard_port=args.port,
+        )
+
+
+if __name__ == "__main__":
+    main()

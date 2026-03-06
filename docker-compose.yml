@@ -1,0 +1,82 @@
+version: "3.8"
+
+# =============================================================================
+# Kalshi Bot Swarm -- Docker Compose
+# =============================================================================
+# Deployment options:
+#   1. Single container (default): runs coordinator + all bots + dashboard
+#   2. Multi-container: each bot as a separate service (uncomment below)
+
+services:
+  # ---- Option 1: All-in-one ----
+  swarm:
+    build: .
+    container_name: kalshi-swarm
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./keys:/app/keys
+      - ./config:/app/config
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python run_swarm.py --port 8080
+
+  # ---- Option 2: Individual services (uncomment to use) ----
+  # dashboard:
+  #   build: .
+  #   container_name: kalshi-dashboard
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./config:/app/config
+  #   command: python run_swarm.py --dashboard-only --port 8080
+
+  # sentinel:
+  #   build: .
+  #   container_name: kalshi-sentinel
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./keys:/app/keys
+  #     - ./config:/app/config
+  #   command: python run_swarm.py --bot sentinel
+
+  # oracle:
+  #   build: .
+  #   container_name: kalshi-oracle
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./keys:/app/keys
+  #     - ./config:/app/config
+  #   command: python run_swarm.py --bot oracle
+
+  # pulse:
+  #   build: .
+  #   container_name: kalshi-pulse
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./keys:/app/keys
+  #     - ./config:/app/config
+  #   command: python run_swarm.py --bot pulse
+
+  # vanguard:
+  #   build: .
+  #   container_name: kalshi-vanguard
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./keys:/app/keys
+  #     - ./config:/app/config
+  #   command: python run_swarm.py --bot vanguard

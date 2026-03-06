@@ -1,0 +1,27 @@
+# Kalshi Bot Swarm v3.0.0 -- Dependencies
+# Python 3.11+
+
+# HTTP client
+requests>=2.31.0
+
+# Kalshi API authentication
+cryptography>=41.0.0
+PyJWT>=2.8.0
+
+# Configuration
+PyYAML>=6.0
+
+# Dashboard
+flask>=3.0.0
+
+# Data analysis
+numpy>=1.24.0
+
+# Database (built-in sqlite3, no extra package needed)
+
+# Optional: News API for external signals
+# newsapi-python>=0.2.7
+
+# Optional: Additional data sources
+# pandas>=2.0.0
+# scipy>=1.11.0

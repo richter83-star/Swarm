@@ -1,0 +1,7 @@
+bot:
+  display_name: Oracle
+  specialist: economics
+  description: Economics and finance specialist
+learning:
+  db_path: data/oracle.db
+category_filters: [economics, finance, inflation, employment]
