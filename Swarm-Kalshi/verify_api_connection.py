@@ -10,19 +10,20 @@ import sys
 from pathlib import Path
 
 # Add project to path
-sys.path.insert(0, "D:\\kalshi-swarm-v4")
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR))
 
 from kalshi_agent.kalshi_client import KalshiClient
 
 def test_api_connection():
     """Test the API connection and report balance"""
-    
+
     print("="*60)
     print("KALSHI API VERIFICATION")
     print("="*60)
-    
+
     # Load config
-    config_path = Path("D:\\kalshi-swarm-v4\\config\\swarm_config.yaml")
+    config_path = BASE_DIR / "config" / "swarm_config.yaml"
     
     if not config_path.exists():
         print(f"❌ Config file not found: {config_path}")
@@ -45,7 +46,7 @@ def test_api_connection():
     print(f"   Private Key: {private_key_path}")
     
     # Check if key file exists
-    key_file = Path("D:\\kalshi-swarm-v4") / private_key_path
+    key_file = BASE_DIR / private_key_path
     if not key_file.exists():
         print(f"\n❌ Private key file NOT FOUND: {key_file}")
         print("   Bots cannot authenticate without this key!")
