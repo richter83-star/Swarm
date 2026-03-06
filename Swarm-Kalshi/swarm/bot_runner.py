@@ -445,17 +445,6 @@ class BotRunner:
 
         self._reconcile_outcomes()
 
-        if self.learning.should_review():
-            new_weights = self.learning.review_and_recalibrate(self.analysis.weights)
-            self.analysis.update_weights(new_weights)
-            trend = self.learning.trend
-            logger.info(
-                "Trend after review: WR_delta=%.1f%% mult=%.2f hot=%s cold=%s",
-                trend.win_rate_trend * 100,
-                trend.momentum_multiplier,
-                trend.hot_categories,
-                trend.cold_categories,
-            )
     def _execute_trade(self, signal) -> None:
         """Execute a trade -- mirrors agent.py logic."""
         base_count = self.risk.position_size(signal.confidence, signal.suggested_price)
@@ -509,6 +498,8 @@ class BotRunner:
                 rationale=signal.rationale,
                 series_ticker=signal.ticker.split("-")[0] if "-" in signal.ticker else signal.ticker,
                 category=signal.category,
+                bot_name=self.bot_name,
+                order_id=order_id,
             )
             self._pending_trades[signal.ticker] = db_id
             self._trade_count += 1
@@ -559,6 +550,7 @@ class BotRunner:
                     outcome = "win" if pnl >= 0 else "loss"
                     self.learning.update_outcome(db_id, outcome, pnl_cents=pnl)
                     self.risk.record_outcome(pnl)
+                    self._on_trade_resolved(outcome, pnl)
                     resolved.append(ticker)
                     logger.info("Resolved %s: %s (%+d cents)", ticker, outcome, pnl)
                     continue
@@ -635,13 +627,60 @@ class BotRunner:
                 outcome = "win" if fill_pnl >= 0 else "loss"
                 self.learning.update_outcome(db_id, outcome, pnl_cents=fill_pnl)
                 self.risk.record_outcome(fill_pnl)
+                self._on_trade_resolved(outcome, fill_pnl)
                 logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
             else:
                 # No fills found — mark as expired/neutral
                 self.learning.update_outcome(db_id, "expired", pnl_cents=0)
+                self._on_trade_resolved("expired", 0)
                 logger.info("Force-resolved %s as expired (no fills found).", ticker)
         except Exception as exc:
             logger.warning("Force-resolve failed for %s: %s", ticker, exc)
+
+    def _on_trade_resolved(self, outcome: str, pnl_cents: int) -> None:
+        """
+        Called immediately after every trade outcome is recorded.
+
+        Refreshes the learning engine's trend snapshot so that the next
+        position-sizing call uses up-to-date momentum, and triggers a full
+        weight recalibration whenever the review threshold is reached.
+
+        This makes strategy adaptation happen per-resolution rather than
+        waiting for a fixed batch boundary at the end of a trading cycle.
+        """
+        # Refresh trend (momentum_multiplier, hot/cold categories, calibration bias).
+        # Cheap — one DB query over the last 20 settled trades.
+        try:
+            self.learning.compute_trend()
+        except Exception as exc:
+            logger.warning("Trend refresh failed after trade resolution: %s", exc)
+
+        # Run full weight recalibration if the review threshold has been reached.
+        if self.learning.should_review():
+            try:
+                new_weights = self.learning.review_and_recalibrate(self.analysis.weights)
+                self.analysis.update_weights(new_weights)
+                trend = self.learning.trend
+                logger.info(
+                    "Auto-recalibrated after %s resolution (pnl=%+d¢): "
+                    "WR_delta=%.1f%% mult=%.2f hot=%s cold=%s weights=%s",
+                    outcome, pnl_cents,
+                    trend.win_rate_trend * 100,
+                    trend.momentum_multiplier,
+                    trend.hot_categories,
+                    trend.cold_categories,
+                    self.analysis.weights,
+                )
+            except Exception as exc:
+                logger.warning("Weight recalibration failed after trade resolution: %s", exc)
+        else:
+            trend = self.learning.trend
+            logger.debug(
+                "Post-resolution trend: outcome=%s pnl=%+d¢ mult=%.2f bias=%.1f",
+                outcome, pnl_cents,
+                trend.momentum_multiplier,
+                trend.calibration_bias,
+            )
 
     def _place_exit_order(self, ticker: str, position: Dict[str, Any]) -> None:
         """
