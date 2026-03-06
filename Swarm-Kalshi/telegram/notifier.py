@@ -261,5 +261,5 @@ class TelegramNotifier:
                 return False
             return True
         except Exception as exc:
-            logger.debug("Telegram send failed: %s", exc)
+            logger.warning("Telegram send failed: %s", exc)
             return False
