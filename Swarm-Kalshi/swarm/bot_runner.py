@@ -40,6 +40,7 @@ from kalshi_agent.backtester import Backtester
 from kalshi_agent.external_signals import ExternalSignals
 from kalshi_agent.prior_knowledge import PriorKnowledge
 from kalshi_agent.llm_advisor import LLMAdvisor
+from telegram.notifier import TelegramNotifier
 
 logger = logging.getLogger("kalshi_agent")
 
@@ -153,6 +154,8 @@ class BotRunner:
             learning=self.learning,
             config=self.cfg.get("backtester", {}),
         )
+
+        self.notifier = TelegramNotifier(self.cfg.get("telegram", {}))
 
         # Category and keyword filters
         self._category_filters = set(
@@ -429,6 +432,18 @@ class BotRunner:
         max_signals_per_cycle = self.cfg.get("trading", {}).get("max_signals_per_cycle", 3)
         trades_executed = 0
 
+        # Notify Telegram for each qualifying signal (pre-execution)
+        for sig in signals[:max_signals_per_cycle]:
+            self.notifier.notify_signal(
+                ticker=sig.ticker,
+                title=sig.title,
+                side=sig.side,
+                confidence=sig.confidence,
+                price_cents=sig.suggested_price,
+                bot_name=self.bot_name,
+                rationale=sig.rationale,
+            )
+
         for signal in signals[:max_signals_per_cycle]:
             if not self.risk.can_trade():
                 logger.info("Risk manager halted further trades this cycle.")
@@ -504,6 +519,15 @@ class BotRunner:
             self._pending_trades[signal.ticker] = db_id
             self._trade_count += 1
             self.behavior.record_action(traded=True)
+            self.notifier.notify_trade(
+                ticker=signal.ticker,
+                side=signal.side,
+                count=count,
+                price_cents=signal.suggested_price,
+                confidence=signal.confidence,
+                order_id=order_id,
+                bot_name=self.bot_name,
+            )
 
         except KalshiAPIError as exc:
             logger.error("Order failed for %s: %s", signal.ticker, exc)
@@ -550,7 +574,7 @@ class BotRunner:
                     outcome = "win" if pnl >= 0 else "loss"
                     self.learning.update_outcome(db_id, outcome, pnl_cents=pnl)
                     self.risk.record_outcome(pnl)
-                    self._on_trade_resolved(outcome, pnl)
+                    self._on_trade_resolved(outcome, pnl, ticker=ticker)
                     resolved.append(ticker)
                     logger.info("Resolved %s: %s (%+d cents)", ticker, outcome, pnl)
                     continue
@@ -627,17 +651,17 @@ class BotRunner:
                 outcome = "win" if fill_pnl >= 0 else "loss"
                 self.learning.update_outcome(db_id, outcome, pnl_cents=fill_pnl)
                 self.risk.record_outcome(fill_pnl)
-                self._on_trade_resolved(outcome, fill_pnl)
+                self._on_trade_resolved(outcome, fill_pnl, ticker=ticker)
                 logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
             else:
                 # No fills found — mark as expired/neutral
                 self.learning.update_outcome(db_id, "expired", pnl_cents=0)
-                self._on_trade_resolved("expired", 0)
+                self._on_trade_resolved("expired", 0, ticker=ticker)
                 logger.info("Force-resolved %s as expired (no fills found).", ticker)
         except Exception as exc:
             logger.warning("Force-resolve failed for %s: %s", ticker, exc)
 
-    def _on_trade_resolved(self, outcome: str, pnl_cents: int) -> None:
+    def _on_trade_resolved(self, outcome: str, pnl_cents: int, ticker: str = "") -> None:
         """
         Called immediately after every trade outcome is recorded.
 
@@ -648,6 +672,14 @@ class BotRunner:
         This makes strategy adaptation happen per-resolution rather than
         waiting for a fixed batch boundary at the end of a trading cycle.
         """
+        # Telegram outcome notification
+        self.notifier.notify_outcome(
+            ticker=ticker,
+            outcome=outcome,
+            pnl_cents=pnl_cents,
+            bot_name=self.bot_name,
+        )
+
         # Refresh trend (momentum_multiplier, hot/cold categories, calibration bias).
         # Cheap — one DB query over the last 20 settled trades.
         try:
@@ -764,6 +796,14 @@ class BotRunner:
             wins=status["wins_today"],
             losses=status["losses_today"],
             avg_conf=perf.get("avg_confidence", 0),
+        )
+        self.notifier.notify_daily_summary(
+            bot_name=self.bot_name,
+            trades=status["trades_today"],
+            wins=status["wins_today"],
+            losses=status["losses_today"],
+            pnl_cents=status["daily_pnl_cents"],
+            win_rate=perf.get("win_rate", 0.0),
         )
 
     def _shutdown(self) -> None:

@@ -126,4 +126,26 @@ logging:
 dashboard:
   host: 0.0.0.0
   port: 8080
+  auth:
+    enabled: false
+    username: admin
+    password: ""                          # use DASHBOARD_PASS env var
   refresh_interval_seconds: 15
+
+# --- Telegram ---
+# Create a bot at https://t.me/BotFather, then get your chat_id by
+# messaging the bot and calling getUpdates, or use @userinfobot.
+telegram:
+  enabled: false
+  bot_token: ""                           # use TELEGRAM_BOT_TOKEN env var
+  chat_id: ""                             # use TELEGRAM_CHAT_ID env var
+  timeout_seconds: 8
+  notify_signals: true
+  notify_trades: true
+  notify_outcomes: true
+  notify_crashes: true
+  notify_daily_summary: true
+  signal_confidence_threshold: 70
+  commands_enabled: true
+  allowed_user_ids: []                    # e.g. [123456789]
+  poll_interval_seconds: 2

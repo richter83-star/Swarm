@@ -36,6 +36,8 @@ import yaml
 from swarm.balance_manager import BalanceManager
 from swarm.conflict_resolver import ConflictResolver
 from swarm.market_router import MarketRouter
+from telegram.notifier import TelegramNotifier
+from telegram.bot import TelegramCommandBot
 
 logger = logging.getLogger("swarm_coordinator")
 
@@ -134,6 +136,11 @@ class SwarmCoordinator:
         self._activity_log: List[Dict[str, Any]] = []
         self._activity_lock = threading.Lock()
         self._max_activity_log = 200
+
+        # Telegram integration
+        tg_cfg = self.cfg.get("telegram", {})
+        self.notifier = TelegramNotifier(tg_cfg)
+        self.tg_bot = TelegramCommandBot(tg_cfg, coordinator=self, project_root=self.project_root)
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -272,12 +279,14 @@ class SwarmCoordinator:
         logger.info("Starting all bots...")
         for bot_name in self.bots:
             self.start_bot(bot_name)
+        self.notifier.notify_swarm_started(list(self.bots.keys()))
 
     def stop_all(self) -> None:
         """Stop all running bots."""
         logger.info("Stopping all bots...")
         for bot_name in self.bots:
             self.stop_bot(bot_name)
+        self.notifier.notify_swarm_stopped()
 
     def pause_bot(self, bot_name: str) -> bool:
         """Pause a bot (write a pause signal file)."""
@@ -354,6 +363,7 @@ class SwarmCoordinator:
                             continue
 
                     self._log_activity(bot_name, "crashed", f"Exit code {poll}")
+                    self.notifier.notify_crash(bot_name, poll)
                     self.restart_bot(bot_name)
                     health[bot_name] = "restarting"
                 else:
@@ -488,6 +498,7 @@ class SwarmCoordinator:
         logger.info("Bots: %s", ", ".join(self.bots.keys()))
         logger.info("=" * 60)
 
+        self.tg_bot.start()
         self.start_all()
 
         check_interval = self.swarm_cfg.get("health_check_interval_seconds", 60)
@@ -506,6 +517,7 @@ class SwarmCoordinator:
     def _shutdown(self) -> None:
         """Graceful shutdown of the entire swarm."""
         logger.info("Shutting down swarm...")
+        self.tg_bot.stop()
         self.stop_all()
         logger.info("Swarm coordinator stopped.")
 
