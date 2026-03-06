@@ -259,6 +259,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn btn-green" onclick="controlAll('resume_all')">▶ Resume All</button>
       <button class="btn btn-yellow" onclick="controlAll('pause_all')">⏸ Pause All</button>
       <button class="btn btn-red" onclick="if(confirm('Stop all bots?'))controlAll('stop_all')">⏹ Stop All</button>
+      <button class="btn btn-red" onclick="resetAllData()" style="margin-left:auto">🗑 Reset All Data</button>
     </div>
     <div class="grid grid-4">
       {% for bot_name in bot_names %}
@@ -608,6 +609,17 @@ async function controlBot(action, name) {
 async function controlAll(action) {
   await fetch(`/api/control/${action}`, { method: 'POST' });
   setTimeout(refreshOverview, 1000);
+}
+async function resetAllData() {
+  if (!confirm('Delete ALL bot databases? This cannot be undone.\n\nStop the bots first, then reset.')) return;
+  const res = await fetch('/api/control/reset_data', { method: 'POST' });
+  const data = await res.json();
+  if (data.success) {
+    alert(`Reset complete. Deleted: ${data.deleted.join(', ') || 'none'}`);
+    setTimeout(refreshAll, 500);
+  } else {
+    alert(`Errors:\n${data.errors.join('\n')}`);
+  }
 }
 async function updateBudget(name) {
   const pct = parseInt(document.getElementById(`budget-${name}`).value) || 25;

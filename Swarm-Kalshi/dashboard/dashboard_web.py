@@ -473,6 +473,24 @@ def create_app(
             return jsonify({"success": True})
         return jsonify({"success": False, "error": "No coordinator"})
 
+    @app.route("/api/control/reset_data", methods=["POST"])
+    def api_reset_data():
+        """Delete all bot databases to start fresh."""
+        import glob as _glob
+        project_root = Path(app.config.get("PROJECT_ROOT", "."))
+        data_dir = project_root / "data"
+        deleted = []
+        errors = []
+        patterns = ["sentinel", "oracle", "pulse", "vanguard"]
+        for bot in patterns:
+            for path in _glob.glob(str(data_dir / f"{bot}.db*")):
+                try:
+                    Path(path).unlink()
+                    deleted.append(Path(path).name)
+                except Exception as exc:
+                    errors.append(f"{Path(path).name}: {exc}")
+        return jsonify({"success": not errors, "deleted": deleted, "errors": errors})
+
     @app.route("/api/alerts")
     def api_alerts():
         """
