@@ -71,6 +71,12 @@ class TradingAgent:
 
         self._pending_trades: Dict[str, int] = {}
 
+        # Restore pending trades that survived a restart so we can reconcile them.
+        for row in self.learning.get_pending_trades():
+            self._pending_trades[row["ticker"]] = row["id"]
+        if self._pending_trades:
+            logger.info("Restored %d pending trade(s) from DB.", len(self._pending_trades))
+
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -275,22 +281,40 @@ class TradingAgent:
             return
 
         try:
+            settlements = self.client.get_settlements()
+            # Build a lookup: ticker → revenue (pnl from settlement in cents).
+            # Kalshi settlement objects use "market_ticker" or "ticker" and "revenue".
+            settlement_pnl: Dict[str, int] = {}
+            for s in settlements:
+                t = s.get("market_ticker") or s.get("ticker", "")
+                if t:
+                    settlement_pnl[t] = s.get("revenue", 0)
+
+            # Also check open positions for any that resolved with realized_pnl.
             positions = self.client.get_positions()
             pos_by_ticker = {p["ticker"]: p for p in positions}
 
-            settlements = self.client.get_settlements()
-            settled_tickers = {s.get("ticker") or s.get("market_ticker") for s in settlements}
-
             resolved = []
             for ticker, db_id in list(self._pending_trades.items()):
-                if ticker in settled_tickers:
-                    pos = pos_by_ticker.get(ticker, {})
-                    pnl = pos.get("realized_pnl", 0)
-                    outcome = "win" if pnl >= 0 else "loss"
+                if ticker in settlement_pnl:
+                    pnl = settlement_pnl[ticker]
+                    outcome = "win" if pnl > 0 else "loss"
                     self.learning.update_outcome(db_id, outcome, pnl_cents=pnl)
                     self.risk.record_outcome(pnl)
                     resolved.append(ticker)
-                    logger.info("Resolved %s: %s (%+d¢)", ticker, outcome, pnl)
+                    logger.info("Settled %s: %s (%+d¢)", ticker, outcome, pnl)
+                elif ticker not in pos_by_ticker:
+                    # Position gone but not in settlements — mark as expired/loss.
+                    trade_row = self.learning.get_pending_trades()
+                    trade_info = next((r for r in trade_row if r["id"] == db_id), None)
+                    if trade_info:
+                        import datetime as _dt
+                        trade_ts = _dt.datetime.fromisoformat(trade_info["timestamp"])
+                        age_hours = (_dt.datetime.now(_dt.timezone.utc) - trade_ts).total_seconds() / 3600
+                        if age_hours > 48:
+                            self.learning.update_outcome(db_id, "loss", pnl_cents=0)
+                            resolved.append(ticker)
+                            logger.warning("Expired pending trade %s after %.0fh — marked loss.", ticker, age_hours)
 
             for t in resolved:
                 del self._pending_trades[t]

@@ -168,12 +168,16 @@ class KalshiClient:
         """
         Execute an HTTP request with automatic retry on 429 and 5xx errors.
         """
+        import json as _json
+
         url = f"{self.base_url}{path}"
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if authenticated:
-            headers.update(self._auth_headers(method, path))
 
         for attempt in range(1, self._MAX_RETRIES + 1):
+            # Rebuild headers (including fresh timestamp) on every attempt.
+            headers: Dict[str, str] = {"Content-Type": "application/json"}
+            if authenticated:
+                headers.update(self._auth_headers(method, path))
+
             self._throttle()
             self._last_request_ts = time.monotonic()
 
@@ -199,6 +203,23 @@ class KalshiClient:
                 logger.warning("Server error %d (attempt %d). Retrying in %.1fs …", resp.status_code, attempt, backoff)
                 time.sleep(backoff)
                 continue
+
+            if resp.status_code == 401:
+                # Detect clock-skew error and retry — Windows Time may need a moment to sync.
+                try:
+                    err_code = _json.loads(resp.text).get("error", {}).get("code", "")
+                except Exception:
+                    err_code = ""
+                if err_code == "header_timestamp_expired" and attempt < self._MAX_RETRIES:
+                    backoff = self._RATE_LIMIT_BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        "Clock skew detected (header_timestamp_expired). "
+                        "Waiting %.1fs for time sync (attempt %d/%d) …",
+                        backoff, attempt, self._MAX_RETRIES,
+                    )
+                    time.sleep(backoff)
+                    continue
+                raise KalshiAPIError(resp.status_code, resp.text, resp)
 
             if resp.status_code >= 400:
                 raise KalshiAPIError(resp.status_code, resp.text, resp)
