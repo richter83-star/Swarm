@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__desktop-commander__list_directory",
+      "mcp__desktop-commander__start_process",
+      "Bash(\"/c/Users/17146/AppData/Local/Programs/Python/Python310/python.exe\" -m pip show requests)",
+      "Bash(\"/c/Users/17146/AppData/Local/Programs/Python/Python312/python.exe\" -m pip list)"
+    ]
+  }
+}

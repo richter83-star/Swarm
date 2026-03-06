@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalshi Bot Swarm — Command Center</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ===== Reset & Variables ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;
+  --text-dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;
+  --yellow:#d29922;--purple:#bc8cff;
+  --sentinel:#e74c3c;--oracle:#3498db;--pulse:#2ecc71;--vanguard:#f39c12;
+}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+
+/* ===== Layout ===== */
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header h1{font-size:1.3rem;font-weight:600;display:flex;align-items:center;gap:10px}
+.header h1 .logo{font-size:1.6rem}
+.header-right{display:flex;align-items:center;gap:16px;font-size:.85rem;color:var(--text-dim)}
+.header-right .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.header-right .status-dot.running{background:var(--green)}
+.header-right .status-dot.stopped{background:var(--red)}
+.header-right .status-dot.unknown{background:var(--yellow)}
+
+.container{max-width:1440px;margin:0 auto;padding:20px 24px}
+
+/* ===== Tabs ===== */
+.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0}
+.tab{padding:10px 20px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;font-size:.9rem;transition:all .2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* ===== Cards ===== */
+.grid{display:grid;gap:16px}
+.grid-4{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(400px,1fr))}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;position:relative;overflow:hidden}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card-title{font-size:.85rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.card-value{font-size:1.8rem;font-weight:700}
+.card-value.positive{color:var(--green)}
+.card-value.negative{color:var(--red)}
+
+/* ===== Bot Cards ===== */
+.bot-card{border-left:3px solid var(--border);transition:transform .15s,box-shadow .15s}
+.bot-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.bot-card .bot-name{font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px}
+.bot-card .bot-specialist{font-size:.8rem;color:var(--text-dim);margin-top:2px}
+.bot-card .bot-state{display:inline-flex;align-items:center;gap:4px;font-size:.75rem;padding:3px 10px;border-radius:12px;font-weight:600}
+.bot-card .bot-state.running{background:rgba(63,185,80,.15);color:var(--green)}
+.bot-card .bot-state.paused{background:rgba(210,153,34,.15);color:var(--yellow)}
+.bot-card .bot-state.stopped{background:rgba(248,81,73,.15);color:var(--red)}
+.bot-card .bot-state.error{background:rgba(248,81,73,.15);color:var(--red)}
+.bot-card .bot-state.unknown{background:rgba(139,148,158,.15);color:var(--text-dim)}
+.bot-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.bot-metric{text-align:center;padding:8px;background:rgba(255,255,255,.03);border-radius:6px}
+.bot-metric .label{font-size:.7rem;color:var(--text-dim);text-transform:uppercase}
+.bot-metric .value{font-size:1.1rem;font-weight:700;margin-top:2px}
+.bot-controls{display:flex;gap:6px;margin-top:12px}
+.btn{padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:.78rem;cursor:pointer;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.btn-green{border-color:var(--green);color:var(--green)}
+.btn.btn-green:hover{background:rgba(63,185,80,.15)}
+.btn.btn-red{border-color:var(--red);color:var(--red)}
+.btn.btn-red:hover{background:rgba(248,81,73,.15)}
+.btn.btn-yellow{border-color:var(--yellow);color:var(--yellow)}
+.btn.btn-yellow:hover{background:rgba(210,153,34,.15)}
+
+/* ===== Tables ===== */
+.table-wrap{overflow-x:auto;margin-top:12px}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--border);color:var(--text-dim);font-weight:600;text-transform:uppercase;font-size:.72rem;letter-spacing:.5px}
+td{padding:8px 12px;border-bottom:1px solid var(--border)}
+tr:hover td{background:rgba(255,255,255,.02)}
+.pnl-pos{color:var(--green)}
+.pnl-neg{color:var(--red)}
+
+/* ===== Charts ===== */
+.chart-container{position:relative;height:300px;margin-top:12px}
+
+/* ===== Activity Feed ===== */
+.activity-feed{max-height:400px;overflow-y:auto}
+.activity-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.82rem}
+.activity-item .time{color:var(--text-dim);min-width:70px;font-size:.75rem}
+.activity-item .bot-tag{padding:2px 8px;border-radius:4px;font-size:.72rem;font-weight:600;min-width:70px;text-align:center}
+.activity-item .detail{color:var(--text)}
+
+/* ===== Global Controls ===== */
+.global-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+.global-controls .btn{padding:8px 18px;font-size:.85rem}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-dim)}
+
+/* ===== Responsive ===== */
+@media(max-width:768px){
+  .grid-4,.grid-3,.grid-2{grid-template-columns:1fr}
+  .header{flex-direction:column;gap:8px}
+  .tabs{overflow-x:auto;flex-wrap:nowrap}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<div class="header">
+  <h1><span class="logo">🐝</span> Kalshi Bot Swarm — Command Center</h1>
+  <div class="header-right">
+    <span>Swarm: <span class="status-dot" id="swarm-dot"></span> <span id="swarm-state">Loading...</span></span>
+    <span id="last-update">—</span>
+  </div>
+</div>
+
+<!-- ===== Main Content ===== -->
+<div class="container">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="sentinel">🔴 Sentinel</div>
+    <div class="tab" data-tab="oracle">🔵 Oracle</div>
+    <div class="tab" data-tab="pulse">🟢 Pulse</div>
+    <div class="tab" data-tab="vanguard">🟡 Vanguard</div>
+    <div class="tab" data-tab="analytics">Analytics</div>
+    <div class="tab" data-tab="activity">Activity</div>
+    <div class="tab" data-tab="controls">Controls</div>
+  </div>
+
+  <!-- ===== OVERVIEW TAB ===== -->
+  <div class="tab-content active" id="tab-overview">
+    <!-- Global Metrics -->
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-title">Total Trades</div>
+        <div class="card-value" id="g-total-trades">0</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Overall Win Rate</div>
+        <div class="card-value" id="g-win-rate">0%</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Total P&L</div>
+        <div class="card-value" id="g-total-pnl">$0.00</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Active Bots</div>
+        <div class="card-value" id="g-active-bots">0 / 4</div>
+      </div>
+    </div>
+
+    <!-- Bot Cards -->
+    <div class="grid grid-4" id="bot-cards"></div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-2" style="margin-top:20px">
+      <div class="card">
+        <div class="card-title">Cumulative P&L (All Bots)</div>
+        <div class="chart-container"><canvas id="chart-pnl-all"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Win Rate by Bot</div>
+        <div class="chart-container"><canvas id="chart-wr-bar"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== BOT DETAIL TABS ===== -->
+  {% for bot_name in bot_names %}
+  <div class="tab-content" id="tab-{{ bot_name }}">
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card"><div class="card-title">Trades</div><div class="card-value" id="{{ bot_name }}-trades">0</div></div>
+      <div class="card"><div class="card-title">Win Rate</div><div class="card-value" id="{{ bot_name }}-wr">0%</div></div>
+      <div class="card"><div class="card-title">P&L</div><div class="card-value" id="{{ bot_name }}-pnl">$0.00</div></div>
+      <div class="card"><div class="card-title">Avg Confidence</div><div class="card-value" id="{{ bot_name }}-conf">0</div></div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Cumulative P&L</div>
+        <div class="chart-container"><canvas id="chart-pnl-{{ bot_name }}"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Confidence Calibration</div>
+        <div class="chart-container"><canvas id="chart-cal-{{ bot_name }}"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Recent Trades</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Price</th><th>Qty</th><th>Conf</th><th>Outcome</th><th>P&L</th></tr></thead>
+          <tbody id="{{ bot_name }}-trades-table"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title">Category Performance</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Category</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L</th></tr></thead>
+            <tbody id="{{ bot_name }}-cat-table"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Weight History</div>
+        <div class="chart-container"><canvas id="chart-wt-{{ bot_name }}"></canvas></div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- ===== ANALYTICS TAB ===== -->
+  <div class="tab-content" id="tab-analytics">
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">P&L Comparison</div>
+        <div class="chart-container"><canvas id="chart-pnl-compare"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Trade Distribution</div>
+        <div class="chart-container"><canvas id="chart-trade-dist"></canvas></div>
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title">Daily P&L Heatmap</div>
+        <div class="chart-container"><canvas id="chart-daily-pnl"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">ROI by Bot</div>
+        <div class="chart-container"><canvas id="chart-roi"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ACTIVITY TAB ===== -->
+  <div class="tab-content" id="tab-activity">
+    <div class="card">
+      <div class="card-title">Activity Feed</div>
+      <div class="activity-feed" id="activity-feed"></div>
+    </div>
+  </div>
+
+  <!-- ===== CONTROLS TAB ===== -->
+  <div class="tab-content" id="tab-controls">
+    <div class="global-controls">
+      <button class="btn btn-green" onclick="controlAll('resume_all')">▶ Resume All</button>
+      <button class="btn btn-yellow" onclick="controlAll('pause_all')">⏸ Pause All</button>
+      <button class="btn btn-red" onclick="if(confirm('Stop all bots?'))controlAll('stop_all')">⏹ Stop All</button>
+    </div>
+    <div class="grid grid-4">
+      {% for bot_name in bot_names %}
+      <div class="card bot-card" style="border-left-color:{{ bots[bot_name].color }}">
+        <div class="bot-name">{{ bots[bot_name].name }}</div>
+        <div class="bot-specialist">{{ bots[bot_name].specialist }}</div>
+        <div class="bot-controls" style="margin-top:16px">
+          <button class="btn btn-green" onclick="controlBot('start','{{ bot_name }}')">Start</button>
+          <button class="btn btn-yellow" onclick="controlBot('pause','{{ bot_name }}')">Pause</button>
+          <button class="btn" onclick="controlBot('resume','{{ bot_name }}')">Resume</button>
+          <button class="btn btn-red" onclick="controlBot('stop','{{ bot_name }}')">Stop</button>
+        </div>
+        <div style="margin-top:16px">
+          <label style="font-size:.8rem;color:var(--text-dim)">Budget Allocation (%)</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <input type="number" id="budget-{{ bot_name }}" value="25" min="0" max="100" step="5"
+              style="width:70px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.85rem">
+            <button class="btn" onclick="updateBudget('{{ bot_name }}')">Set</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ===== Configuration =====
+const BOT_NAMES = {{ bot_names | tojson }};
+const BOT_DISPLAY = {{ bots | tojson }};
+const REFRESH_MS = {{ refresh_interval }} * 1000;
+
+// ===== Chart instances =====
+const charts = {};
+
+// ===== Tab switching =====
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ===== Utility functions =====
+function fmt$(cents) {
+  const d = cents / 100;
+  const s = d >= 0 ? '+$' + d.toFixed(2) : '-$' + Math.abs(d).toFixed(2);
+  return s;
+}
+function pnlClass(cents) { return cents >= 0 ? 'positive pnl-pos' : 'negative pnl-neg'; }
+function stateClass(s) { return ['running','paused','stopped','error','unknown'].includes(s) ? s : 'unknown'; }
+
+function makeChart(id, cfg) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  if (charts[id]) { charts[id].destroy(); }
+  charts[id] = new Chart(el.getContext('2d'), cfg);
+  return charts[id];
+}
+
+// ===== Data fetching =====
+async function fetchJSON(url) {
+  try { const r = await fetch(url); return await r.json(); }
+  catch(e) { console.warn('Fetch error:', url, e); return null; }
+}
+
+// ===== Refresh overview =====
+async function refreshOverview() {
+  const data = await fetchJSON('/api/swarm/status');
+  if (!data) return;
+
+  // Swarm state
+  const dot = document.getElementById('swarm-dot');
+  const stateEl = document.getElementById('swarm-state');
+  dot.className = 'status-dot ' + stateClass(data.swarm_state);
+  stateEl.textContent = data.swarm_state;
+  document.getElementById('last-update', new Date().toLocaleTimeString());
+
+  // Global metrics
+  const gm = data.global_metrics || {};
+  document.getElementById('g-total-trades').textContent = gm.total_trades || 0;
+  const wrEl = document.getElementById('g-win-rate');
+  wrEl.textContent = (gm.overall_win_rate || 0).toFixed(1) + '%';
+  const pnlEl = document.getElementById('g-total-pnl');
+  pnlEl.textContent = fmt$(gm.total_pnl_cents || 0);
+  pnlEl.className = 'card-value ' + pnlClass(gm.total_pnl_cents || 0);
+
+  // Active bots count
+  let active = 0;
+  const bots = data.bots || {};
+  BOT_NAMES.forEach(n => { if ((bots[n]||{}).state === 'running') active++; });
+  document.getElementById('g-active-bots').textContent = active + ' / 4';
+
+  // Bot cards
+  renderBotCards(bots);
+
+  // Update last-update time
+  document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+}
+
+function renderBotCards(bots) {
+  const container = document.getElementById('bot-cards');
+  let html = '';
+  BOT_NAMES.forEach(name => {
+    const b = bots[name] || {};
+    const d = BOT_DISPLAY[name] || {};
+    const perf = b.performance || {};
+    const state = b.state || b.process_state || 'unknown';
+    const pnl = perf.total_pnl || 0;
+    html += `
+    <div class="card bot-card" style="border-left-color:${d.color}">
+      <div class="card-header">
+        <div>
+          <div class="bot-name">${d.name || name}</div>
+          <div class="bot-specialist">${d.specialist || ''}</div>
+        </div>
+        <span class="bot-state ${stateClass(state)}">${state}</span>
+      </div>
+      <div class="bot-metrics">
+        <div class="bot-metric"><div class="label">Trades</div><div class="value">${perf.total_trades||0}</div></div>
+        <div class="bot-metric"><div class="label">Win Rate</div><div class="value">${(perf.win_rate||0).toFixed(1)}%</div></div>
+        <div class="bot-metric"><div class="label">P&L</div><div class="value ${pnlClass(pnl)}">${fmt$(pnl)}</div></div>
+        <div class="bot-metric"><div class="label">Avg Conf</div><div class="value">${(perf.avg_confidence||0).toFixed(0)}</div></div>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+// ===== Refresh bot detail tabs =====
+async function refreshBotDetail(name) {
+  const [perf, trades, cats, cal, cpnl, wts] = await Promise.all([
+    fetchJSON(`/api/bot/${name}/performance`),
+    fetchJSON(`/api/bot/${name}/trades?limit=50`),
+    fetchJSON(`/api/bot/${name}/categories`),
+    fetchJSON(`/api/bot/${name}/calibration`),
+    fetchJSON(`/api/bot/${name}/cumulative_pnl`),
+    fetchJSON(`/api/bot/${name}/weights`),
+  ]);
+
+  if (perf) {
+    document.getElementById(`${name}-trades`).textContent = perf.total_trades || 0;
+    const wrEl = document.getElementById(`${name}-wr`);
+    wrEl.textContent = (perf.win_rate || 0).toFixed(1) + '%';
+    const pnlEl = document.getElementById(`${name}-pnl`);
+    pnlEl.textContent = fmt$(perf.total_pnl || 0);
+    pnlEl.className = 'card-value ' + pnlClass(perf.total_pnl || 0);
+    document.getElementById(`${name}-conf`).textContent = (perf.avg_confidence || 0).toFixed(0);
+  }
+
+  // Trades table
+  if (trades) {
+    const tbody = document.getElementById(`${name}-trades-table`);
+    tbody.innerHTML = trades.slice(0, 30).map(t => `
+      <tr>
+        <td>${(t.timestamp||'').slice(0,16)}</td>
+        <td>${t.ticker||''}</td>
+        <td>${t.side||''}</td>
+        <td>${t.entry_price||0}¢</td>
+        <td>${t.count||0}</td>
+        <td>${(t.confidence||0).toFixed(0)}</td>
+        <td><span class="${t.outcome==='win'?'pnl-pos':'pnl-neg'}">${t.outcome||'pending'}</span></td>
+        <td class="${(t.pnl_cents||0)>=0?'pnl-pos':'pnl-neg'}">${fmt$(t.pnl_cents||0)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Category table
+  if (cats) {
+    const tbody = document.getElementById(`${name}-cat-table`);
+    tbody.innerHTML = cats.map(c => `
+      <tr>
+        <td>${c.category||'—'}</td>
+        <td>${c.trades||0}</td>
+        <td>${c.wins||0}</td>
+        <td>${(c.win_rate||0).toFixed(1)}%</td>
+        <td class="${(c.total_pnl_cents||0)>=0?'pnl-pos':'pnl-neg'}">${fmt$(c.total_pnl_cents||0)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Cumulative PnL chart
+  if (cpnl && cpnl.length) {
+    const color = BOT_DISPLAY[name]?.color || '#58a6ff';
+    makeChart(`chart-pnl-${name}`, {
+      type: 'line',
+      data: {
+        labels: cpnl.map(p => p.trade_num),
+        datasets: [{
+          label: 'Cumulative P&L (¢)',
+          data: cpnl.map(p => p.cumulative_pnl),
+          borderColor: color,
+          backgroundColor: color + '20',
+          fill: true, tension: .3, pointRadius: 1,
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  // Calibration chart
+  if (cal && cal.length) {
+    makeChart(`chart-cal-${name}`, {
+      type: 'bar',
+      data: {
+        labels: cal.map(c => c.bucket + '-' + (c.bucket+9) + '%'),
+        datasets: [
+          { label: 'Expected', data: cal.map(c => c.bucket), backgroundColor: '#30363d', borderRadius: 4 },
+          { label: 'Actual', data: cal.map(c => c.n > 0 ? Math.round(c.wins/c.n*100) : 0), backgroundColor: BOT_DISPLAY[name]?.color || '#58a6ff', borderRadius: 4 },
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { x: { ticks: { color: '#8b949e' } }, y: { max: 100, grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
+        plugins: { legend: { labels: { color: '#c9d1d9' } } }
+      }
+    });
+  }
+
+  // Weight history chart
+  if (wts && wts.length) {
+    const keys = ['edge','liquidity','volume','timing','momentum'];
+    const colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#bc8cff'];
+    makeChart(`chart-wt-${name}`, {
+      type: 'line',
+      data: {
+        labels: wts.map((_,i) => i+1),
+        datasets: keys.map((k,i) => ({
+          label: k, data: wts.map(w => w[k+'_weight'] || w[k] || 0),
+          borderColor: colors[i], tension: .3, pointRadius: 0, borderWidth: 2,
+        }))
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
+        plugins: { legend: { labels: { color: '#c9d1d9', font: { size: 10 } } } }
+      }
+    });
+  }
+}
+
+// ===== Refresh analytics =====
+async function refreshAnalytics() {
+  const data = await fetchJSON('/api/performance/all');
+  if (!data) return;
+
+  // P&L comparison (line)
+  const datasets = [];
+  BOT_NAMES.forEach(name => {
+    const cpnl = (data[name]||{}).cumulative_pnl || [];
+    if (cpnl.length) {
+      datasets.push({
+        label: BOT_DISPLAY[name]?.name || name,
+        data: cpnl.map(p => p.cumulative_pnl),
+        borderColor: BOT_DISPLAY[name]?.color || '#58a6ff',
+        tension: .3, pointRadius: 0, borderWidth: 2,
+      });
+    }
+  });
+  const maxLen = Math.max(...datasets.map(d => d.data.length), 0);
+  makeChart('chart-pnl-compare', {
+    type: 'line',
+    data: { labels: Array.from({length:maxLen},(_,i)=>i+1), datasets },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
+      plugins: { legend: { labels: { color: '#c9d1d9' } } }
+    }
+  });
+
+  // Trade distribution (doughnut)
+  const tradeCounts = BOT_NAMES.map(n => ((data[n]||{}).performance||{}).total_trades || 0);
+  makeChart('chart-trade-dist', {
+    type: 'doughnut',
+    data: {
+      labels: BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n),
+      datasets: [{ data: tradeCounts, backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff') }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { color: '#c9d1d9' } } }
+    }
+  });
+
+  // Daily P&L bar
+  const dailyDatasets = [];
+  BOT_NAMES.forEach(name => {
+    const daily = (data[name]||{}).daily || [];
+    if (daily.length) {
+      dailyDatasets.push({
+        label: BOT_DISPLAY[name]?.name || name,
+        data: daily.slice(0,14).reverse().map(d => d.pnl_cents || 0),
+        backgroundColor: BOT_DISPLAY[name]?.color || '#58a6ff',
+        borderRadius: 4,
+      });
+    }
+  });
+  const dailyLabels = ((data[BOT_NAMES[0]]||{}).daily||[]).slice(0,14).reverse().map(d => (d.date||'').slice(5));
+  makeChart('chart-daily-pnl', {
+    type: 'bar',
+    data: { labels: dailyLabels.length ? dailyLabels : ['No data'], datasets: dailyDatasets },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { ticks: { color: '#8b949e' } }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
+      plugins: { legend: { labels: { color: '#c9d1d9' } } }
+    }
+  });
+
+  // ROI bar
+  const rois = BOT_NAMES.map(n => ((data[n]||{}).performance||{}).roi_pct || 0);
+  makeChart('chart-roi', {
+    type: 'bar',
+    data: {
+      labels: BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n),
+      datasets: [{ label: 'ROI %', data: rois,
+        backgroundColor: rois.map(r => r >= 0 ? '#3fb950' : '#f85149'), borderRadius: 6 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      scales: { x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+// ===== Refresh activity =====
+async function refreshActivity() {
+  const data = await fetchJSON('/api/activity');
+  if (!data) return;
+  const feed = document.getElementById('activity-feed');
+  feed.innerHTML = data.map(a => {
+    const color = BOT_DISPLAY[a.bot]?.color || '#8b949e';
+    const time = (a.timestamp||'').slice(11,19);
+    return `<div class="activity-item">
+      <span class="time">${time}</span>
+      <span class="bot-tag" style="background:${color}22;color:${color}">${a.bot}</span>
+      <span class="detail"><strong>${a.action}</strong> ${a.detail||''}</span>
+    </div>`;
+  }).join('');
+}
+
+// ===== Controls =====
+async function controlBot(action, name) {
+  await fetch(`/api/control/${action}/${name}`, { method: 'POST' });
+  setTimeout(refreshOverview, 1000);
+}
+async function controlAll(action) {
+  await fetch(`/api/control/${action}`, { method: 'POST' });
+  setTimeout(refreshOverview, 1000);
+}
+async function updateBudget(name) {
+  const pct = parseInt(document.getElementById(`budget-${name}`).value) || 25;
+  await fetch('/api/control/budget', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ bot_name: name, percentage: pct })
+  });
+}
+
+// ===== Main refresh loop =====
+async function refreshAll() {
+  await refreshOverview();
+  const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+  if (activeTab && BOT_NAMES.includes(activeTab)) {
+    await refreshBotDetail(activeTab);
+  } else if (activeTab === 'analytics') {
+    await refreshAnalytics();
+  } else if (activeTab === 'activity') {
+    await refreshActivity();
+  }
+}
+
+// Tab change triggers refresh
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const t = tab.dataset.tab;
+    if (BOT_NAMES.includes(t)) refreshBotDetail(t);
+    else if (t === 'analytics') refreshAnalytics();
+    else if (t === 'activity') refreshActivity();
+  });
+});
+
+// Initial load + auto-refresh
+refreshAll();
+setInterval(refreshAll, REFRESH_MS);
+</script>
+</body>
+</html>
