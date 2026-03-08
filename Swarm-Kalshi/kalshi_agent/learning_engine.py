@@ -143,6 +143,14 @@ class LearningEngine:
         # WAL mode: concurrent reads from dashboard don't block bot writes
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Wait up to 30 s instead of instantly failing if another connection
+        # holds a write lock (e.g. a dashboard reader doing a long SELECT).
+        self._conn.execute("PRAGMA busy_timeout = 30000")
+        # Disable automatic WAL checkpointing during batch backtest writes.
+        # The WAL file can grow to ~1000 pages then trigger a slow OS-level
+        # checkpoint mid-loop (especially on Windows with AV scanning).
+        # We call checkpoint() explicitly after the backtest loop completes.
+        self._conn.execute("PRAGMA wal_autocheckpoint = 0")
         self._conn.executescript(_SCHEMA)
         self._migrate()
         self._conn.commit()
@@ -166,6 +174,39 @@ class LearningEngine:
             if col not in existing:
                 self._conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_def}")
                 logger.info("Schema migration: added column trades.%s", col)
+
+        # Normalize historical mislabeled outcomes: zero P&L is breakeven, not win.
+        cur = self._conn.execute(
+            """
+            UPDATE trades
+            SET outcome = 'breakeven'
+            WHERE outcome = 'win'
+              AND COALESCE(pnl_cents, 0) = 0
+              AND settled_at IS NOT NULL
+            """
+        )
+        if (cur.rowcount or 0) > 0:
+            logger.info(
+                "Schema migration: relabeled %d zero-PnL trade(s) from win -> breakeven.",
+                cur.rowcount,
+            )
+
+    # ------------------------------------------------------------------
+    # WAL checkpoint
+    # ------------------------------------------------------------------
+
+    def checkpoint(self) -> None:
+        """Run a passive WAL checkpoint to flush WAL pages to the main DB file.
+
+        Call this after bulk-write operations (e.g. after the backtest loop)
+        to keep the WAL file small.  A PASSIVE checkpoint does not block
+        readers or writers; it only writes pages that are not currently in use.
+        """
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            logger.debug("WAL checkpoint completed for %s", self.cfg.get("db_path", "db"))
+        except Exception as exc:
+            logger.warning("WAL checkpoint failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Trade logging

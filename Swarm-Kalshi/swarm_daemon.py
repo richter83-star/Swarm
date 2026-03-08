@@ -11,7 +11,7 @@ Features
 * Resets back-off counter when the child process runs healthily for ≥ 30 min.
 * Dual logging: stdout + logs/daemon.log (rotating, 10 MB × 5 files).
 * Graceful SIGINT / SIGTERM passthrough to the child process.
-* Targets run_swarm_with_openclaw_brain.py (LLM brain mode).
+* Targets run_swarm_with_ollama_brain.py (LLM brain mode).
 
 Usage
 -----
@@ -35,7 +35,7 @@ from pathlib import Path
 # Configuration
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent
-SWARM_SCRIPT = str(PROJECT_ROOT / "run_swarm_with_openclaw_brain.py")
+SWARM_SCRIPT = str(PROJECT_ROOT / "run_swarm_with_ollama_brain.py")
 
 BACKOFF_BASE      = 30      # seconds — first retry delay
 BACKOFF_FACTOR    = 2       # doubles each failure
@@ -193,3 +193,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

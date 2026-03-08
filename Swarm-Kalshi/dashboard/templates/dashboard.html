@@ -97,6 +97,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .global-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
 .global-controls .btn{padding:8px 18px;font-size:.85rem}
 
+/* ===== LLM Chat ===== */
+.llm-feed{height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.02);padding:12px}
+.llm-msg{padding:10px 12px;border-radius:8px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;font-size:.9rem}
+.llm-msg.user{background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.25)}
+.llm-msg.assistant{background:rgba(63,185,80,.10);border:1px solid rgba(63,185,80,.2)}
+.llm-msg.error{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.25)}
+.llm-input{width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.9rem}
+.llm-meta{font-size:.78rem;color:var(--text-dim)}
+.llm-checkbox{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text-dim);font-size:.85rem}
+
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:var(--bg)}
@@ -134,6 +144,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="tab" data-tab="vanguard">🟡 Vanguard</div>
     <div class="tab" data-tab="analytics">Analytics</div>
     <div class="tab" data-tab="activity">Activity</div>
+    <div class="tab" data-tab="llm">LLM Chat</div>
     <div class="tab" data-tab="controls">Controls</div>
   </div>
 
@@ -253,6 +264,38 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
   </div>
 
+  <!-- ===== LLM CHAT TAB ===== -->
+  <div class="tab-content" id="tab-llm">
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Ollama Conversation</div>
+        <div id="llm-feed" class="llm-feed" style="margin-top:12px"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:flex-start">
+          <textarea id="llm-input" class="llm-input" rows="4" placeholder="Ask Ollama anything about your swarm, markets, or strategy. Press Enter to send, Shift+Enter for newline."></textarea>
+          <button id="llm-send-btn" class="btn btn-green" onclick="sendLLMChat()">Send</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Chat Settings</div>
+        <label style="display:block;margin-top:12px;font-size:.8rem;color:var(--text-dim)">Model</label>
+        <input id="llm-model" class="llm-input" value="{{ ollama_model }}" />
+
+        <label style="display:block;margin-top:12px;font-size:.8rem;color:var(--text-dim)">System Prompt (optional)</label>
+        <textarea id="llm-system" class="llm-input" rows="8" placeholder="You are the central risk assistant for this trading swarm."></textarea>
+
+        <label class="llm-checkbox">
+          <input type="checkbox" id="llm-include-context" checked />
+          Include live swarm context (bot status, risk, recent trades, central decisions)
+        </label>
+
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn" onclick="clearLLMChat()">Clear Chat</button>
+        </div>
+        <div id="llm-status" class="llm-meta" style="margin-top:12px">Ready. Live context ON.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== CONTROLS TAB ===== -->
   <div class="tab-content" id="tab-controls">
     <div class="global-controls">
@@ -292,6 +335,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 const BOT_NAMES = {{ bot_names | tojson }};
 const BOT_DISPLAY = {{ bots | tojson }};
 const REFRESH_MS = {{ refresh_interval }} * 1000;
+const LLM_HISTORY = [];
 
 // ===== Chart instances =====
 const charts = {};
@@ -629,6 +673,84 @@ async function updateBudget(name) {
   });
 }
 
+function appendLLMMessage(role, text) {
+  const feed = document.getElementById('llm-feed');
+  if (!feed) return;
+  const div = document.createElement('div');
+  div.className = `llm-msg ${role}`;
+  div.textContent = text;
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function clearLLMChat() {
+  const feed = document.getElementById('llm-feed');
+  if (!feed) return;
+  feed.innerHTML = '';
+  LLM_HISTORY.length = 0;
+  document.getElementById('llm-status').textContent = 'Chat cleared.';
+}
+
+async function sendLLMChat() {
+  const inputEl = document.getElementById('llm-input');
+  const modelEl = document.getElementById('llm-model');
+  const systemEl = document.getElementById('llm-system');
+  const includeContextEl = document.getElementById('llm-include-context');
+  const sendBtn = document.getElementById('llm-send-btn');
+  const statusEl = document.getElementById('llm-status');
+  if (!inputEl || !modelEl || !systemEl || !includeContextEl || !sendBtn || !statusEl) return;
+
+  const prompt = (inputEl.value || '').trim();
+  if (!prompt) return;
+
+  const model = (modelEl.value || '').trim();
+  const system = (systemEl.value || '').trim();
+  const includeContext = !!includeContextEl.checked;
+
+  appendLLMMessage('user', prompt);
+  inputEl.value = '';
+  sendBtn.disabled = true;
+  statusEl.textContent = 'Sending...';
+
+  try {
+    const res = await fetch('/api/ollama/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        model,
+        system,
+        include_context: includeContext,
+        history: LLM_HISTORY.slice(-12),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      const err = data.error || `HTTP ${res.status}`;
+      appendLLMMessage('error', `Error: ${err}`);
+      statusEl.textContent = `Failed: ${err}`;
+      return;
+    }
+    appendLLMMessage('assistant', data.response || '(empty response)');
+    LLM_HISTORY.push({ role: 'user', content: prompt });
+    LLM_HISTORY.push({ role: 'assistant', content: data.response || '' });
+    if (LLM_HISTORY.length > 40) LLM_HISTORY.splice(0, LLM_HISTORY.length - 40);
+
+    const ctx = data.context_summary;
+    if (ctx) {
+      statusEl.textContent =
+        `Model ${data.model} in ${data.latency_ms} ms | Context: trades=${ctx.total_trades}, decisions=${ctx.recent_central_decisions}`;
+    } else {
+      statusEl.textContent = `Model ${data.model} responded in ${data.latency_ms} ms`;
+    }
+  } catch (e) {
+    appendLLMMessage('error', `Network error: ${e}`);
+    statusEl.textContent = 'Network error.';
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
 // ===== Main refresh loop =====
 async function refreshAll() {
   await refreshOverview();
@@ -649,8 +771,19 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (BOT_NAMES.includes(t)) refreshBotDetail(t);
     else if (t === 'analytics') refreshAnalytics();
     else if (t === 'activity') refreshActivity();
+    else if (t === 'llm') document.getElementById('llm-input')?.focus();
   });
 });
+
+const llmInput = document.getElementById('llm-input');
+if (llmInput) {
+  llmInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendLLMChat();
+    }
+  });
+}
 
 // Initial load + auto-refresh
 refreshAll();

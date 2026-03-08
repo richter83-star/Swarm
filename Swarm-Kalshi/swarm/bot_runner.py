@@ -19,10 +19,11 @@ import logging.handlers
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -41,6 +42,7 @@ from kalshi_agent.external_signals import ExternalSignals
 from kalshi_agent.prior_knowledge import PriorKnowledge
 from kalshi_agent.llm_advisor import LLMAdvisor
 from telegram.notifier import TelegramNotifier
+from swarm.central_llm_controller import CentralLLMController
 
 logger = logging.getLogger("kalshi_agent")
 
@@ -78,6 +80,15 @@ class BotRunner:
         # Status file for coordinator communication
         self._status_file = self.project_root / "data" / f"{bot_name}_status.json"
         self._status_file.parent.mkdir(parents=True, exist_ok=True)
+        self._risk_state_file = self.project_root / "data" / f"{bot_name}_risk_state.json"
+        self._status_state: str = "starting"
+        self._status_error: str = ""
+        self._status_lock = threading.Lock()
+        self._status_thread: Optional[threading.Thread] = None
+        self._status_heartbeat_seconds = max(
+            5,
+            int(self.cfg.get("swarm", {}).get("status_heartbeat_seconds", 15)),
+        )
 
         # Initialize all modules
         api_cfg = self.cfg["api"]
@@ -145,6 +156,7 @@ class BotRunner:
             state_file=str(self.project_root / "data" / f"{bot_name}_behavior_state.json"),
         )
         self.risk = RiskManager(risk_cfg)
+        self._load_risk_state()
         self.dashboard = Dashboard(self.learning)
 
         self.backtester = Backtester(
@@ -156,6 +168,12 @@ class BotRunner:
         )
 
         self.notifier = TelegramNotifier(self.cfg.get("telegram", {}))
+
+        # Centralized LLM controller (Ollama) can approve/reject every trade.
+        self.central_llm = CentralLLMController(
+            config=self.cfg.get("central_llm", {}),
+            project_root=str(self.project_root),
+        )
 
         # Category and keyword filters
         self._category_filters = set(
@@ -171,10 +189,27 @@ class BotRunner:
             s.upper() for s in self.cfg.get("series_filters", [])
         )
 
-        self._pending_trades: Dict[str, int] = {}
+        # Track pending trades by stable DB id to avoid losing earlier entries
+        # when multiple trades share the same ticker.
+        self._pending_trades: Dict[int, Dict[str, Any]] = {}
         self._trade_count = 0
         self._session_start = None
         self._last_backtest_date: Optional[datetime] = None
+
+        # Restore pending trades from DB so outcome reconciliation continues
+        # across restarts (required for continuous learning feedback).
+        for row in self.learning.get_pending_trades():
+            ticker = str(row.get("ticker", "")).strip()
+            trade_id = row.get("id")
+            if ticker and trade_id is not None:
+                trade_id_int = int(trade_id)
+                self._pending_trades[trade_id_int] = {
+                    "ticker": ticker,
+                    "order_id": str(row.get("order_id", "") or ""),
+                    "count": int(row.get("count", 1) or 1),
+                }
+        if self._pending_trades:
+            logger.info("Restored %d pending trade(s) from DB.", len(self._pending_trades))
         
         # FIX: Cache last known good balance to prevent $0 displays
         self._last_known_balance: int = 0
@@ -236,6 +271,67 @@ class BotRunner:
     def _handle_signal(self, signum, frame):
         logger.info("Received signal %d -- shutting down gracefully.", signum)
         self._running = False
+
+    def _set_status(self, state: str, error: str = "") -> None:
+        """Update in-memory status and immediately persist it."""
+        self._status_state = state
+        self._status_error = error
+        self._write_status(state, error)
+
+    def _status_heartbeat_loop(self) -> None:
+        """
+        Periodically refresh status file even while a long cycle is running.
+        This keeps dashboard/coordinator data live under API retries/rate limits.
+        """
+        while self._running:
+            time.sleep(self._status_heartbeat_seconds)
+            if not self._running:
+                break
+            self._write_status(self._status_state, self._status_error)
+
+    def _start_status_heartbeat(self) -> None:
+        if self._status_thread and self._status_thread.is_alive():
+            return
+        self._status_thread = threading.Thread(
+            target=self._status_heartbeat_loop,
+            daemon=True,
+            name=f"{self.bot_name}-status-heartbeat",
+        )
+        self._status_thread.start()
+
+    def _load_risk_state(self) -> None:
+        """Restore persisted risk state from disk if available."""
+        if not self._risk_state_file.exists():
+            return
+        try:
+            with open(self._risk_state_file, "r", encoding="utf-8") as fh:
+                state = json.load(fh)
+            self.risk.import_state(state)
+            restored = self.risk.export_state()
+            daily = restored.get("daily", {})
+            logger.info(
+                "Loaded persisted risk state from %s (date=%s pnl=%+d¢ trades=%d peak=%d¢ balance=%d¢ pause_until=%s).",
+                self._risk_state_file,
+                str(daily.get("date", "")),
+                int(daily.get("gross_pnl_cents", 0) or 0),
+                int(daily.get("trades_today", 0) or 0),
+                int(restored.get("peak_balance_cents", 0) or 0),
+                int(restored.get("current_balance_cents", 0) or 0),
+                restored.get("drawdown_pause_until") or "none",
+            )
+        except Exception as exc:
+            logger.warning("Failed to load risk state file: %s", exc)
+
+    def _save_risk_state(self) -> None:
+        """Persist current risk state to disk atomically."""
+        try:
+            state = self.risk.export_state()
+            temp_file = self._risk_state_file.with_suffix(".tmp")
+            with open(temp_file, "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2)
+            temp_file.replace(self._risk_state_file)
+        except Exception as exc:
+            logger.warning("Failed to save risk state file: %s", exc)
 
     # ------------------------------------------------------------------
     # Market filtering
@@ -309,18 +405,22 @@ class BotRunner:
 
         self._session_start = datetime.now(timezone.utc)
 
-        # Fetch real balance immediately so the first status write isn't $0
+        # Signal coordinator that backtest is done — do this BEFORE the balance
+        # fetch so the coordinator can start the next bot immediately rather than
+        # waiting for a potentially rate-limited API call to complete.
+        self._set_status("running")
+        self._start_status_heartbeat()
+
+        # Fetch real balance so the first status write isn't $0
         try:
             self._refresh_state()
         except Exception as exc:
             logger.warning("Initial balance fetch failed: %s", exc)
 
-        self._write_status("running")
-
         while self._running:
             try:
                 if self._paused:
-                    self._write_status("paused")
+                    self._set_status("paused")
                     time.sleep(5)
                     continue
 
@@ -332,15 +432,15 @@ class BotRunner:
                     self._last_backtest_date = datetime.now(timezone.utc)
 
                 self._run_cycle()
-                self._write_status("running")
+                self._set_status("running")
 
             except KalshiAPIError as exc:
                 logger.error("API error during cycle: %s", exc)
-                self._write_status("error", str(exc))
+                self._set_status("error", str(exc))
                 time.sleep(30)
             except Exception as exc:
                 logger.exception("Unexpected error during cycle: %s", exc)
-                self._write_status("error", str(exc))
+                self._set_status("error", str(exc))
                 time.sleep(60)
 
         self._shutdown()
@@ -466,6 +566,32 @@ class BotRunner:
         trend_mult = self.learning.trend.momentum_multiplier
         base_count = max(1, int(base_count * trend_mult))
         count = self.behavior.vary_trade_size(base_count)
+        approval = self.central_llm.review_trade(
+            bot_name=self.bot_name,
+            trade_request={
+                "ticker": signal.ticker,
+                "title": signal.title,
+                "category": signal.category,
+                "side": signal.side,
+                "action": signal.action,
+                "quant_confidence": signal.confidence,
+                "suggested_price": signal.suggested_price,
+                "proposed_count": count,
+                "event_ticker": signal.event_ticker,
+            },
+        )
+
+        if approval.decision != "approve":
+            logger.info(
+                "Central LLM rejected trade %s %s on %s | rationale=%s | flags=%s",
+                signal.action, signal.side, signal.ticker,
+                approval.rationale, approval.red_flags,
+            )
+            self.behavior.record_action(traded=False)
+            return
+
+        count = max(1, int(count * approval.size_multiplier))
+        signal.rationale = f"{signal.rationale} | CENTRAL_LLM: {approval.rationale}"
 
         logger.info(
             "Executing: %s %s on %s | conf=%.1f | price=%d | count=%d",
@@ -516,7 +642,16 @@ class BotRunner:
                 bot_name=self.bot_name,
                 order_id=order_id,
             )
-            self._pending_trades[signal.ticker] = db_id
+            self.central_llm.record_execution(
+                decision_id=approval.decision_id,
+                order_id=order_id,
+                trade_db_id=db_id,
+            )
+            self._pending_trades[int(db_id)] = {
+                "ticker": signal.ticker,
+                "order_id": str(order_id or ""),
+                "count": int(count),
+            }
             self._trade_count += 1
             self.behavior.record_action(traded=True)
             self.notifier.notify_trade(
@@ -553,37 +688,74 @@ class BotRunner:
                     "Found stale pending trade id=%d ticker=%s from %s. Force-resolving.",
                     trade["id"], trade["ticker"], trade["timestamp"],
                 )
-                self._force_resolve_trade(trade["id"], trade["ticker"], trade.get("count", 1))
+                self._force_resolve_trade(
+                    trade["id"],
+                    trade["ticker"],
+                    trade.get("count", 1),
+                    order_id=str(trade.get("order_id", "") or ""),
+                )
             return
 
         try:
             positions = self.client.get_positions()
-            pos_by_ticker = {p["ticker"]: p for p in positions}
+            pos_by_ticker = {p.get("ticker"): p for p in positions if p.get("ticker")}
             settlements = self.client.get_settlements()
-            settled_tickers = {s.get("ticker") or s.get("market_ticker") for s in settlements}
+            settlement_by_ticker = {
+                str(s.get("ticker") or s.get("market_ticker") or "").strip(): s
+                for s in settlements
+                if str(s.get("ticker") or s.get("market_ticker") or "").strip()
+            }
+            settled_tickers = {
+                s.get("ticker") or s.get("market_ticker")
+                for s in settlements
+                if s.get("ticker") or s.get("market_ticker")
+            }
 
-            resolved = []
+            resolved_ids: List[int] = []
             stale_age_hours = self.cfg.get("trading", {}).get("stale_trade_hours", 48.0)
             exit_threshold_cents = self.cfg.get("trading", {}).get("exit_loss_threshold_cents", -20)
 
-            for ticker, db_id in list(self._pending_trades.items()):
+            # Group by ticker to resolve duplicate-ticker pending rows safely.
+            pending_by_ticker: Dict[str, List[tuple[int, Dict[str, Any]]]] = {}
+            for db_id, meta in list(self._pending_trades.items()):
+                ticker = str(meta.get("ticker", "")).strip()
+                if not ticker:
+                    continue
+                pending_by_ticker.setdefault(ticker, []).append((db_id, meta))
+
+            for ticker, rows in pending_by_ticker.items():
                 # --- Case 1: Market has settled ---
                 if ticker in settled_tickers:
-                    pos = pos_by_ticker.get(ticker, {})
-                    pnl = pos.get("realized_pnl", 0)
-                    outcome = "win" if pnl >= 0 else "loss"
-                    self.learning.update_outcome(db_id, outcome, pnl_cents=pnl)
-                    self.risk.record_outcome(pnl)
-                    self._on_trade_resolved(outcome, pnl, ticker=ticker)
-                    resolved.append(ticker)
-                    logger.info("Resolved %s: %s (%+d cents)", ticker, outcome, pnl)
+                    settlement = settlement_by_ticker.get(ticker)
+                    if settlement is not None:
+                        total_pnl = self._settlement_pnl_cents(settlement)
+                    else:
+                        pos = pos_by_ticker.get(ticker, {})
+                        total_pnl = int(pos.get("realized_pnl", 0) or 0)
+                    allocations = self._allocate_pnl_across_rows(total_pnl, rows)
+                    for db_id, meta, row_pnl in allocations:
+                        outcome = self._outcome_from_pnl(row_pnl)
+                        self.learning.update_outcome(db_id, outcome, pnl_cents=row_pnl)
+                        self.risk.record_outcome(row_pnl)
+                        self._on_trade_resolved(
+                            outcome,
+                            row_pnl,
+                            ticker=ticker,
+                            trade_db_id=db_id,
+                            order_id=str(meta.get("order_id", "") or ""),
+                        )
+                        resolved_ids.append(db_id)
+                    logger.info(
+                        "Resolved %s across %d trade row(s): total %+d cents.",
+                        ticker, len(rows), total_pnl,
+                    )
                     continue
 
                 # --- Case 2: Position exists but not settled yet ---
                 pos = pos_by_ticker.get(ticker)
                 if pos is not None:
-                    unrealized = pos.get("unrealized_pnl", 0)
-                    position_qty = pos.get("position", 0)
+                    unrealized = int(pos.get("unrealized_pnl", 0) or 0)
+                    position_qty = int(pos.get("position", 0) or 0)
 
                     # Exit if unrealized loss exceeds threshold
                     if unrealized <= exit_threshold_cents and position_qty > 0:
@@ -594,12 +766,11 @@ class BotRunner:
                         )
                         self._place_exit_order(ticker, pos)
 
-                # --- Case 3: Stale — trade logged but no position found and not settled ---
-                from datetime import datetime, timezone
-                import sqlite3
-                trade_rows = self._conn_get_trade_ts(db_id)
-                if trade_rows:
-                    trade_ts_str = trade_rows
+                # --- Case 3: stale pending rows ---
+                for db_id, meta in rows:
+                    trade_ts_str = self._conn_get_trade_ts(db_id)
+                    if not trade_ts_str:
+                        continue
                     try:
                         trade_ts = datetime.fromisoformat(trade_ts_str)
                         age_hours = (datetime.now(timezone.utc) - trade_ts).total_seconds() / 3600.0
@@ -608,19 +779,87 @@ class BotRunner:
                                 "Stale pending trade id=%d ticker=%s (%.1fh old). Force-resolving.",
                                 db_id, ticker, age_hours,
                             )
-                            self._force_resolve_trade(db_id, ticker, pos.get("position", 1) if pos else 1)
-                            resolved.append(ticker)
+                            self._force_resolve_trade(
+                                db_id,
+                                ticker,
+                                int(meta.get("count", 1) or 1),
+                                order_id=str(meta.get("order_id", "") or ""),
+                            )
+                            resolved_ids.append(db_id)
                     except Exception as exc:
                         logger.warning(
                             "Could not parse timestamp for trade id=%d ticker=%s: %s",
                             db_id, ticker, exc,
                         )
 
-            for t in resolved:
-                del self._pending_trades[t]
+            for db_id in resolved_ids:
+                self._pending_trades.pop(db_id, None)
 
         except Exception as exc:
             logger.warning("Reconciliation error: %s", exc)
+
+    @staticmethod
+    def _allocate_pnl_across_rows(
+        total_pnl: int,
+        rows: List[tuple[int, Dict[str, Any]]],
+    ) -> List[tuple[int, Dict[str, Any], int]]:
+        """Split ticker-level realized P&L across multiple pending trade rows."""
+        if not rows:
+            return []
+
+        weights = [max(1, int(meta.get("count", 1) or 1)) for _, meta in rows]
+        weight_sum = sum(weights)
+        if weight_sum <= 0:
+            per_row = int(total_pnl / len(rows))
+            result = [(db_id, meta, per_row) for db_id, meta in rows]
+            remainder = total_pnl - (per_row * len(rows))
+            if result:
+                db_id, meta, pnl = result[-1]
+                result[-1] = (db_id, meta, pnl + remainder)
+            return result
+
+        allocated: List[tuple[int, Dict[str, Any], int]] = []
+        running = 0
+        for idx, (db_id, meta) in enumerate(rows):
+            if idx == len(rows) - 1:
+                row_pnl = total_pnl - running
+            else:
+                row_pnl = int(round(total_pnl * (weights[idx] / weight_sum)))
+                running += row_pnl
+            allocated.append((db_id, meta, row_pnl))
+        return allocated
+
+    @staticmethod
+    def _outcome_from_pnl(pnl_cents: int) -> str:
+        if pnl_cents > 0:
+            return "win"
+        if pnl_cents < 0:
+            return "loss"
+        return "breakeven"
+
+    @staticmethod
+    def _settlement_pnl_cents(settlement: Dict[str, Any]) -> int:
+        """
+        Compute realized P&L in cents from a settlement row.
+        Uses revenue - total_cost - fee_cost.
+        """
+        try:
+            revenue = int(settlement.get("revenue", 0) or 0)
+        except Exception:
+            revenue = 0
+        try:
+            yes_cost = int(settlement.get("yes_total_cost", 0) or 0)
+        except Exception:
+            yes_cost = 0
+        try:
+            no_cost = int(settlement.get("no_total_cost", 0) or 0)
+        except Exception:
+            no_cost = 0
+        try:
+            fee_cents = int(round(float(settlement.get("fee_cost", 0) or 0) * 100))
+        except Exception:
+            fee_cents = 0
+        return int(revenue - yes_cost - no_cost - fee_cents)
 
     def _conn_get_trade_ts(self, trade_id: int) -> Optional[str]:
         """Helper: fetch timestamp for a trade by ID from the learning DB."""
@@ -633,7 +872,13 @@ class BotRunner:
             logger.debug("Could not fetch trade timestamp for id=%d: %s", trade_id, exc)
             return None
 
-    def _force_resolve_trade(self, db_id: int, ticker: str, count: int) -> None:
+    def _force_resolve_trade(
+        self,
+        db_id: int,
+        ticker: str,
+        count: int,
+        order_id: str = "",
+    ) -> None:
         """
         Force-resolve a trade that is past its staleness threshold.
         Uses fill history to find the actual outcome; falls back to neutral.
@@ -643,25 +888,57 @@ class BotRunner:
             fill_pnl = 0
             found = False
             for fill in fills:
-                if fill.get("ticker") == ticker:
-                    fill_pnl += fill.get("profit_loss", 0)
-                    found = True
+                fill_ticker = str(fill.get("ticker") or fill.get("market_ticker") or "")
+                if fill_ticker != ticker:
+                    continue
+                if order_id:
+                    fill_order_candidates = {
+                        str(fill.get("order_id", "") or ""),
+                        str(fill.get("maker_order_id", "") or ""),
+                        str(fill.get("taker_order_id", "") or ""),
+                    }
+                    if order_id not in fill_order_candidates:
+                        continue
+                try:
+                    fill_pnl += int(fill.get("profit_loss", 0) or 0)
+                except Exception:
+                    fill_pnl += 0
+                found = True
 
             if found:
-                outcome = "win" if fill_pnl >= 0 else "loss"
+                outcome = self._outcome_from_pnl(fill_pnl)
                 self.learning.update_outcome(db_id, outcome, pnl_cents=fill_pnl)
                 self.risk.record_outcome(fill_pnl)
-                self._on_trade_resolved(outcome, fill_pnl, ticker=ticker)
+                self._on_trade_resolved(
+                    outcome,
+                    fill_pnl,
+                    ticker=ticker,
+                    trade_db_id=db_id,
+                    order_id=order_id,
+                )
                 logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
             else:
                 # No fills found — mark as expired/neutral
                 self.learning.update_outcome(db_id, "expired", pnl_cents=0)
-                self._on_trade_resolved("expired", 0, ticker=ticker)
+                self._on_trade_resolved(
+                    "expired",
+                    0,
+                    ticker=ticker,
+                    trade_db_id=db_id,
+                    order_id=order_id,
+                )
                 logger.info("Force-resolved %s as expired (no fills found).", ticker)
         except Exception as exc:
             logger.warning("Force-resolve failed for %s: %s", ticker, exc)
 
-    def _on_trade_resolved(self, outcome: str, pnl_cents: int, ticker: str = "") -> None:
+    def _on_trade_resolved(
+        self,
+        outcome: str,
+        pnl_cents: int,
+        ticker: str = "",
+        trade_db_id: Optional[int] = None,
+        order_id: str = "",
+    ) -> None:
         """
         Called immediately after every trade outcome is recorded.
 
@@ -679,6 +956,17 @@ class BotRunner:
             pnl_cents=pnl_cents,
             bot_name=self.bot_name,
         )
+        try:
+            self.central_llm.record_trade_outcome(
+                bot_name=self.bot_name,
+                ticker=ticker,
+                outcome=outcome,
+                pnl_cents=pnl_cents,
+                trade_db_id=trade_db_id,
+                order_id=order_id,
+            )
+        except Exception as exc:
+            logger.warning("Central LLM outcome feedback update failed: %s", exc)
 
         # Refresh trend (momentum_multiplier, hot/cold categories, calibration bias).
         # Cheap — one DB query over the last 20 settled trades.
@@ -780,7 +1068,27 @@ class BotRunner:
 
         try:
             positions = self.client.get_positions(count_filter="position")
-            self.risk.update_open_positions(len(positions))
+            account_open_tickers = {
+                str(p.get("ticker", "")).strip()
+                for p in positions
+                if str(p.get("ticker", "")).strip()
+            }
+            scope = str(
+                self.cfg.get("risk", {}).get(
+                    "open_positions_scope",
+                    self.cfg.get("trading", {}).get("open_positions_scope", "per_bot"),
+                )
+            ).lower()
+            if scope == "account":
+                open_position_count = len(account_open_tickers)
+            else:
+                bot_open_tickers = {
+                    str(meta.get("ticker", "")).strip()
+                    for meta in self._pending_trades.values()
+                    if str(meta.get("ticker", "")).strip()
+                }
+                open_position_count = len(account_open_tickers & bot_open_tickers)
+            self.risk.update_open_positions(open_position_count)
         except KalshiAPIError as exc:
             logger.warning("Failed to fetch positions: %s", exc)
 
@@ -810,8 +1118,12 @@ class BotRunner:
         """Graceful shutdown."""
         logger.info("Shutting down bot '%s'.", self.bot_name)
         self._end_of_session()
+        self._running = False
+        self._set_status("stopped")
+        self._save_risk_state()
+        if self._status_thread and self._status_thread.is_alive():
+            self._status_thread.join(timeout=2)
         self.learning.close()
-        self._write_status("stopped")
         logger.info("Bot '%s' stopped.", self.bot_name)
 
     # ------------------------------------------------------------------
@@ -821,37 +1133,39 @@ class BotRunner:
     def _write_status(self, state: str, error: str = "") -> None:
         """Write status to a JSON file for the coordinator to read."""
         try:
-            perf = self.learning.get_performance()
-            risk_status = self.risk.status()
-            
-            # FIX: Ensure balance is never 0 in status if we have a cached value
-            if risk_status.get("balance_cents", 0) == 0 and self._last_known_balance > 0:
-                risk_status["balance_cents"] = self._last_known_balance
-                risk_status["last_known_balance"] = True
+            with self._status_lock:
+                perf = self.learning.get_performance()
+                risk_status = self.risk.status()
 
-            status = {
-                "bot_name": self.bot_name,
-                "display_name": self.cfg.get("bot", {}).get("display_name", self.bot_name),
-                "specialist": self.cfg.get("bot", {}).get("specialist", "general"),
-                "state": state,
-                "error": error,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "session_start": self._session_start.isoformat() if self._session_start else None,
-                "trade_count": self._trade_count,
-                "pending_trades": len(self._pending_trades),
-                "performance": perf,
-                "risk": risk_status,
-                "pid": os.getpid(),
-            }
+                # FIX: Ensure balance is never 0 in status if we have a cached value
+                if risk_status.get("balance_cents", 0) == 0 and self._last_known_balance > 0:
+                    risk_status["balance_cents"] = self._last_known_balance
+                    risk_status["last_known_balance"] = True
 
-            # FIX: Use atomic write to prevent corruption
-            temp_file = self._status_file.with_suffix('.tmp')
-            with open(temp_file, "w") as fh:
-                json.dump(status, fh, indent=2)
-            temp_file.replace(self._status_file)
+                status = {
+                    "bot_name": self.bot_name,
+                    "display_name": self.cfg.get("bot", {}).get("display_name", self.bot_name),
+                    "specialist": self.cfg.get("bot", {}).get("specialist", "general"),
+                    "state": state,
+                    "error": error,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "session_start": self._session_start.isoformat() if self._session_start else None,
+                    "trade_count": self._trade_count,
+                    "pending_trades": len(self._pending_trades),
+                    "performance": perf,
+                    "risk": risk_status,
+                    "pid": os.getpid(),
+                }
+
+                # FIX: Use atomic write to prevent corruption
+                temp_file = self._status_file.with_suffix('.tmp')
+                with open(temp_file, "w") as fh:
+                    json.dump(status, fh, indent=2)
+                temp_file.replace(self._status_file)
+                self._save_risk_state()
 
         except Exception as exc:
-            logger.debug("Failed to write status file: %s", exc)
+            logger.warning("Failed to write status file: %s", exc)
 
     # ------------------------------------------------------------------
     # External control
@@ -908,3 +1222,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

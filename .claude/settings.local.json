@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__desktop-commander__list_directory",
+      "mcp__desktop-commander__read_file",
+      "mcp__Desktop_Commander__read_file"
+    ]
+  }
+}

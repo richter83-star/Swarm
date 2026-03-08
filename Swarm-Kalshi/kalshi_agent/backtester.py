@@ -134,6 +134,11 @@ class Backtester:
             backtested, wins, losses, total_pnl,
         )
 
+        # Flush WAL pages accumulated during the batch loop.  Auto-checkpoint
+        # is disabled (PRAGMA wal_autocheckpoint=0) to prevent mid-loop stalls
+        # on Windows; we do one explicit passive checkpoint here instead.
+        self.learning.checkpoint()
+
         # Trigger recalibration if configured
         if self.cfg.get("recalibrate_after", True) and backtested >= 10:
             logger.info("BACKTESTER: Triggering post-backtest weight recalibration.")

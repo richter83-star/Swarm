@@ -17,7 +17,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import requests
@@ -65,7 +65,7 @@ class KalshiClient:
     # Sensible defaults — overridden by ``config.yaml`` at runtime.
     DEFAULT_BASE_URL = "https://demo-api.kalshi.co/trade-api/v2"
     _RATE_LIMIT_BACKOFF_BASE = 1.0  # seconds
-    _MAX_RETRIES = 3
+    _MAX_RETRIES = 6
 
     def __init__(
         self,
@@ -256,23 +256,44 @@ class KalshiClient:
         limit: int = 200,
         max_pages: int = 50,
         authenticated: bool = True,
-    ) -> List[Dict]:
+        return_meta: bool = False,
+    ) -> Union[List[Dict], Tuple[List[Dict], Dict[str, Any]]]:
         """
         Automatically follow cursor-based pagination and collect all results.
         """
         params = dict(params or {})
         params["limit"] = limit
         collected: List[Dict] = []
+        pages_fetched = 0
+        truncated = False
+        final_cursor = ""
 
         for _ in range(max_pages):
             data = self._get(path, params=params, authenticated=authenticated)
+            pages_fetched += 1
             items = data.get(result_key, [])
             collected.extend(items)
             cursor = data.get("cursor", "")
+            final_cursor = cursor or ""
             if not cursor or not items:
                 break
             params["cursor"] = cursor
+        else:
+            # Loop exhausted (pagination cap hit) while cursor still available.
+            if final_cursor:
+                truncated = True
+                logger.warning(
+                    "Pagination cap reached for %s: collected %d items at %d pages; more data exists.",
+                    path, len(collected), pages_fetched,
+                )
 
+        if return_meta:
+            return collected, {
+                "pages_fetched": pages_fetched,
+                "truncated": truncated,
+                "final_cursor": final_cursor,
+                "collected": len(collected),
+            }
         return collected
 
     # ==================================================================
@@ -395,8 +416,10 @@ class KalshiClient:
         series_ticker: Optional[str] = None,
         event_ticker: Optional[str] = None,
         limit: int = 1000,
+        max_pages: int = 50,
+        return_meta: bool = False,
         **kwargs,
-    ) -> List[Dict]:
+    ) -> Union[List[Dict], Tuple[List[Dict], Dict[str, Any]]]:
         """
         Retrieve markets with optional filters (auto-paginated).
 
@@ -412,7 +435,13 @@ class KalshiClient:
             params["event_ticker"] = event_ticker
         params.update({k: v for k, v in kwargs.items() if v is not None})
         return self._paginate(
-            "/markets", "markets", params=params, limit=min(limit, 1000), authenticated=False
+            "/markets",
+            "markets",
+            params=params,
+            limit=min(limit, 1000),
+            max_pages=max_pages,
+            authenticated=False,
+            return_meta=return_meta,
         )
 
     def get_market(self, ticker: str) -> Dict:
@@ -425,10 +454,35 @@ class KalshiClient:
         data = self._get(f"/markets/{ticker}/orderbook", authenticated=False)
         return data.get("orderbook", data)
 
-    def get_trades(self, ticker: str, limit: int = 200) -> List[Dict]:
-        """Retrieve recent public trades for a market."""
+    def get_trades(
+        self,
+        ticker: Optional[str] = None,
+        limit: int = 200,
+        max_pages: int = 1,
+    ) -> List[Dict]:
+        """
+        Retrieve recent public trades.
+
+        Parameters
+        ----------
+        ticker : str, optional
+            If provided, filter trades to a single market ticker.
+            If omitted, returns recent trades across all markets.
+        limit : int
+            Page size (max 200).
+        max_pages : int
+            Number of cursor pages to fetch (default 1).
+        """
+        params: Dict[str, Any] = {}
+        if ticker:
+            params["ticker"] = ticker
         return self._paginate(
-            "/trades", "trades", params={"ticker": ticker}, limit=min(limit, 200), authenticated=False
+            "/markets/trades",
+            "trades",
+            params=params,
+            limit=min(limit, 200),
+            max_pages=max_pages,
+            authenticated=False,
         )
 
     def get_market_candlesticks(self, ticker: str, **kwargs) -> Dict:

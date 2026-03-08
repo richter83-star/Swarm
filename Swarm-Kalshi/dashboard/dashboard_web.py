@@ -20,6 +20,9 @@ import os
 import sqlite3
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -255,6 +258,156 @@ def create_app(
             })
         return result
 
+    def get_recent_central_llm_decisions(limit: int = 12) -> List[Dict[str, Any]]:
+        """Read recent centralized LLM trade decisions from shared DB."""
+        central_cfg = swarm_cfg.get("central_llm", {}) if isinstance(swarm_cfg, dict) else {}
+        db_rel = str(central_cfg.get("db_path", "data/central_llm_controller.db"))
+        db_path = project_root / db_rel
+        if not db_path.exists():
+            return []
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT timestamp, bot_name, ticker, side, quant_confidence, llm_confidence,
+                       decision, size_multiplier, rationale, red_flags
+                FROM llm_decisions
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            conn.close()
+        except Exception as exc:
+            logger.debug("Failed reading central_llm decisions: %s", exc)
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            red_flags = row["red_flags"]
+            try:
+                red_flags = json.loads(red_flags) if red_flags else []
+            except Exception:
+                red_flags = [str(red_flags)] if red_flags else []
+            out.append({
+                "timestamp": row["timestamp"],
+                "bot_name": row["bot_name"],
+                "ticker": row["ticker"],
+                "side": row["side"],
+                "quant_confidence": row["quant_confidence"],
+                "llm_confidence": row["llm_confidence"],
+                "decision": row["decision"],
+                "size_multiplier": row["size_multiplier"],
+                "rationale": row["rationale"],
+                "red_flags": red_flags,
+            })
+        return out
+
+    def get_recent_runtime_events(max_lines: int = 250, per_bot: int = 8) -> Dict[str, List[str]]:
+        """Read recent bot runtime events from swarm log for operator context."""
+        log_path = project_root / "logs" / "swarm.log"
+        events: Dict[str, List[str]] = {bot: [] for bot in BOT_NAMES}
+        if not log_path.exists():
+            return events
+
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception as exc:
+            logger.debug("Failed reading swarm log: %s", exc)
+            return events
+
+        tail = lines[-max_lines:]
+        for line in tail:
+            line_stripped = line.strip()
+            for bot in BOT_NAMES:
+                marker = f"| {bot} |"
+                if marker in line_stripped:
+                    parts = [p.strip() for p in line_stripped.split("|")]
+                    message = parts[-1] if parts else line_stripped
+                    if message and (not events[bot] or events[bot][-1] != message):
+                        events[bot].append(message)
+
+        for bot in BOT_NAMES:
+            if len(events[bot]) > per_bot:
+                events[bot] = events[bot][-per_bot:]
+        return events
+
+    def get_swarm_context_for_chat(
+        max_trades_per_bot: int = 6,
+        max_central_decisions: int = 12,
+    ) -> Dict[str, Any]:
+        """Build compact live context for interactive operator chat."""
+        bots: Dict[str, Any] = {}
+        runtime_events = get_recent_runtime_events()
+        total_trades = 0
+        total_wins = 0
+        total_pnl = 0
+
+        for bot_name in BOT_NAMES:
+            status = get_bot_status(bot_name)
+            perf = get_bot_performance(bot_name)
+            risk = status.get("risk", {}) if isinstance(status, dict) else {}
+            trades = get_bot_trades(bot_name, limit=max_trades_per_bot)
+
+            recent_trades = []
+            for t in trades:
+                recent_trades.append({
+                    "timestamp": t.get("timestamp"),
+                    "ticker": t.get("ticker"),
+                    "side": t.get("side"),
+                    "entry_price": t.get("entry_price"),
+                    "count": t.get("count"),
+                    "confidence": t.get("confidence"),
+                    "outcome": t.get("outcome"),
+                    "pnl_cents": t.get("pnl_cents"),
+                    "rationale": t.get("rationale"),
+                })
+
+            bots[bot_name] = {
+                "state": status.get("state", "unknown"),
+                "timestamp": status.get("timestamp"),
+                "pid": status.get("pid"),
+                "session_start": status.get("session_start"),
+                "session_trade_count": status.get("trade_count", 0),
+                "pending_trades": status.get("pending_trades", 0),
+                "recent_runtime_events": runtime_events.get(bot_name, []),
+                "risk": {
+                    "balance_cents": risk.get("balance_cents", 0),
+                    "daily_pnl_cents": risk.get("daily_pnl_cents", 0),
+                    "drawdown_pct": risk.get("drawdown_pct", 0.0),
+                    "open_positions": risk.get("open_positions", 0),
+                    "can_trade": risk.get("can_trade", False),
+                    "consecutive_losses": risk.get("consecutive_losses", 0),
+                },
+                "performance": {
+                    "total_trades": perf.get("total_trades", 0),
+                    "wins": perf.get("wins", 0),
+                    "losses": perf.get("losses", 0),
+                    "win_rate": perf.get("win_rate", 0.0),
+                    "total_pnl": perf.get("total_pnl", 0),
+                    "avg_confidence": perf.get("avg_confidence", 0.0),
+                },
+                "recent_trades": recent_trades,
+            }
+
+            total_trades += int(perf.get("total_trades", 0) or 0)
+            total_wins += int(perf.get("wins", 0) or 0)
+            total_pnl += int(perf.get("total_pnl", 0) or 0)
+
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "global_metrics": {
+                "total_trades": total_trades,
+                "total_wins": total_wins,
+                "total_losses": max(0, total_trades - total_wins),
+                "overall_win_rate": round((total_wins / total_trades * 100), 1) if total_trades > 0 else 0.0,
+                "total_pnl_cents": total_pnl,
+            },
+            "bots": bots,
+            "recent_central_llm_decisions": get_recent_central_llm_decisions(limit=max_central_decisions),
+        }
+
     # ------------------------------------------------------------------
     # Auth
     # ------------------------------------------------------------------
@@ -272,11 +425,13 @@ def create_app(
     @app.route("/")
     def index():
         """Render the main dashboard page."""
+        central_cfg = swarm_cfg.get("central_llm", {}) if isinstance(swarm_cfg, dict) else {}
         return render_template(
             "dashboard.html",
             bots=BOT_DISPLAY,
             bot_names=BOT_NAMES,
             refresh_interval=swarm_cfg.get("dashboard", {}).get("auto_refresh_seconds", 15),
+            ollama_model=central_cfg.get("model", "qwen2.5:14b"),
         )
 
     # ------------------------------------------------------------------
@@ -397,6 +552,114 @@ def create_app(
                 "detail": "",
             })
         return jsonify(activities)
+
+    @app.route("/api/ollama/chat", methods=["POST"])
+    def api_ollama_chat():
+        """Send a prompt to the configured Ollama model and return the response."""
+        data = request.json or {}
+        prompt = str(data.get("prompt", "")).strip()
+        system_prompt = str(data.get("system", "")).strip()
+        model_override = str(data.get("model", "")).strip()
+        include_context = bool(data.get("include_context", True))
+        raw_history = data.get("history", [])
+
+        if not prompt:
+            return jsonify({"success": False, "error": "prompt is required"}), 400
+
+        central_cfg = swarm_cfg.get("central_llm", {}) if isinstance(swarm_cfg, dict) else {}
+        ollama_base_url = str(central_cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
+        model = model_override or str(central_cfg.get("model", "qwen2.5:14b"))
+        timeout_seconds = int(data.get("timeout_seconds") or max(60, int(central_cfg.get("timeout_seconds", 20))))
+        timeout_seconds = max(10, min(timeout_seconds, 180))
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt[:4000]})
+        else:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "You are SwarmOps, an operator console assistant for a live trading swarm.\n"
+                    "Rules:\n"
+                    "1) Start with a direct answer to the user's question.\n"
+                    "2) Use LIVE_SWARM_CONTEXT_JSON as primary evidence and cite exact bot names, fields, and event phrases.\n"
+                    "3) Do NOT give generic suggestions like 'check logs/config' unless data is truly missing.\n"
+                    "4) If something is unknown, explicitly say what field is missing from live context.\n"
+                    "5) Keep concise and operational (answer + key evidence + concrete next action).\n"
+                ),
+            })
+
+        context_obj = None
+        if include_context:
+            context_obj = get_swarm_context_for_chat()
+            messages.append({
+                "role": "system",
+                "content": f"LIVE_SWARM_CONTEXT_JSON:\n{json.dumps(context_obj, ensure_ascii=True)}",
+            })
+
+        if isinstance(raw_history, list):
+            for item in raw_history[-20:]:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role", "")).strip().lower()
+                content = str(item.get("content", "")).strip()
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content[:6000]})
+
+        messages.append({"role": "user", "content": prompt[:12000]})
+
+        payload = json.dumps({
+            "model": model,
+            "stream": False,
+            "messages": messages,
+            "options": {"temperature": 0.0},
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{ollama_base_url}/api/chat",
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+        start = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            logger.warning("Ollama HTTP error %s: %s", exc.code, detail)
+            return jsonify({"success": False, "error": f"Ollama HTTP {exc.code}", "detail": detail}), 502
+        except urllib.error.URLError as exc:
+            return jsonify({"success": False, "error": f"Ollama unavailable: {exc}"}), 502
+        except json.JSONDecodeError:
+            return jsonify({"success": False, "error": "Invalid JSON from Ollama"}), 502
+
+        content = str((body.get("message") or {}).get("content") or "").strip()
+        if not content:
+            return jsonify({"success": False, "error": "Empty response from Ollama"}), 502
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        context_summary = None
+        if context_obj is not None:
+            bot_states = {
+                bot: details.get("state", "unknown")
+                for bot, details in context_obj.get("bots", {}).items()
+            }
+            context_summary = {
+                "generated_at": context_obj.get("generated_at"),
+                "bot_states": bot_states,
+                "recent_central_decisions": len(context_obj.get("recent_central_llm_decisions", [])),
+                "total_trades": context_obj.get("global_metrics", {}).get("total_trades", 0),
+            }
+
+        return jsonify({
+            "success": True,
+            "model": model,
+            "response": content,
+            "latency_ms": latency_ms,
+            "context_summary": context_summary,
+        })
 
     # ------------------------------------------------------------------
     # Routes -- Control endpoints
