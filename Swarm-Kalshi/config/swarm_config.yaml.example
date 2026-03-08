@@ -144,11 +144,14 @@ llm_advisor:
   timeout_seconds: 10
   max_calls_per_cycle: 5               # Hard cap per scan cycle (controls API cost)
 
-# --- Central LLM Controller (Ollama trade gate) ---
+# --- Central LLM Controller (Ollama or Claude trade gate) ---
 central_llm:
   enabled: true
-  provider: ollama
+  provider: anthropic                  # anthropic | ollama
   ollama_base_url: http://127.0.0.1:11434
+  anthropic_api_url: https://api.anthropic.com/v1/messages
+  anthropic_api_key: ""                # or use ANTHROPIC_API_KEY env var
+  anthropic_model: claude-haiku-4-5-20251001
   model: qwen2.5:14b
   timeout_seconds: 20
   min_approved_confidence: 55

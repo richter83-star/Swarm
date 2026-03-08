@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import urllib.error
 import urllib.request
@@ -46,6 +47,9 @@ class CentralLLMController:
         "enabled": True,
         "provider": "ollama",
         "ollama_base_url": "http://127.0.0.1:11434",
+        "anthropic_api_url": "https://api.anthropic.com/v1/messages",
+        "anthropic_api_key": "",
+        "anthropic_model": "claude-3-5-haiku-latest",
         "model": "qwen2.5:14b",
         "timeout_seconds": 20,
         "min_approved_confidence": 55.0,
@@ -139,9 +143,11 @@ class CentralLLMController:
     # ------------------------------------------------------------------
 
     def _evaluate_with_llm(self, bot_name: str, trade_request: Dict[str, Any]) -> Dict[str, Any]:
-        if self._provider != "ollama":
-            raise RuntimeError(f"Unsupported central LLM provider: {self._provider}")
-        return self._query_ollama(bot_name, trade_request)
+        if self._provider == "ollama":
+            return self._query_ollama(bot_name, trade_request)
+        if self._provider in {"anthropic", "claude"}:
+            return self._query_anthropic(bot_name, trade_request)
+        raise RuntimeError(f"Unsupported central LLM provider: {self._provider}")
 
     def _query_ollama(self, bot_name: str, trade_request: Dict[str, Any]) -> Dict[str, Any]:
         base_url = str(self.cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
@@ -197,6 +203,75 @@ class CentralLLMController:
             return json.loads(content)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Ollama returned non-JSON content: {content[:200]}") from exc
+
+    def _query_anthropic(self, bot_name: str, trade_request: Dict[str, Any]) -> Dict[str, Any]:
+        endpoint = str(self.cfg.get("anthropic_api_url", "https://api.anthropic.com/v1/messages")).strip()
+        timeout = int(self.cfg.get("timeout_seconds", 20))
+        model = str(
+            self.cfg.get("anthropic_model")
+            or self.cfg.get("model")
+            or "claude-3-5-haiku-latest"
+        )
+        api_key = str(self.cfg.get("anthropic_api_key") or "").strip() or str(
+            os.environ.get("ANTHROPIC_API_KEY", "")
+        ).strip()
+        if not api_key:
+            raise RuntimeError("Anthropic API key missing (set central_llm.anthropic_api_key or ANTHROPIC_API_KEY).")
+
+        prompt = self._build_prompt(bot_name, trade_request)
+        system_prompt = (
+            "You are the central risk controller for a multi-bot trading swarm. "
+            "Return ONLY valid JSON with keys: decision, confidence, size_multiplier, rationale, red_flags. "
+            "decision must be 'approve' or 'reject'. confidence is 0-100. "
+            "size_multiplier is 0.0-1.5. red_flags is an array of short strings."
+        )
+        payload = json.dumps(
+            {
+                "model": model,
+                "max_tokens": 350,
+                "temperature": 0.1,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Anthropic request failed: {exc}") from exc
+
+        content_blocks = body.get("content", []) if isinstance(body, dict) else []
+        text_parts = []
+        if isinstance(content_blocks, list):
+            for block in content_blocks:
+                if isinstance(block, dict) and str(block.get("type", "")) == "text":
+                    text_parts.append(str(block.get("text", "")))
+        content = "\n".join(text_parts).strip()
+        if not content:
+            raise RuntimeError("Anthropic response missing text content.")
+
+        if content.startswith("```"):
+            parts = content.split("```")
+            content = parts[1] if len(parts) > 1 else content
+            if content.lstrip().startswith("json"):
+                content = content.lstrip()[4:].strip()
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Anthropic returned non-JSON content: {content[:200]}") from exc
 
     # ------------------------------------------------------------------
     # Decision normalization and logging
