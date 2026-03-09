@@ -53,10 +53,7 @@ class CentralLLMController:
         "model": "qwen2.5:14b",
         "timeout_seconds": 20,
         "min_approved_confidence": 55.0,
-        # If LLM wants to reject but has weak conviction, prefer quant signal.
-        "min_reject_confidence": 60.0,
-        # In strict mode, a reject remains reject (no weak-reject auto-override).
-        "strict_rejects": True,
+        # Rejects are fail-safe by default (no weak-reject auto-override).
         # Archetype-aware approval confidence floors.
         "approval_confidence_floor": 70.0,
         "low_volume_threshold": 1000.0,
@@ -327,29 +324,8 @@ class CentralLLMController:
         llm_confidence = confidence
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
         min_conf = float(self.cfg.get("min_approved_confidence", 55.0))
-        min_reject_conf = float(self.cfg.get("min_reject_confidence", 60.0))
-        strict_rejects = bool(self.cfg.get("strict_rejects", True))
         approval_floor = self._approval_confidence_floor(trade_request)
         max_flags = int(self.cfg.get("max_red_flags", 2))
-
-        # Optional fail-soft mode: ignore weak LLM rejects when quant confidence is strong.
-        if (
-            not strict_rejects
-            and decision == "reject"
-            and llm_confidence < min_reject_conf
-            and quant_conf >= min_conf
-        ):
-            decision = "approve"
-            confidence = max(min_conf, quant_conf)
-            size_multiplier = max(
-                size_multiplier,
-                float(self.cfg.get("default_size_multiplier", 1.0)),
-            )
-            rationale = (
-                f"{rationale} | Low-confidence reject ignored "
-                f"(llm_conf={llm_confidence:.1f} < min_reject_conf={min_reject_conf:.1f})."
-            )
-            red_flags = red_flags[:1]
 
         if decision == "approve" and confidence < approval_floor:
             decision = "reject"

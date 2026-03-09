@@ -51,6 +51,8 @@ class TradeSignal:
     volume_score: float = 0.0
     timing_score: float = 0.0
     momentum_score: float = 0.0
+    volume_24h: int = 0
+    spread_cents: int = 0
 
 
 class AnalysisEngine:
@@ -226,6 +228,8 @@ class AnalysisEngine:
                 volume_score=vol_sc,
                 timing_score=tim_sc,
                 momentum_score=mom_sc,
+                volume_24h=int(opp.volume_24h or 0),
+                spread_cents=int(opp.spread or 0),
             )
         except Exception as exc:
             logger.debug("Scoring failed for %s: %s", opp.ticker, exc)

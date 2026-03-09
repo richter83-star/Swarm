@@ -279,7 +279,6 @@ class BotRunner:
         if bool(auto_cfg.get("require_llm_for_trade", True)):
             central_cfg["allow_quant_fallback_on_error"] = False
             central_cfg["fail_open"] = False
-            central_cfg["strict_rejects"] = True
         if bool(auto_cfg.get("llm_learning_enabled", True)):
             central_cfg["learning_enabled"] = True
         self.cfg["central_llm"] = central_cfg
@@ -824,8 +823,8 @@ class BotRunner:
                 "suggested_price": signal.suggested_price,
                 "proposed_count": count,
                 "event_ticker": signal.event_ticker,
-                "volume_24h": getattr(signal, "volume_24h", 0),
-                "spread_cents": getattr(signal, "spread", 0),
+                "volume_24h": int(getattr(signal, "volume_24h", 0) or 0),
+                "spread_cents": int(getattr(signal, "spread_cents", 0) or 0),
             },
         )
 
