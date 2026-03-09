@@ -1,0 +1,51 @@
+# Fallback routing rules when Kalshi payloads omit explicit category metadata.
+# Used by BotRunner._infer_market_category().
+
+unknown_category_policy: probabilistic  # strict | probabilistic
+
+series_prefix_to_category:
+  KXFED: economics
+  KXCPI: economics
+  KXBTCD: economics
+  KXETH: economics
+  KXTEMP: weather
+  KXRAIN: weather
+  KXSNOW: weather
+  KXHURR: weather
+  KXELECT: politics
+  KXPRES: politics
+  KXCONG: politics
+
+title_keywords:
+  election: politics
+  president: politics
+  senate: politics
+  house: politics
+  inflation: economics
+  gdp: economics
+  unemployment: economics
+  fed: economics
+  bitcoin: economics
+  weather: weather
+  rain: weather
+  snow: weather
+  hurricane: weather
+  storm: weather
+  temperature: weather
+  climate: weather
+  science: weather
+
+event_patterns:
+  elect: politics
+  pres: politics
+  cong: politics
+  cpi: economics
+  fed: economics
+  gdp: economics
+  unemp: economics
+  btc: economics
+  temp: weather
+  rain: weather
+  snow: weather
+  hurr: weather
+  climate: weather

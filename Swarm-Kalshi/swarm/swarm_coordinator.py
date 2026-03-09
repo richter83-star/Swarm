@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -163,6 +164,10 @@ class SwarmCoordinator:
         self._market_status_ttl_seconds = int(
             self.swarm_cfg.get("market_status_cache_ttl_seconds", 120)
         )
+        self._trade_guard_file = self.project_root / "data" / "swarm_trade_guard.json"
+        self._trade_guard_file.parent.mkdir(parents=True, exist_ok=True)
+        self._last_known_balance_cents: int = 0
+        self._bot_learning_db_paths: Dict[str, Path] = self._resolve_bot_learning_db_paths()
 
         # Telegram integration
         tg_cfg = self.cfg.get("telegram", {})
@@ -510,6 +515,173 @@ class SwarmCoordinator:
         """Return recent activity log entries."""
         with self._activity_lock:
             return list(reversed(self._activity_log[-limit:]))
+
+    # ------------------------------------------------------------------
+    # Trade guard snapshot for bot pre-trade authorization
+    # ------------------------------------------------------------------
+
+    def _resolve_bot_learning_db_paths(self) -> Dict[str, Path]:
+        """
+        Resolve each bot's learning DB path from its bot config.
+        """
+        paths: Dict[str, Path] = {}
+        for bot_name, bot_def in BOT_DEFINITIONS.items():
+            cfg_path = self.project_root / bot_def["config_file"]
+            db_path = self.project_root / "data" / f"{bot_name}.db"
+            try:
+                if cfg_path.exists():
+                    with open(cfg_path, "r", encoding="utf-8") as fh:
+                        cfg = yaml.safe_load(fh) or {}
+                    learning = cfg.get("learning", {}) or {}
+                    raw = str(learning.get("db_path", "")).strip()
+                    if raw:
+                        db_candidate = Path(raw)
+                        if not db_candidate.is_absolute():
+                            db_candidate = self.project_root / db_candidate
+                        db_path = db_candidate
+            except Exception as exc:
+                logger.warning("Failed resolving learning DB path for %s: %s", bot_name, exc)
+            paths[bot_name] = db_path
+        return paths
+
+    @staticmethod
+    def _query_bot_trade_metrics(db_path: Path, today_utc: str) -> Dict[str, int]:
+        """
+        Return pending exposure and realized daily P&L from one bot DB.
+        """
+        if not db_path.exists():
+            return {
+                "pending_exposure_cents": 0,
+                "pending_rows": 0,
+                "daily_realized_pnl_cents": 0,
+            }
+
+        conn = sqlite3.connect(str(db_path), timeout=5)
+        try:
+            pending_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(count * entry_price), 0) AS pending_exposure_cents,
+                    COUNT(*) AS pending_rows
+                FROM trades
+                WHERE outcome = 'pending'
+                """
+            ).fetchone()
+            daily_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(pnl_cents), 0) AS daily_realized_pnl_cents
+                FROM trades
+                WHERE outcome IN ('win', 'loss')
+                  AND settled_at IS NOT NULL
+                  AND substr(settled_at, 1, 10) = ?
+                """,
+                (today_utc,),
+            ).fetchone()
+            return {
+                "pending_exposure_cents": int((pending_row[0] if pending_row else 0) or 0),
+                "pending_rows": int((pending_row[1] if pending_row else 0) or 0),
+                "daily_realized_pnl_cents": int((daily_row[0] if daily_row else 0) or 0),
+            }
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _write_trade_guard_snapshot(self) -> None:
+        """
+        Publish a compact pre-trade guard snapshot for bot_runner fail-safe checks.
+        """
+        now = datetime.now(timezone.utc)
+        today_utc = now.date().isoformat()
+
+        balance_cents = self._last_known_balance_cents
+        valid = True
+        reason = "ok"
+        client = self._get_portfolio_client()
+        if client is not None:
+            try:
+                bal = client.get_balance()
+                fetched = int(bal.get("balance", 0) or 0)
+                if fetched > 0:
+                    balance_cents = fetched
+                    self._last_known_balance_cents = fetched
+            except Exception as exc:
+                if balance_cents <= 0:
+                    valid = False
+                    reason = f"balance_unavailable:{exc}"
+                else:
+                    reason = f"balance_stale:{exc}"
+        elif balance_cents <= 0:
+            valid = False
+            reason = "portfolio_client_unavailable"
+
+        bot_metrics: Dict[str, Dict[str, int]] = {}
+        total_exposure = 0
+        total_daily_pnl = 0
+        for bot_name in self.bots:
+            db_path = self._bot_learning_db_paths.get(
+                bot_name,
+                self.project_root / "data" / f"{bot_name}.db",
+            )
+            try:
+                metrics = self._query_bot_trade_metrics(db_path, today_utc)
+            except Exception as exc:
+                logger.warning("Trade metrics read failed for %s: %s", bot_name, exc)
+                metrics = {
+                    "pending_exposure_cents": 0,
+                    "pending_rows": 0,
+                    "daily_realized_pnl_cents": 0,
+                }
+            bot_metrics[bot_name] = metrics
+            total_exposure += int(metrics.get("pending_exposure_cents", 0) or 0)
+            total_daily_pnl += int(metrics.get("daily_realized_pnl_cents", 0) or 0)
+
+        limits = {
+            "global_daily_loss_limit_cents": int(
+                self.swarm_cfg.get("global_daily_loss_limit_cents", 15000) or 0
+            ),
+            "global_exposure_limit_cents": int(
+                self.swarm_cfg.get("global_exposure_limit_cents", 50000) or 0
+            ),
+        }
+
+        bots_snapshot: Dict[str, Dict[str, Any]] = {}
+        for bot_name in self.bots:
+            alloc_pct = float(self.balance_manager.get_bot_allocation_pct(bot_name) or 0.0)
+            allocated = int(balance_cents * alloc_pct)
+            pending = int(bot_metrics.get(bot_name, {}).get("pending_exposure_cents", 0) or 0)
+            bots_snapshot[bot_name] = {
+                "allocation_pct": round(alloc_pct * 100, 2),
+                "allocated_budget_cents": allocated,
+                "pending_exposure_cents": pending,
+                "available_budget_cents": max(0, allocated - pending),
+                "daily_realized_pnl_cents": int(
+                    bot_metrics.get(bot_name, {}).get("daily_realized_pnl_cents", 0) or 0
+                ),
+                "pending_rows": int(bot_metrics.get(bot_name, {}).get("pending_rows", 0) or 0),
+            }
+
+        snapshot = {
+            "timestamp": now.isoformat(),
+            "valid": bool(valid),
+            "reason": reason,
+            "limits": limits,
+            "metrics": {
+                "total_balance_cents": int(balance_cents),
+                "total_exposure_cents": int(total_exposure),
+                "total_daily_pnl_cents": int(total_daily_pnl),
+            },
+            "bots": bots_snapshot,
+        }
+
+        tmp = self._trade_guard_file.with_suffix(".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, indent=2)
+            tmp.replace(self._trade_guard_file)
+        except Exception as exc:
+            logger.warning("Failed writing trade guard snapshot: %s", exc)
 
     # ------------------------------------------------------------------
     # Portfolio count reconciliation
@@ -961,7 +1133,9 @@ class SwarmCoordinator:
         logger.info("=" * 60)
 
         self.tg_bot.start()
+        self._write_trade_guard_snapshot()
         self.start_all()
+        self._write_trade_guard_snapshot()
 
         check_interval = self.swarm_cfg.get(
             "health_check_interval_seconds",
@@ -973,6 +1147,7 @@ class SwarmCoordinator:
                 self.check_health()
                 self.conflict_resolver.prune_stale_claims()
                 self._run_auto_scale()
+                self._write_trade_guard_snapshot()
                 time.sleep(check_interval)
             except Exception as exc:
                 logger.exception("Coordinator error: %s", exc)

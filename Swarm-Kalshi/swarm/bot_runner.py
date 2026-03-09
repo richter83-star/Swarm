@@ -42,6 +42,7 @@ from kalshi_agent.external_signals import ExternalSignals
 from kalshi_agent.prior_knowledge import PriorKnowledge
 from kalshi_agent.llm_advisor import LLMAdvisor
 from telegram.notifier import TelegramNotifier
+from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
 
 logger = logging.getLogger("kalshi_agent")
@@ -81,6 +82,13 @@ class BotRunner:
         # Status file for coordinator communication
         self._status_file = self.project_root / "data" / f"{bot_name}_status.json"
         self._status_file.parent.mkdir(parents=True, exist_ok=True)
+        self._trade_guard_snapshot_file = self.project_root / "data" / "swarm_trade_guard.json"
+        self._trade_guard_max_age_seconds = int(
+            self.cfg.get("swarm", {}).get("trade_guard_max_age_seconds", 45)
+        )
+        self._enforce_global_trade_guard = bool(
+            self.cfg.get("swarm", {}).get("enforce_global_trade_guard", True)
+        )
         self._risk_state_file = self.project_root / "data" / f"{bot_name}_risk_state.json"
         self._status_state: str = "starting"
         self._status_error: str = ""
@@ -157,6 +165,7 @@ class BotRunner:
             state_file=str(self.project_root / "data" / f"{bot_name}_behavior_state.json"),
         )
         self.risk = RiskManager(risk_cfg)
+        self.balance_guard = BalanceManager(self.cfg.get("swarm", {}))
         self._load_risk_state()
         self.dashboard = Dashboard(self.learning)
 
@@ -189,6 +198,22 @@ class BotRunner:
         self._series_filters = set(
             s.upper() for s in self.cfg.get("series_filters", [])
         )
+        self._routing_cfg = self._load_routing_config()
+        self._unknown_category_policy = str(
+            self._routing_cfg.get("unknown_category_policy", "probabilistic")
+        ).strip().lower()
+        self._series_prefix_category_map = {
+            str(k).upper(): str(v).lower()
+            for k, v in (self._routing_cfg.get("series_prefix_to_category", {}) or {}).items()
+        }
+        self._title_keyword_category_map = {
+            str(k).lower(): str(v).lower()
+            for k, v in (self._routing_cfg.get("title_keywords", {}) or {}).items()
+        }
+        self._event_pattern_category_map = {
+            str(k).lower(): str(v).lower()
+            for k, v in (self._routing_cfg.get("event_patterns", {}) or {}).items()
+        }
 
         # Track pending trades by stable DB id to avoid losing earlier entries
         # when multiple trades share the same ticker.
@@ -208,6 +233,7 @@ class BotRunner:
                     "ticker": ticker,
                     "order_id": str(row.get("order_id", "") or ""),
                     "count": int(row.get("count", 1) or 1),
+                    "entry_price": int(row.get("entry_price", 0) or 0),
                 }
         if self._pending_trades:
             logger.info("Restored %d pending trade(s) from DB.", len(self._pending_trades))
@@ -253,6 +279,7 @@ class BotRunner:
         if bool(auto_cfg.get("require_llm_for_trade", True)):
             central_cfg["allow_quant_fallback_on_error"] = False
             central_cfg["fail_open"] = False
+            central_cfg["strict_rejects"] = True
         if bool(auto_cfg.get("llm_learning_enabled", True)):
             central_cfg["learning_enabled"] = True
         self.cfg["central_llm"] = central_cfg
@@ -280,6 +307,98 @@ class BotRunner:
             else:
                 result[key] = value
         return result
+
+    def _load_routing_config(self) -> Dict[str, Any]:
+        """
+        Load optional routing fallback config for missing category metadata.
+        """
+        defaults: Dict[str, Any] = {
+            "unknown_category_policy": "probabilistic",
+            "series_prefix_to_category": {
+                "KXFED": "economics",
+                "KXCPI": "economics",
+                "KXBTCD": "economics",
+                "KXETH": "economics",
+                "KXTEMP": "weather",
+                "KXRAIN": "weather",
+                "KXSNOW": "weather",
+                "KXHURR": "weather",
+                "KXELECT": "politics",
+                "KXPRES": "politics",
+                "KXCONG": "politics",
+            },
+            "title_keywords": {
+                "election": "politics",
+                "president": "politics",
+                "senate": "politics",
+                "house": "politics",
+                "inflation": "economics",
+                "gdp": "economics",
+                "unemployment": "economics",
+                "fed": "economics",
+                "bitcoin": "economics",
+                "weather": "weather",
+                "rain": "weather",
+                "snow": "weather",
+                "hurricane": "weather",
+                "storm": "weather",
+                "temperature": "weather",
+                "climate": "weather",
+                "science": "weather",
+            },
+            "event_patterns": {
+                "elect": "politics",
+                "pres": "politics",
+                "cong": "politics",
+                "cpi": "economics",
+                "fed": "economics",
+                "gdp": "economics",
+                "unemp": "economics",
+                "btc": "economics",
+                "temp": "weather",
+                "rain": "weather",
+                "snow": "weather",
+                "hurr": "weather",
+                "climate": "weather",
+            },
+        }
+        routing_path = self.project_root / "config" / "routing_config.yaml"
+        try:
+            if routing_path.exists():
+                with open(routing_path, "r", encoding="utf-8") as fh:
+                    loaded = yaml.safe_load(fh) or {}
+                if isinstance(loaded, dict):
+                    return self._deep_merge(defaults, loaded)
+        except Exception as exc:
+            logger.warning("Failed loading routing config %s: %s", routing_path, exc)
+        return defaults
+
+    def _infer_market_category(self, market: Dict[str, Any]) -> tuple[str, str, float]:
+        """
+        Infer a category when API payloads omit explicit category metadata.
+        Returns (category, source, confidence).
+        """
+        category = str(market.get("category", "") or "").strip().lower()
+        if category:
+            return category, "category", 1.0
+
+        ticker = str(market.get("ticker", "") or "").strip().upper()
+        event_ticker = str(market.get("event_ticker", "") or "").strip().lower()
+        title = str(market.get("title", "") or "").strip().lower()
+
+        for prefix, mapped_category in self._series_prefix_category_map.items():
+            if ticker.startswith(prefix):
+                return mapped_category, "series_prefix", 0.8
+
+        for kw, mapped_category in self._title_keyword_category_map.items():
+            if kw and kw in title:
+                return mapped_category, "title_keyword", 0.7
+
+        for pattern, mapped_category in self._event_pattern_category_map.items():
+            if pattern and pattern in event_ticker:
+                return mapped_category, "event_pattern", 0.6
+
+        return "", "unknown", 0.0
 
     def _setup_logging(self) -> None:
         log_cfg = self.cfg.get("logging", {})
@@ -375,16 +494,17 @@ class BotRunner:
 
     def _matches_specialist(self, market: Dict[str, Any]) -> bool:
         """Check if a market matches this bot's specialist filters."""
+        inferred_category, source, confidence = self._infer_market_category(market)
+
         # If no filters, accept everything (Vanguard behavior)
         if not self._category_filters and not self._series_filters:
             # But check exclusions
-            category = (market.get("category") or "").lower()
-            if category in self._excluded_categories:
+            if inferred_category in self._excluded_categories:
                 return False
             return True
 
         ticker = market.get("ticker", "")
-        category = (market.get("category") or "").lower()
+        category = inferred_category
         title = (market.get("title") or "").lower()
         series_ticker = ticker.split("-")[0].upper() if "-" in ticker else ticker.upper()
 
@@ -407,6 +527,17 @@ class BotRunner:
                 if kw in title:
                     return True
 
+        if not category and self._unknown_category_policy == "strict":
+            logger.debug(
+                "Dropped unknown-category market for %s under strict policy: %s",
+                self.bot_name, ticker,
+            )
+            return False
+
+        logger.debug(
+            "No specialist match for %s (bot=%s category_source=%s confidence=%.2f inferred_category=%s).",
+            ticker, self.bot_name, source, confidence, category or "unknown",
+        )
         return False
 
     def _should_run_weekly_backtest(self) -> bool:
@@ -526,6 +657,7 @@ class BotRunner:
                 "ticker": opp.ticker,
                 "category": opp.category,
                 "title": opp.title,
+                "event_ticker": opp.event_ticker,
             })
         ]
 
@@ -596,12 +728,89 @@ class BotRunner:
 
         self._reconcile_outcomes()
 
+    def _apply_final_position_cap(
+        self,
+        ticker: str,
+        price_cents: int,
+        requested_count: int,
+        base_count: int,
+        trend_mult: float,
+        human_mult: float,
+        llm_mult: float,
+    ) -> int:
+        """
+        Enforce a hard notional cap *after* all multipliers.
+        """
+        if price_cents <= 0:
+            return 0
+        if requested_count <= 0:
+            return 0
+
+        trading_cfg = self.cfg.get("trading", {}) or {}
+        max_pct = float(trading_cfg.get("max_position_pct", 0.05) or 0.0)
+        state = self.risk.export_state()
+        balance_cents = int(state.get("current_balance_cents", 0) or 0)
+        hard_cap_cents = int(max(0, balance_cents) * max(0.0, max_pct))
+        requested_notional = int(requested_count * price_cents)
+
+        if hard_cap_cents <= 0:
+            logger.warning(
+                "Hard cap rejected %s: balance=%d cap_pct=%.4f cap_cents=%d",
+                ticker, balance_cents, max_pct, hard_cap_cents,
+            )
+            return 0
+
+        capped_count = min(requested_count, int(hard_cap_cents // price_cents))
+        final_notional = int(capped_count * price_cents)
+        logger.info(
+            "Trade sizing %s | base_size_cents=%d trend_mult=%.3f human_mult=%.3f "
+            "llm_mult=%.3f requested_size_cents=%d hard_cap_cents=%d final_capped_size_cents=%d",
+            ticker,
+            int(base_count * price_cents),
+            float(trend_mult),
+            float(human_mult),
+            float(llm_mult),
+            requested_notional,
+            hard_cap_cents,
+            final_notional,
+        )
+        return max(0, capped_count)
+
+    def _authorize_global_trade(
+        self,
+        ticker: str,
+        notional_cents: int,
+    ) -> tuple[bool, str]:
+        """
+        Fail-safe pre-trade gate using coordinator-published trade guard snapshot.
+        """
+        if not self._enforce_global_trade_guard:
+            return True, "global_trade_guard_disabled"
+
+        try:
+            snapshot, reason = BalanceManager.load_trade_guard_snapshot(
+                str(self._trade_guard_snapshot_file),
+                max_age_seconds=self._trade_guard_max_age_seconds,
+            )
+            if snapshot is None:
+                return False, reason
+            return self.balance_guard.can_execute_trade(
+                bot_name=self.bot_name,
+                ticker=ticker,
+                notional_cents=notional_cents,
+                guard_snapshot=snapshot,
+            )
+        except Exception as exc:
+            return False, f"trade_guard_exception:{exc}"
+
     def _execute_trade(self, signal) -> None:
         """Execute a trade -- mirrors agent.py logic."""
         base_count = self.risk.position_size(signal.confidence, signal.suggested_price)
-        trend_mult = self.learning.trend.momentum_multiplier
-        base_count = max(1, int(base_count * trend_mult))
-        count = self.behavior.vary_trade_size(base_count)
+        trend_mult = float(self.learning.trend.momentum_multiplier)
+        trend_count = max(1, int(base_count * trend_mult))
+        pre_human_count = trend_count
+        count = self.behavior.vary_trade_size(pre_human_count)
+        human_mult = float(count / max(1, pre_human_count))
         approval = self.central_llm.review_trade(
             bot_name=self.bot_name,
             trade_request={
@@ -614,6 +823,8 @@ class BotRunner:
                 "suggested_price": signal.suggested_price,
                 "proposed_count": count,
                 "event_ticker": signal.event_ticker,
+                "volume_24h": getattr(signal, "volume_24h", 0),
+                "spread_cents": getattr(signal, "spread", 0),
             },
         )
 
@@ -626,8 +837,48 @@ class BotRunner:
             self.behavior.record_action(traded=False)
             return
 
-        count = max(1, int(count * approval.size_multiplier))
-        signal.rationale = f"{signal.rationale} | CENTRAL_LLM: {approval.rationale}"
+        llm_mult = float(approval.size_multiplier)
+        requested_count = max(1, int(count * llm_mult))
+        count = self._apply_final_position_cap(
+            ticker=signal.ticker,
+            price_cents=int(signal.suggested_price),
+            requested_count=requested_count,
+            base_count=base_count,
+            trend_mult=trend_mult,
+            human_mult=human_mult,
+            llm_mult=llm_mult,
+        )
+        if count <= 0:
+            logger.warning(
+                "Trade rejected by hard cap: %s %s on %s",
+                signal.action, signal.side, signal.ticker,
+            )
+            self.behavior.record_action(traded=False)
+            return
+
+        notional_cents = int(count * int(signal.suggested_price))
+        auth_ok, auth_reason = self._authorize_global_trade(signal.ticker, notional_cents)
+        if not auth_ok:
+            logger.warning(
+                "Trade rejected by global guard: %s %s on %s | reason=%s",
+                signal.action, signal.side, signal.ticker, auth_reason,
+            )
+            self.behavior.record_action(traded=False)
+            return
+
+        route_category, route_source, route_conf = self._infer_market_category(
+            {
+                "ticker": signal.ticker,
+                "category": signal.category,
+                "title": signal.title,
+                "event_ticker": signal.event_ticker,
+            }
+        )
+        signal.rationale = (
+            f"{signal.rationale} | ROUTE:source={route_source} "
+            f"assigned={route_category or 'unknown'} conf={route_conf:.2f} "
+            f"| CENTRAL_LLM: {approval.rationale}"
+        )
 
         logger.info(
             "Executing: %s %s on %s | conf=%.1f | price=%d | count=%d",
@@ -687,6 +938,7 @@ class BotRunner:
                 "ticker": signal.ticker,
                 "order_id": str(order_id or ""),
                 "count": int(count),
+                "entry_price": int(signal.suggested_price),
             }
             self._trade_count += 1
             self.behavior.record_action(traded=True)
@@ -770,9 +1022,45 @@ class BotRunner:
                         total_pnl = int(pos.get("realized_pnl", 0) or 0)
                     allocations = self._allocate_pnl_across_rows(total_pnl, rows)
                     for db_id, meta, row_pnl in allocations:
-                        outcome = self._outcome_from_pnl(row_pnl)
-                        self.learning.update_outcome(db_id, outcome, pnl_cents=row_pnl)
-                        self.risk.record_outcome(row_pnl)
+                        pnl_ok, pnl_reason, pnl_trace = self._validate_resolved_trade_pnl(
+                            row_meta=meta,
+                            pnl_cents=row_pnl,
+                        )
+                        if pnl_ok:
+                            outcome = self._outcome_from_pnl(row_pnl)
+                            self.learning.update_outcome(
+                                db_id,
+                                outcome,
+                                pnl_cents=row_pnl,
+                                pnl_valid=True,
+                                pnl_validation_reason="ok",
+                                reconciliation_trace={
+                                    **pnl_trace,
+                                    "ticker": ticker,
+                                    "source": "settlement_reconcile",
+                                    "total_ticker_pnl_cents": int(total_pnl),
+                                },
+                            )
+                            self.risk.record_outcome(row_pnl)
+                        else:
+                            outcome = "pnl_invalid"
+                            self.learning.update_outcome(
+                                db_id,
+                                outcome,
+                                pnl_cents=row_pnl,
+                                pnl_valid=False,
+                                pnl_validation_reason=pnl_reason,
+                                reconciliation_trace={
+                                    **pnl_trace,
+                                    "ticker": ticker,
+                                    "source": "settlement_reconcile",
+                                    "total_ticker_pnl_cents": int(total_pnl),
+                                },
+                            )
+                            logger.error(
+                                "P&L invariant failed for %s trade_id=%d: %s trace=%s",
+                                ticker, db_id, pnl_reason, pnl_trace,
+                            )
                         self._on_trade_resolved(
                             outcome,
                             row_pnl,
@@ -866,6 +1154,41 @@ class BotRunner:
         return allocated
 
     @staticmethod
+    def _validate_resolved_trade_pnl(
+        row_meta: Dict[str, Any],
+        pnl_cents: int,
+        tolerance_pct: float = 0.05,
+    ) -> tuple[bool, str, Dict[str, Any]]:
+        """
+        Validate realized P&L against theoretical bounds for one trade row.
+        """
+        count = max(1, int(row_meta.get("count", 1) or 1))
+        entry_price = int(row_meta.get("entry_price", 0) or 0)
+        max_loss = max(0, count * max(0, entry_price))
+        max_gain = max(0, count * max(0, 100 - entry_price))
+        tol = int(max(max_loss, max_gain) * max(0.0, float(tolerance_pct)))
+        tol = max(tol, 5)  # Avoid zero-tolerance false positives on tiny positions.
+        min_allowed = -max_loss - tol
+        max_allowed = max_gain + tol
+
+        trace = {
+            "count": count,
+            "entry_price_cents": entry_price,
+            "pnl_cents": int(pnl_cents),
+            "max_theoretical_loss_cents": -max_loss,
+            "max_theoretical_gain_cents": max_gain,
+            "tolerance_cents": tol,
+            "min_allowed_cents": min_allowed,
+            "max_allowed_cents": max_allowed,
+        }
+
+        if pnl_cents < min_allowed:
+            return False, f"loss exceeds theoretical bound ({pnl_cents} < {min_allowed})", trace
+        if pnl_cents > max_allowed:
+            return False, f"gain exceeds theoretical bound ({pnl_cents} > {max_allowed})", trace
+        return True, "ok", trace
+
+    @staticmethod
     def _outcome_from_pnl(pnl_cents: int) -> str:
         if pnl_cents > 0:
             return "win"
@@ -892,7 +1215,9 @@ class BotRunner:
         except Exception:
             no_cost = 0
         try:
-            fee_cents = int(round(float(settlement.get("fee_cost", 0) or 0) * 100))
+            # Kalshi settlement monetary fields are typically cents in this API.
+            # Keep fee in the same unit family as revenue/cost values.
+            fee_cents = int(round(float(settlement.get("fee_cost", 0) or 0)))
         except Exception:
             fee_cents = 0
         return int(revenue - yes_cost - no_cost - fee_cents)
@@ -943,7 +1268,18 @@ class BotRunner:
 
             if found:
                 outcome = self._outcome_from_pnl(fill_pnl)
-                self.learning.update_outcome(db_id, outcome, pnl_cents=fill_pnl)
+                self.learning.update_outcome(
+                    db_id,
+                    outcome,
+                    pnl_cents=fill_pnl,
+                    pnl_valid=True,
+                    pnl_validation_reason="ok",
+                    reconciliation_trace={
+                        "source": "force_resolve_fills",
+                        "ticker": ticker,
+                        "order_id": order_id,
+                    },
+                )
                 self.risk.record_outcome(fill_pnl)
                 self._on_trade_resolved(
                     outcome,
@@ -955,7 +1291,18 @@ class BotRunner:
                 logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
             else:
                 # No fills found — mark as expired/neutral
-                self.learning.update_outcome(db_id, "expired", pnl_cents=0)
+                self.learning.update_outcome(
+                    db_id,
+                    "expired",
+                    pnl_cents=0,
+                    pnl_valid=True,
+                    pnl_validation_reason="no_fills_expired",
+                    reconciliation_trace={
+                        "source": "force_resolve_fills",
+                        "ticker": ticker,
+                        "order_id": order_id,
+                    },
+                )
                 self._on_trade_resolved(
                     "expired",
                     0,

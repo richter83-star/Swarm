@@ -55,6 +55,16 @@ class CentralLLMController:
         "min_approved_confidence": 55.0,
         # If LLM wants to reject but has weak conviction, prefer quant signal.
         "min_reject_confidence": 60.0,
+        # In strict mode, a reject remains reject (no weak-reject auto-override).
+        "strict_rejects": True,
+        # Archetype-aware approval confidence floors.
+        "approval_confidence_floor": 70.0,
+        "low_volume_threshold": 1000.0,
+        "low_volume_confidence_floor": 85.0,
+        "wide_spread_threshold_cents": 5.0,
+        "wide_spread_confidence_floor": 80.0,
+        "longshot_price_threshold_cents": 10.0,
+        "longshot_confidence_floor": 80.0,
         # When Ollama times out/unavailable, allow strong quant signals through.
         "allow_quant_fallback_on_error": True,
         "max_red_flags": 2,
@@ -318,10 +328,17 @@ class CentralLLMController:
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
         min_conf = float(self.cfg.get("min_approved_confidence", 55.0))
         min_reject_conf = float(self.cfg.get("min_reject_confidence", 60.0))
+        strict_rejects = bool(self.cfg.get("strict_rejects", True))
+        approval_floor = self._approval_confidence_floor(trade_request)
         max_flags = int(self.cfg.get("max_red_flags", 2))
 
-        # Fail-soft: ignore weak LLM rejects when quant confidence is strong.
-        if decision == "reject" and llm_confidence < min_reject_conf and quant_conf >= min_conf:
+        # Optional fail-soft mode: ignore weak LLM rejects when quant confidence is strong.
+        if (
+            not strict_rejects
+            and decision == "reject"
+            and llm_confidence < min_reject_conf
+            and quant_conf >= min_conf
+        ):
             decision = "approve"
             confidence = max(min_conf, quant_conf)
             size_multiplier = max(
@@ -333,6 +350,13 @@ class CentralLLMController:
                 f"(llm_conf={llm_confidence:.1f} < min_reject_conf={min_reject_conf:.1f})."
             )
             red_flags = red_flags[:1]
+
+        if decision == "approve" and confidence < approval_floor:
+            decision = "reject"
+            rationale = (
+                f"{rationale} | Auto-rejected by approval floor "
+                f"(confidence={confidence:.1f} < floor={approval_floor:.1f})."
+            )
 
         if decision == "approve" and (confidence < min_conf or len(red_flags) > max_flags):
             decision = "reject"
@@ -356,6 +380,32 @@ class CentralLLMController:
             rationale=rationale,
             red_flags=red_flags,
         )
+
+    def _approval_confidence_floor(self, trade_request: Dict[str, Any]) -> float:
+        """
+        Compute a stricter floor for low-quality market archetypes.
+        """
+        floor = float(self.cfg.get("approval_confidence_floor", 70.0))
+        try:
+            volume = float(trade_request.get("volume_24h", 0) or 0)
+        except Exception:
+            volume = 0.0
+        try:
+            spread = float(trade_request.get("spread_cents", 0) or 0)
+        except Exception:
+            spread = 0.0
+        try:
+            price = float(trade_request.get("suggested_price", 0) or 0)
+        except Exception:
+            price = 0.0
+
+        if volume > 0 and volume < float(self.cfg.get("low_volume_threshold", 1000.0)):
+            floor = max(floor, float(self.cfg.get("low_volume_confidence_floor", 85.0)))
+        if spread > float(self.cfg.get("wide_spread_threshold_cents", 5.0)):
+            floor = max(floor, float(self.cfg.get("wide_spread_confidence_floor", 80.0)))
+        if 0 < price <= float(self.cfg.get("longshot_price_threshold_cents", 10.0)):
+            floor = max(floor, float(self.cfg.get("longshot_confidence_floor", 80.0)))
+        return max(0.0, min(100.0, floor))
 
     def _init_db(self) -> None:
         conn = sqlite3.connect(str(self._db_path))

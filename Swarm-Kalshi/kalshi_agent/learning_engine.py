@@ -22,6 +22,7 @@ All data persists in SQLite for durability across restarts.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import sqlite3
@@ -60,7 +61,10 @@ CREATE TABLE IF NOT EXISTS trades (
     outcome         TEXT,
     exit_price      INTEGER,
     pnl_cents       INTEGER,
-    settled_at      TEXT
+    settled_at      TEXT,
+    pnl_valid       INTEGER DEFAULT 1,
+    pnl_validation_reason TEXT,
+    reconciliation_trace TEXT
 );
 
 CREATE TABLE IF NOT EXISTS weight_history (
@@ -169,6 +173,9 @@ class LearningEngine:
             "slippage_cents": "INTEGER",
             "fill_status":    "TEXT DEFAULT 'unknown'",
             "order_id":       "TEXT",
+            "pnl_valid":      "INTEGER DEFAULT 1",
+            "pnl_validation_reason": "TEXT",
+            "reconciliation_trace": "TEXT",
         }
         for col, col_def in additions.items():
             if col not in existing:
@@ -270,26 +277,49 @@ class LearningEngine:
         outcome: str,
         exit_price: Optional[int] = None,
         pnl_cents: Optional[int] = None,
+        pnl_valid: Optional[bool] = None,
+        pnl_validation_reason: str = "",
+        reconciliation_trace: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update a trade record with its final outcome."""
         now = datetime.now(timezone.utc).isoformat()
+        valid_flag = 1 if pnl_valid is None else (1 if pnl_valid else 0)
+        trace_text = ""
+        if reconciliation_trace:
+            try:
+                trace_text = json.dumps(reconciliation_trace, ensure_ascii=True, sort_keys=True)
+            except Exception:
+                trace_text = str(reconciliation_trace)
         self._conn.execute(
             """
             UPDATE trades
-            SET outcome = ?, exit_price = ?, pnl_cents = ?, settled_at = ?
+            SET outcome = ?, exit_price = ?, pnl_cents = ?, settled_at = ?,
+                pnl_valid = ?, pnl_validation_reason = ?, reconciliation_trace = ?
             WHERE id = ?
             """,
-            (outcome, exit_price, pnl_cents, now, trade_id),
+            (
+                outcome,
+                exit_price,
+                pnl_cents,
+                now,
+                valid_flag,
+                str(pnl_validation_reason or ""),
+                trace_text,
+                trade_id,
+            ),
         )
         self._conn.commit()
 
         row = self._conn.execute(
             "SELECT category FROM trades WHERE id = ?", (trade_id,)
         ).fetchone()
-        if row and row["category"]:
+        if row and row["category"] and outcome in {"win", "loss"} and valid_flag == 1:
             self._update_category_stats(row["category"], outcome, pnl_cents or 0)
 
-        logger.info("Trade %d outcome: %s (P&L: %s¢)", trade_id, outcome, pnl_cents)
+        logger.info(
+            "Trade %d outcome: %s (P&L: %s¢ valid=%s reason=%s)",
+            trade_id, outcome, pnl_cents, bool(valid_flag), pnl_validation_reason or "ok",
+        )
 
     def update_outcome_by_ticker(
         self,
@@ -336,6 +366,7 @@ class LearningEngine:
             SELECT confidence, pnl_cents, outcome, entry_price, count
             FROM trades
             WHERE outcome IN ('win', 'loss')
+              AND COALESCE(pnl_valid, 1) = 1
             ORDER BY id DESC
         """
         if last_n:
@@ -388,6 +419,7 @@ class LearningEngine:
                 SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS wins
             FROM trades
             WHERE outcome IN ('win', 'loss')
+              AND COALESCE(pnl_valid, 1) = 1
             GROUP BY bucket
             ORDER BY bucket
             """
@@ -424,6 +456,7 @@ class LearningEngine:
                    timing_score, momentum_score
             FROM trades
             WHERE outcome IN ('win', 'loss')
+              AND COALESCE(pnl_valid, 1) = 1
             ORDER BY id DESC
             LIMIT ?
             """,
@@ -484,7 +517,11 @@ class LearningEngine:
 
         # Momentum multiplier: blend win rate trend and P&L trend
         trend_signal = snap.win_rate_trend * 2 + snap.pnl_trend / 200.0
-        snap.momentum_multiplier = max(0.7, min(1.3, 1.0 + trend_signal))
+        trend_min = float(self.cfg.get("trend_multiplier_min", 0.7))
+        trend_max = float(self.cfg.get("trend_multiplier_max", 1.3))
+        if trend_min > trend_max:
+            trend_min, trend_max = trend_max, trend_min
+        snap.momentum_multiplier = max(trend_min, min(trend_max, 1.0 + trend_signal))
 
         logger.info(
             "Trend: WR_delta=%.1f%% PnL_delta=%.1f¢ bias=%.1f hot=%s cold=%s mult=%.2f FI=%s",
@@ -587,6 +624,7 @@ class LearningEngine:
                    timing_score, momentum_score, confidence, pnl_cents
             FROM trades
             WHERE outcome IN ('win', 'loss')
+              AND COALESCE(pnl_valid, 1) = 1
             ORDER BY id DESC
             LIMIT ?
             """,

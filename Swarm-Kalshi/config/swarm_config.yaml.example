@@ -15,6 +15,8 @@ swarm:
   unassigned_market_bot: vanguard         # Which bot handles uncategorised markets
   global_daily_loss_limit_cents: 15000    # $150 — halts ALL bots if hit
   global_exposure_limit_cents: 50000      # $500 — max total capital at risk
+  enforce_global_trade_guard: true        # fail-safe pre-trade guard from coordinator snapshot
+  trade_guard_max_age_seconds: 45         # reject trades if guard snapshot is stale
   health_check_interval: 30              # seconds between coordinator health checks
   max_restart_attempts: 3
   restart_cooldown_seconds: 60
@@ -53,7 +55,7 @@ trading:
   min_volume_24h: 50
   min_hours_to_expiry: 2
   max_hours_to_expiry: 720               # 30 days
-  max_position_pct: 0.05                 # max % of balance per position
+  max_position_pct: 0.01                 # max % of balance per position (conservative)
   max_open_positions: 10
   open_positions_scope: per_bot          # per_bot (recommended) or account
   max_trades_per_day: 20
@@ -63,7 +65,7 @@ trading:
   loss_streak_threshold: 3
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
-  max_signals_per_cycle: 3              # v4: execute up to N signals per scan
+  max_signals_per_cycle: 1              # v4: execute up to N signals per scan
   market_scan_max_pages: 50             # scanner page cap (50*1000=50k markets scanned)
   scan_mode: recent_focus               # recent_focus | full_universe
   recent_trade_seed_pages: 3            # pages from /markets/trades seed feed
@@ -100,6 +102,8 @@ learning:
   learning_rate: 0.05
   decay_factor: 0.95
   min_confidence_threshold: 65
+  trend_multiplier_min: 1.0             # tighten position amplification while hardening
+  trend_multiplier_max: 1.05
 
 # --- Human-like behavior ---
 human_behavior:
@@ -112,8 +116,8 @@ human_behavior:
   idle_period_min: 30                  # minutes between sessions
   idle_period_max: 180
   browse_without_trade_prob: 0.30
-  trade_size_min_multiplier: 0.6
-  trade_size_max_multiplier: 1.4
+  trade_size_min_multiplier: 0.95
+  trade_size_max_multiplier: 1.05
   # v4: state_file is set automatically per-bot (data/{bot_name}_behavior_state.json)
 
 # --- External signals ---
@@ -155,6 +159,15 @@ central_llm:
   model: qwen2.5:14b
   timeout_seconds: 20
   min_approved_confidence: 55
+  strict_rejects: true                 # reject remains reject in strict mode
+  approval_confidence_floor: 75
+  low_volume_threshold: 1000
+  low_volume_confidence_floor: 85
+  wide_spread_threshold_cents: 5
+  wide_spread_confidence_floor: 80
+  longshot_price_threshold_cents: 10
+  longshot_confidence_floor: 80
+  min_reject_confidence: 0             # no weak-reject auto-convert when strict_rejects=true
   max_red_flags: 2
   default_size_multiplier: 1.0
   fail_open: false
