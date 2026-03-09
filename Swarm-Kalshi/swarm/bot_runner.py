@@ -517,9 +517,10 @@ class BotRunner:
             return True
 
         # Partial category match
-        for cat_filter in self._category_filters:
-            if cat_filter in category or category in cat_filter:
-                return True
+        if category:
+            for cat_filter in self._category_filters:
+                if cat_filter in category or category in cat_filter:
+                    return True
 
         # Keyword match
         if self._category_keywords:

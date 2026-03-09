@@ -114,10 +114,11 @@ class MarketRouter:
             return bot
 
         # 3. Partial category match
-        for cat_key, bot_name in self._category_map.items():
-            if cat_key in category or category in cat_key:
-                logger.debug("Routed %s to %s (partial category: %s)", ticker, bot_name, category)
-                return bot_name
+        if category:
+            for cat_key, bot_name in self._category_map.items():
+                if cat_key in category or category in cat_key:
+                    logger.debug("Routed %s to %s (partial category: %s)", ticker, bot_name, category)
+                    return bot_name
 
         # 4. Title keyword match
         best_bot = None
