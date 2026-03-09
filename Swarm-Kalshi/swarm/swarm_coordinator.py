@@ -660,6 +660,84 @@ class SwarmCoordinator:
             allocs = {k: v / final_total for k, v in allocs.items()}
         return allocs
 
+    @staticmethod
+    def _rebalance_with_direction_guards(
+        proposed: Dict[str, float],
+        current: Dict[str, float],
+        decisions: Dict[str, Dict[str, Any]],
+        min_alloc: float,
+        max_alloc: float,
+    ) -> Dict[str, float]:
+        """
+        Rebalance allocations while preserving promote/demote direction intent.
+
+        Guardrails:
+        - A demoted bot cannot end up above its current allocation.
+        - A promoted bot cannot end up below its current allocation.
+        - If a valid 100% rebalance cannot satisfy direction constraints, keep current.
+        """
+        allocs = {
+            bot: max(min_alloc, min(max_alloc, float(proposed.get(bot, current.get(bot, 0.0)))))
+            for bot in current
+        }
+
+        # First pass: enforce directional bounds against current allocations.
+        for bot, old in current.items():
+            action = str((decisions.get(bot) or {}).get("action", "hold"))
+            if action == "demote" and allocs[bot] > old:
+                allocs[bot] = old
+            elif action == "promote" and allocs[bot] < old:
+                allocs[bot] = old
+
+        # Rebalance to 100% using only direction-compatible bots.
+        for _ in range(10):
+            total = sum(allocs.values())
+            diff = 1.0 - total
+            if abs(diff) < 1e-6:
+                break
+
+            if diff > 0:
+                eligible = [
+                    bot
+                    for bot, val in allocs.items()
+                    if val < max_alloc - 1e-9
+                    and str((decisions.get(bot) or {}).get("action", "hold")) != "demote"
+                ]
+                if not eligible:
+                    return dict(current)
+                capacity = sum(max_alloc - allocs[bot] for bot in eligible)
+                if capacity <= 0:
+                    return dict(current)
+                for bot in eligible:
+                    bump = diff * ((max_alloc - allocs[bot]) / capacity)
+                    allocs[bot] = min(max_alloc, allocs[bot] + bump)
+            else:
+                excess = -diff
+                eligible = [
+                    bot
+                    for bot, val in allocs.items()
+                    if val > min_alloc + 1e-9
+                    and str((decisions.get(bot) or {}).get("action", "hold")) != "promote"
+                ]
+                if not eligible:
+                    return dict(current)
+                capacity = sum(allocs[bot] - min_alloc for bot in eligible)
+                if capacity <= 0:
+                    return dict(current)
+                for bot in eligible:
+                    cut = excess * ((allocs[bot] - min_alloc) / capacity)
+                    allocs[bot] = max(min_alloc, allocs[bot] - cut)
+
+        # Final directional clamp (defensive against floating-point drift).
+        for bot, old in current.items():
+            action = str((decisions.get(bot) or {}).get("action", "hold"))
+            if action == "demote" and allocs[bot] > old + 1e-9:
+                return dict(current)
+            if action == "promote" and allocs[bot] < old - 1e-9:
+                return dict(current)
+
+        return allocs
+
     def _evaluate_auto_scale_decision(
         self,
         bot_name: str,
@@ -754,10 +832,17 @@ class SwarmCoordinator:
                 targets[bot_name] = targets.get(bot_name, 0.0) - demote_step
 
         bounded = self._rebalance_allocations_with_bounds(targets, min_alloc, max_alloc)
+        final_allocs = self._rebalance_with_direction_guards(
+            proposed=bounded,
+            current=current,
+            decisions=decisions,
+            min_alloc=min_alloc,
+            max_alloc=max_alloc,
+        )
         changes: List[Dict[str, Any]] = []
         for bot_name in self.bots:
             old = current.get(bot_name, 0.0)
-            new = bounded.get(bot_name, old)
+            new = final_allocs.get(bot_name, old)
             delta = new - old
             if abs(delta) < min_change:
                 continue
@@ -776,8 +861,6 @@ class SwarmCoordinator:
                 "auto_scale",
                 f"{info['old_pct']}% -> {info['new_pct']}% ({info['reason']})",
             )
-
-        self.balance_manager.normalize_allocations()
 
         self._last_auto_scale_summary = {
             "enabled": True,

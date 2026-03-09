@@ -168,7 +168,26 @@ central_llm:
   adaptive_hot_win_rate_pct: 58
   adaptive_hot_avg_pnl_cents: 3
   adaptive_size_boost: 1.10
+  adaptive_prompt_enabled: true
+  adaptive_prompt_window: 120
+  adaptive_prompt_min_samples: 6
+  adaptive_prompt_cold_win_rate_pct: 45
+  adaptive_prompt_cold_avg_pnl_cents: -3
+  adaptive_prompt_hot_win_rate_pct: 58
+  adaptive_prompt_hot_avg_pnl_cents: 3
+  adaptive_prompt_cold_size_cap: 0.70
+  adaptive_prompt_hot_size_boost: 1.10
+  adaptive_prompt_reject_quant_floor: 70
   db_path: data/central_llm_controller.db
+
+# --- Autonomous Mode (single switch for full LLM-led operation) ---
+autonomous_mode:
+  enabled: true
+  anthropic_only: true
+  require_llm_for_trade: true
+  disable_local_llm_advisor: true
+  llm_learning_enabled: true
+  lock_manual_controls: true
 # --- Backtester ---
 backtester:
   max_settled_markets: 200

@@ -73,6 +73,7 @@ class BotRunner:
         self.bot_name = bot_name
         self.project_root = Path(project_root)
         self.cfg = self._load_merged_config(swarm_config_path, bot_config_path)
+        self._apply_autonomous_mode_overrides()
         self._setup_logging()
         self._running = True
         self._paused = False
@@ -233,6 +234,41 @@ class BotRunner:
             overrides = yaml.safe_load(fh) or {}
 
         return self._deep_merge(base, overrides)
+
+    def _apply_autonomous_mode_overrides(self) -> None:
+        """
+        Enforce single-switch autonomous behavior when configured.
+
+        This keeps operation hands-off by ensuring the centralized LLM gate
+        remains authoritative and optional local/manual assist paths are disabled.
+        """
+        auto_cfg = self.cfg.get("autonomous_mode", {}) or {}
+        if not bool(auto_cfg.get("enabled", False)):
+            return
+
+        central_cfg = dict(self.cfg.get("central_llm", {}) or {})
+        central_cfg["enabled"] = True
+        if bool(auto_cfg.get("anthropic_only", True)):
+            central_cfg["provider"] = "anthropic"
+        if bool(auto_cfg.get("require_llm_for_trade", True)):
+            central_cfg["allow_quant_fallback_on_error"] = False
+            central_cfg["fail_open"] = False
+        if bool(auto_cfg.get("llm_learning_enabled", True)):
+            central_cfg["learning_enabled"] = True
+        self.cfg["central_llm"] = central_cfg
+
+        if bool(auto_cfg.get("disable_local_llm_advisor", True)):
+            advisor_cfg = dict(self.cfg.get("llm_advisor", {}) or {})
+            advisor_cfg["enabled"] = False
+            self.cfg["llm_advisor"] = advisor_cfg
+
+        logger.info(
+            "Autonomous mode enabled: provider=%s require_llm_for_trade=%s "
+            "disable_local_llm_advisor=%s",
+            self.cfg.get("central_llm", {}).get("provider", "unknown"),
+            bool(auto_cfg.get("require_llm_for_trade", True)),
+            bool(auto_cfg.get("disable_local_llm_advisor", True)),
+        )
 
     @staticmethod
     def _deep_merge(base: Dict, override: Dict) -> Dict:

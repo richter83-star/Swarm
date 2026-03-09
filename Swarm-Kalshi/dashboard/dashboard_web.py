@@ -107,6 +107,12 @@ def create_app(
     # Helper functions
     # ------------------------------------------------------------------
 
+    def _sqlite_connect(db_path: Path) -> sqlite3.Connection:
+        """Open SQLite with timeout settings suitable for concurrent bot writes."""
+        conn = sqlite3.connect(str(db_path), timeout=10)
+        conn.execute("PRAGMA busy_timeout = 10000")
+        return conn
+
     def get_bot_db_path(bot_name: str) -> Path:
         """Get the SQLite database path for a bot."""
         bot_cfg_path = project_root / "config" / f"{bot_name}_config.yaml"
@@ -118,30 +124,78 @@ def create_app(
             db_path = f"data/{bot_name}.db"
         return project_root / db_path
 
+    _table_column_cache: Dict[tuple[str, str], set[str]] = {}
+    _table_column_lock = threading.Lock()
+
+    def _get_table_columns(bot_name: str, table_name: str) -> set[str]:
+        """Return cached column names for a table in a bot DB."""
+        db_path = get_bot_db_path(bot_name)
+        cache_key = (str(db_path), table_name)
+        with _table_column_lock:
+            cached = _table_column_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        columns: set[str] = set()
+        if db_path.exists():
+            try:
+                conn = _sqlite_connect(db_path)
+                rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+                conn.close()
+                columns = {str(r[1]) for r in rows}
+            except Exception as exc:
+                logger.debug("Column introspection failed for %s.%s: %s", db_path, table_name, exc)
+
+        with _table_column_lock:
+            _table_column_cache[cache_key] = columns
+        return columns
+
+    def _trade_scope(bot_name: str) -> tuple[str, tuple]:
+        """Return WHERE clause and params for bot-scoped trades queries."""
+        if "bot_name" in _get_table_columns(bot_name, "trades"):
+            return "bot_name = ?", (bot_name,)
+        return "1=1", ()
+
     def query_bot_db(bot_name: str, query: str, params: tuple = ()) -> List[Dict]:
         """Execute a query against a bot's SQLite database."""
         db_path = get_bot_db_path(bot_name)
         if not db_path.exists():
             return []
-        try:
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-            conn.close()
-            return [dict(r) for r in rows]
-        except Exception as exc:
-            logger.debug("DB query error for %s: %s", bot_name, exc)
-            return []
+        for attempt in range(2):
+            conn: Optional[sqlite3.Connection] = None
+            try:
+                conn = _sqlite_connect(db_path)
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(query, params).fetchall()
+                return [dict(r) for r in rows]
+            except sqlite3.OperationalError as exc:
+                # Retry once on transient lock contention to avoid false-zero dashboards.
+                if "locked" in str(exc).lower() and attempt == 0:
+                    time.sleep(0.2)
+                    continue
+                logger.debug("DB query operational error for %s: %s", bot_name, exc)
+                return []
+            except Exception as exc:
+                logger.debug("DB query error for %s: %s", bot_name, exc)
+                return []
+            finally:
+                if conn is not None:
+                    conn.close()
+        return []
 
     def get_bot_performance(bot_name: str) -> Dict[str, Any]:
         """Get performance metrics for a bot."""
+        where_clause, where_params = _trade_scope(bot_name)
         rows = query_bot_db(
             bot_name,
             """
             SELECT confidence, pnl_cents, outcome, entry_price, count
-            FROM trades WHERE outcome IN ('win', 'loss')
+            FROM trades WHERE """
+            + where_clause
+            + """ AND outcome IN ('win', 'loss')
             ORDER BY id DESC
             """,
+            where_params,
         )
         if not rows:
             return {
@@ -188,17 +242,44 @@ def create_app(
 
     def get_bot_trades(bot_name: str, limit: int = 100) -> List[Dict]:
         """Get trade history for a bot."""
+        where_clause, where_params = _trade_scope(bot_name)
         return query_bot_db(
             bot_name,
-            "SELECT * FROM trades ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM trades WHERE "
+            + where_clause
+            + " ORDER BY id DESC LIMIT ?",
+            (*where_params, limit),
         )
 
     def get_bot_daily_summaries(bot_name: str, limit: int = 30) -> List[Dict]:
         """Get daily summaries for a bot."""
+        # If trades are shared across bots, derive bot-scoped daily stats from trades.
+        if "bot_name" in _get_table_columns(bot_name, "trades"):
+            where_clause, where_params = _trade_scope(bot_name)
+            return query_bot_db(
+                bot_name,
+                """
+                SELECT
+                    SUBSTR(timestamp, 1, 10) AS date,
+                    COUNT(*) AS trades,
+                    SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) AS losses,
+                    SUM(COALESCE(pnl_cents, 0)) AS pnl_cents,
+                    ROUND(AVG(COALESCE(confidence, 0)), 1) AS avg_confidence
+                FROM trades
+                WHERE """
+                + where_clause
+                + """ AND outcome IN ('win', 'loss', 'breakeven')
+                GROUP BY SUBSTR(timestamp, 1, 10)
+                ORDER BY date DESC
+                LIMIT ?
+                """,
+                (*where_params, limit),
+            )
         return query_bot_db(
             bot_name,
-            "SELECT * FROM daily_summary ORDER BY date DESC LIMIT ?",
+            "SELECT date, trades, wins, losses, gross_pnl_cents AS pnl_cents, avg_confidence, notes "
+            "FROM daily_summary ORDER BY date DESC LIMIT ?",
             (limit,),
         )
 
@@ -212,6 +293,30 @@ def create_app(
 
     def get_bot_category_stats(bot_name: str) -> List[Dict]:
         """Get category performance for a bot."""
+        # If trades are shared across bots, derive category stats from trades.
+        if "bot_name" in _get_table_columns(bot_name, "trades"):
+            where_clause, where_params = _trade_scope(bot_name)
+            return query_bot_db(
+                bot_name,
+                """
+                SELECT
+                    COALESCE(NULLIF(category, ''), 'unknown') AS category,
+                    COUNT(*) AS trades,
+                    SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS wins,
+                    ROUND(
+                        CAST(SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS REAL)
+                        / NULLIF(COUNT(*), 0) * 100, 1
+                    ) AS win_rate,
+                    SUM(COALESCE(pnl_cents, 0)) AS total_pnl_cents
+                FROM trades
+                WHERE """
+                + where_clause
+                + """ AND outcome IN ('win', 'loss', 'breakeven')
+                GROUP BY COALESCE(NULLIF(category, ''), 'unknown')
+                ORDER BY trades DESC
+                """,
+                where_params,
+            )
         return query_bot_db(
             bot_name,
             """
@@ -224,6 +329,7 @@ def create_app(
 
     def get_bot_calibration(bot_name: str) -> List[Dict]:
         """Get confidence calibration for a bot."""
+        where_clause, where_params = _trade_scope(bot_name)
         return query_bot_db(
             bot_name,
             """
@@ -232,20 +338,27 @@ def create_app(
                 COUNT(*) AS n,
                 SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) AS wins
             FROM trades
-            WHERE outcome IN ('win', 'loss')
+            WHERE """
+            + where_clause
+            + """ AND outcome IN ('win', 'loss')
             GROUP BY bucket ORDER BY bucket
             """,
+            where_params,
         )
 
     def get_cumulative_pnl(bot_name: str) -> List[Dict]:
         """Get cumulative P&L series for charting."""
+        where_clause, where_params = _trade_scope(bot_name)
         rows = query_bot_db(
             bot_name,
             """
             SELECT id, timestamp, pnl_cents, outcome
-            FROM trades WHERE outcome IN ('win', 'loss')
+            FROM trades WHERE """
+            + where_clause
+            + """ AND outcome IN ('win', 'loss')
             ORDER BY id ASC
             """,
+            where_params,
         )
         result = []
         running = 0
@@ -266,7 +379,7 @@ def create_app(
         if not db_path.exists():
             return []
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = _sqlite_connect(db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -414,6 +527,16 @@ def create_app(
 
     _auth_cfg = swarm_cfg.get("dashboard", {}).get("auth", {})
 
+    def _manual_controls_locked() -> bool:
+        auto_cfg = swarm_cfg.get("autonomous_mode", {}) if isinstance(swarm_cfg, dict) else {}
+        return bool(auto_cfg.get("enabled", False) and auto_cfg.get("lock_manual_controls", False))
+
+    def _manual_controls_forbidden():
+        return jsonify({
+            "success": False,
+            "error": "Manual controls are locked by autonomous_mode.",
+        }), 403
+
     @app.before_request
     def require_auth():
         return _auth_required(_auth_cfg)
@@ -426,12 +549,26 @@ def create_app(
     def index():
         """Render the main dashboard page."""
         central_cfg = swarm_cfg.get("central_llm", {}) if isinstance(swarm_cfg, dict) else {}
+        auto_cfg = swarm_cfg.get("autonomous_mode", {}) if isinstance(swarm_cfg, dict) else {}
+        provider = str(central_cfg.get("provider", "anthropic")).strip().lower()
+        default_chat_model = (
+            str(central_cfg.get("anthropic_model") or central_cfg.get("model") or "claude-3-5-haiku-latest")
+            if provider in {"anthropic", "claude"}
+            else str(central_cfg.get("model", "qwen2.5:14b"))
+        )
+        manual_controls_locked = bool(
+            auto_cfg.get("enabled", False) and auto_cfg.get("lock_manual_controls", False)
+        )
         return render_template(
             "dashboard.html",
             bots=BOT_DISPLAY,
             bot_names=BOT_NAMES,
-            refresh_interval=swarm_cfg.get("dashboard", {}).get("auto_refresh_seconds", 15),
-            ollama_model=central_cfg.get("model", "qwen2.5:14b"),
+            refresh_interval=swarm_cfg.get("dashboard", {}).get(
+                "refresh_interval_seconds",
+                swarm_cfg.get("dashboard", {}).get("auto_refresh_seconds", 15),
+            ),
+            ollama_model=default_chat_model,
+            manual_controls_locked=manual_controls_locked,
         )
 
     # ------------------------------------------------------------------
@@ -443,7 +580,38 @@ def create_app(
         """Get overall swarm status."""
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
-            return jsonify(coordinator.get_swarm_status())
+            status = coordinator.get_swarm_status()
+            bots = status.get("bots", {}) if isinstance(status, dict) else {}
+            for bot_name in BOT_NAMES:
+                bot_status = bots.get(bot_name, {}) if isinstance(bots, dict) else {}
+                if not isinstance(bot_status, dict):
+                    bot_status = {}
+                bot_status["performance"] = get_bot_performance(bot_name)
+                bots[bot_name] = bot_status
+
+            total_trades = sum(
+                int((bots.get(name, {}).get("performance", {}) or {}).get("total_trades", 0) or 0)
+                for name in BOT_NAMES
+            )
+            total_wins = sum(
+                int((bots.get(name, {}).get("performance", {}) or {}).get("wins", 0) or 0)
+                for name in BOT_NAMES
+            )
+            total_pnl = sum(
+                int((bots.get(name, {}).get("performance", {}) or {}).get("total_pnl", 0) or 0)
+                for name in BOT_NAMES
+            )
+
+            status["bots"] = bots
+            status["global_metrics"] = {
+                "total_trades": total_trades,
+                "total_wins": total_wins,
+                "total_losses": total_trades - total_wins,
+                "overall_win_rate": round(total_wins / total_trades * 100, 1) if total_trades > 0 else 0.0,
+                "total_pnl_cents": total_pnl,
+                "total_pnl_dollars": round(total_pnl / 100, 2),
+            }
+            return jsonify(status)
 
         # Fallback: read from status files
         bots = {}
@@ -554,8 +722,9 @@ def create_app(
         return jsonify(activities)
 
     @app.route("/api/ollama/chat", methods=["POST"])
-    def api_ollama_chat():
-        """Send a prompt to the configured Ollama model and return the response."""
+    @app.route("/api/llm/chat", methods=["POST"])
+    def api_llm_chat():
+        """Send a prompt to the configured central LLM provider and return the response."""
         data = request.json or {}
         prompt = str(data.get("prompt", "")).strip()
         system_prompt = str(data.get("system", "")).strip()
@@ -567,8 +736,15 @@ def create_app(
             return jsonify({"success": False, "error": "prompt is required"}), 400
 
         central_cfg = swarm_cfg.get("central_llm", {}) if isinstance(swarm_cfg, dict) else {}
-        ollama_base_url = str(central_cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
-        model = model_override or str(central_cfg.get("model", "qwen2.5:14b"))
+        provider = str(central_cfg.get("provider", "anthropic")).strip().lower()
+        if provider in {"anthropic", "claude"}:
+            model = model_override or str(
+                central_cfg.get("anthropic_model")
+                or central_cfg.get("model")
+                or "claude-3-5-haiku-latest"
+            )
+        else:
+            model = model_override or str(central_cfg.get("model", "qwen2.5:14b"))
         timeout_seconds = int(data.get("timeout_seconds") or max(60, int(central_cfg.get("timeout_seconds", 20))))
         timeout_seconds = max(10, min(timeout_seconds, 180))
 
@@ -608,36 +784,93 @@ def create_app(
 
         messages.append({"role": "user", "content": prompt[:12000]})
 
-        payload = json.dumps({
-            "model": model,
-            "stream": False,
-            "messages": messages,
-            "options": {"temperature": 0.0},
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            f"{ollama_base_url}/api/chat",
-            data=payload,
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-
         start = time.monotonic()
-        try:
-            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            logger.warning("Ollama HTTP error %s: %s", exc.code, detail)
-            return jsonify({"success": False, "error": f"Ollama HTTP {exc.code}", "detail": detail}), 502
-        except urllib.error.URLError as exc:
-            return jsonify({"success": False, "error": f"Ollama unavailable: {exc}"}), 502
-        except json.JSONDecodeError:
-            return jsonify({"success": False, "error": "Invalid JSON from Ollama"}), 502
+        if provider in {"anthropic", "claude"}:
+            anthropic_api_url = str(
+                central_cfg.get("anthropic_api_url", "https://api.anthropic.com/v1/messages")
+            ).strip()
+            anthropic_key = str(central_cfg.get("anthropic_api_key", "")).strip() or str(
+                os.environ.get("ANTHROPIC_API_KEY", "")
+            ).strip()
+            if not anthropic_key:
+                return jsonify({
+                    "success": False,
+                    "error": "Anthropic API key missing (set central_llm.anthropic_api_key or ANTHROPIC_API_KEY).",
+                }), 500
 
-        content = str((body.get("message") or {}).get("content") or "").strip()
-        if not content:
-            return jsonify({"success": False, "error": "Empty response from Ollama"}), 502
+            system_parts = [m.get("content", "") for m in messages if m.get("role") == "system"]
+            anthropic_messages = [
+                {"role": m.get("role"), "content": m.get("content", "")}
+                for m in messages
+                if m.get("role") in ("user", "assistant")
+            ]
+            payload = json.dumps({
+                "model": model,
+                "max_tokens": int(data.get("max_tokens") or central_cfg.get("max_tokens", 350)),
+                "temperature": float(data.get("temperature", 0.0)),
+                "system": "\n\n".join(system_parts)[:20000],
+                "messages": anthropic_messages,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                anthropic_api_url,
+                data=payload,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                logger.warning("Anthropic HTTP error %s: %s", exc.code, detail)
+                return jsonify({"success": False, "error": f"Anthropic HTTP {exc.code}", "detail": detail}), 502
+            except urllib.error.URLError as exc:
+                return jsonify({"success": False, "error": f"Anthropic unavailable: {exc}"}), 502
+            except json.JSONDecodeError:
+                return jsonify({"success": False, "error": "Invalid JSON from Anthropic"}), 502
+
+            content_blocks = body.get("content", []) if isinstance(body, dict) else []
+            text_parts: List[str] = []
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if isinstance(block, dict) and str(block.get("type", "")) == "text":
+                        text_parts.append(str(block.get("text", "")))
+            content = "\n".join(text_parts).strip()
+            if not content:
+                return jsonify({"success": False, "error": "Empty response from Anthropic"}), 502
+        else:
+            ollama_base_url = str(central_cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
+            payload = json.dumps({
+                "model": model,
+                "stream": False,
+                "messages": messages,
+                "options": {"temperature": 0.0},
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"{ollama_base_url}/api/chat",
+                data=payload,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                logger.warning("Ollama HTTP error %s: %s", exc.code, detail)
+                return jsonify({"success": False, "error": f"Ollama HTTP {exc.code}", "detail": detail}), 502
+            except urllib.error.URLError as exc:
+                return jsonify({"success": False, "error": f"Ollama unavailable: {exc}"}), 502
+            except json.JSONDecodeError:
+                return jsonify({"success": False, "error": "Invalid JSON from Ollama"}), 502
+
+            content = str((body.get("message") or {}).get("content") or "").strip()
+            if not content:
+                return jsonify({"success": False, "error": "Empty response from Ollama"}), 502
 
         latency_ms = int((time.monotonic() - start) * 1000)
         context_summary = None
@@ -655,6 +888,7 @@ def create_app(
 
         return jsonify({
             "success": True,
+            "provider": provider,
             "model": model,
             "response": content,
             "latency_ms": latency_ms,
@@ -667,6 +901,8 @@ def create_app(
 
     @app.route("/api/control/start/<bot_name>", methods=["POST"])
     def api_start_bot(bot_name):
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.start_bot(bot_name)
@@ -675,6 +911,8 @@ def create_app(
 
     @app.route("/api/control/stop/<bot_name>", methods=["POST"])
     def api_stop_bot(bot_name):
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.stop_bot(bot_name)
@@ -683,6 +921,8 @@ def create_app(
 
     @app.route("/api/control/pause/<bot_name>", methods=["POST"])
     def api_pause_bot(bot_name):
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.pause_bot(bot_name)
@@ -691,6 +931,8 @@ def create_app(
 
     @app.route("/api/control/resume/<bot_name>", methods=["POST"])
     def api_resume_bot(bot_name):
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.resume_bot(bot_name)
@@ -699,6 +941,8 @@ def create_app(
 
     @app.route("/api/control/pause_all", methods=["POST"])
     def api_pause_all():
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.pause_all()
@@ -707,15 +951,29 @@ def create_app(
 
     @app.route("/api/control/resume_all", methods=["POST"])
     def api_resume_all():
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.resume_all()
             return jsonify({"success": True})
         return jsonify({"success": False, "error": "No coordinator"})
 
+    @app.route("/api/control/stop_all", methods=["POST"])
+    def api_stop_all():
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
+        coordinator = app.config.get("COORDINATOR")
+        if coordinator:
+            coordinator.stop_all()
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": "No coordinator"})
+
     @app.route("/api/control/budget", methods=["POST"])
     def api_update_budget():
         """Update budget allocation for a bot."""
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         data = request.json or {}
         bot_name = data.get("bot_name")
         pct = data.get("percentage", 0)
@@ -728,6 +986,8 @@ def create_app(
     @app.route("/api/control/global_loss_limit", methods=["POST"])
     def api_update_loss_limit():
         """Update global daily loss limit."""
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         data = request.json or {}
         limit = data.get("limit_cents", 15000)
         coordinator = app.config.get("COORDINATOR")
@@ -739,6 +999,8 @@ def create_app(
     @app.route("/api/control/reset_data", methods=["POST"])
     def api_reset_data():
         """Delete all bot databases to start fresh."""
+        if _manual_controls_locked():
+            return _manual_controls_forbidden()
         import glob as _glob
         project_root = Path(app.config.get("PROJECT_ROOT", "."))
         data_dir = project_root / "data"
@@ -802,8 +1064,7 @@ def create_app(
             try:
                 db_path = get_bot_db_path(bot_name)
                 if db_path.exists():
-                    import sqlite3
-                    conn = sqlite3.connect(str(db_path))
+                    conn = _sqlite_connect(db_path)
                     cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
                     rows = conn.execute(
                         "SELECT count(*) FROM trades WHERE outcome='pending' AND timestamp < ?",
@@ -822,14 +1083,27 @@ def create_app(
                 logger.debug("Alert check failed for %s: %s", bot_name, exc)
 
         # -- Recent trade failure alerts from activity log --
-        activity = app.config.get("ACTIVITY_LOG", [])
+        if coordinator:
+            activity = coordinator.get_activity_log(limit=20)
+        else:
+            activity = app.config.get("ACTIVITY_LOG", [])
         for entry in activity[-20:]:
-            if "error" in entry.get("message", "").lower() or entry.get("level") == "error":
+            action = str(entry.get("action", "")).lower()
+            detail = str(entry.get("detail", "")).lower()
+            msg = str(entry.get("message", "")).lower()
+            level = str(entry.get("level", "")).lower()
+            if (
+                action in {"crashed", "failed", "error"}
+                or "error" in detail
+                or "exception" in detail
+                or "error" in msg
+                or level == "error"
+            ):
                 alerts.append({
                     "level": "warning",
                     "type": "trade_error",
                     "bot": entry.get("bot", "unknown"),
-                    "message": entry.get("message", ""),
+                    "message": entry.get("detail") or entry.get("message", ""),
                     "timestamp": entry.get("timestamp", ""),
                 })
 

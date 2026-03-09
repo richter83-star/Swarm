@@ -176,7 +176,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <!-- Charts Row -->
     <div class="grid grid-2" style="margin-top:20px">
       <div class="card">
-        <div class="card-title">Cumulative P&L (All Bots)</div>
+        <div class="card-title">Total P&L by Bot</div>
         <div class="chart-container"><canvas id="chart-pnl-all"></canvas></div>
       </div>
       <div class="card">
@@ -268,10 +268,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="tab-content" id="tab-llm">
     <div class="grid grid-2">
       <div class="card">
-        <div class="card-title">Ollama Conversation</div>
+        <div class="card-title">LLM Conversation</div>
         <div id="llm-feed" class="llm-feed" style="margin-top:12px"></div>
         <div style="display:flex;gap:8px;margin-top:12px;align-items:flex-start">
-          <textarea id="llm-input" class="llm-input" rows="4" placeholder="Ask Ollama anything about your swarm, markets, or strategy. Press Enter to send, Shift+Enter for newline."></textarea>
+          <textarea id="llm-input" class="llm-input" rows="4" placeholder="Ask your central LLM anything about the swarm, markets, or strategy. Press Enter to send, Shift+Enter for newline."></textarea>
           <button id="llm-send-btn" class="btn btn-green" onclick="sendLLMChat()">Send</button>
         </div>
       </div>
@@ -335,6 +335,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 const BOT_NAMES = {{ bot_names | tojson }};
 const BOT_DISPLAY = {{ bots | tojson }};
 const REFRESH_MS = {{ refresh_interval }} * 1000;
+const MANUAL_CONTROLS_LOCKED = {{ manual_controls_locked | tojson }};
 const LLM_HISTORY = [];
 
 // ===== Chart instances =====
@@ -383,7 +384,6 @@ async function refreshOverview() {
   const stateEl = document.getElementById('swarm-state');
   dot.className = 'status-dot ' + stateClass(data.swarm_state);
   stateEl.textContent = data.swarm_state;
-  document.getElementById('last-update', new Date().toLocaleTimeString());
 
   // Global metrics
   const gm = data.global_metrics || {};
@@ -402,9 +402,56 @@ async function refreshOverview() {
 
   // Bot cards
   renderBotCards(bots);
+  renderOverviewCharts(bots);
 
   // Update last-update time
   document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+}
+
+function renderOverviewCharts(bots) {
+  const labels = BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n);
+  const pnlData = BOT_NAMES.map(n => ((bots[n] || {}).performance || {}).total_pnl || 0);
+  const wrData = BOT_NAMES.map(n => ((bots[n] || {}).performance || {}).win_rate || 0);
+
+  makeChart('chart-pnl-all', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'P&L (¢)',
+        data: pnlData,
+        backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff'),
+        borderRadius: 6,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  makeChart('chart-wr-bar', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Win Rate %',
+        data: wrData,
+        backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff'),
+        borderRadius: 6,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+        y: { min: 0, max: 100, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
 }
 
 function renderBotCards(bots) {
@@ -647,14 +694,26 @@ async function refreshActivity() {
 
 // ===== Controls =====
 async function controlBot(action, name) {
+  if (MANUAL_CONTROLS_LOCKED) {
+    alert('Manual controls are locked by autonomous mode.');
+    return;
+  }
   await fetch(`/api/control/${action}/${name}`, { method: 'POST' });
   setTimeout(refreshOverview, 1000);
 }
 async function controlAll(action) {
+  if (MANUAL_CONTROLS_LOCKED) {
+    alert('Manual controls are locked by autonomous mode.');
+    return;
+  }
   await fetch(`/api/control/${action}`, { method: 'POST' });
   setTimeout(refreshOverview, 1000);
 }
 async function resetAllData() {
+  if (MANUAL_CONTROLS_LOCKED) {
+    alert('Manual controls are locked by autonomous mode.');
+    return;
+  }
   if (!confirm('Delete ALL bot databases? This cannot be undone.\n\nStop the bots first, then reset.')) return;
   const res = await fetch('/api/control/reset_data', { method: 'POST' });
   const data = await res.json();
@@ -666,6 +725,10 @@ async function resetAllData() {
   }
 }
 async function updateBudget(name) {
+  if (MANUAL_CONTROLS_LOCKED) {
+    alert('Manual controls are locked by autonomous mode.');
+    return;
+  }
   const pct = parseInt(document.getElementById(`budget-${name}`).value) || 25;
   await fetch('/api/control/budget', {
     method: 'POST', headers: {'Content-Type':'application/json'},

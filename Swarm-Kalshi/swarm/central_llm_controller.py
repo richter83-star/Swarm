@@ -45,7 +45,7 @@ class CentralLLMController:
 
     DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": True,
-        "provider": "ollama",
+        "provider": "anthropic",
         "ollama_base_url": "http://127.0.0.1:11434",
         "anthropic_api_url": "https://api.anthropic.com/v1/messages",
         "anthropic_api_key": "",
@@ -71,16 +71,30 @@ class CentralLLMController:
         "adaptive_hot_win_rate_pct": 58.0,
         "adaptive_hot_avg_pnl_cents": 3.0,
         "adaptive_size_boost": 1.10,
+        # Category-level adaptive guidance injected into prompts + guardrails.
+        "adaptive_prompt_enabled": True,
+        "adaptive_prompt_window": 120,
+        "adaptive_prompt_min_samples": 6,
+        "adaptive_prompt_cold_win_rate_pct": 45.0,
+        "adaptive_prompt_cold_avg_pnl_cents": -3.0,
+        "adaptive_prompt_hot_win_rate_pct": 58.0,
+        "adaptive_prompt_hot_avg_pnl_cents": 3.0,
+        "adaptive_prompt_cold_size_cap": 0.70,
+        "adaptive_prompt_hot_size_boost": 1.10,
+        "adaptive_prompt_reject_quant_floor": 70.0,
+        "category_hint_cache_ttl_seconds": 120,
+        "category_hint_max_entries": 8,
         "db_path": "data/central_llm_controller.db",
     }
 
     def __init__(self, config: Optional[Dict[str, Any]], project_root: str):
         self.cfg = {**self.DEFAULT_CONFIG, **(config or {})}
         self._enabled = bool(self.cfg.get("enabled", False))
-        self._provider = str(self.cfg.get("provider", "ollama")).lower()
+        self._provider = str(self.cfg.get("provider", "anthropic")).lower()
         self._project_root = Path(project_root).resolve()
         self._db_path = self._project_root / str(self.cfg.get("db_path", "data/central_llm_controller.db"))
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._category_hint_cache: Dict[str, Dict[str, Any]] = {}
         self._init_db()
 
     @property
@@ -135,6 +149,7 @@ class CentralLLMController:
                 )
 
         decision = self._apply_feedback_policy(bot_name, trade_request, decision)
+        decision = self._apply_category_feedback_policy(bot_name, trade_request, decision)
         decision.decision_id = self._log_decision(bot_name, trade_request, decision)
         return decision
 
@@ -520,6 +535,8 @@ class CentralLLMController:
                 ),
             )
             conn.commit()
+            # Outcome updates should be reflected immediately in adaptive hints.
+            self._category_hint_cache.pop(bot_name, None)
         finally:
             conn.close()
 
@@ -527,19 +544,186 @@ class CentralLLMController:
     # Prompt shaping
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_trade_category(trade_request: Dict[str, Any]) -> str:
+        """Best-effort category extraction from a trade request payload."""
+        for key in ("category", "market_category", "topic", "series_ticker", "event_ticker"):
+            value = str(trade_request.get(key, "") or "").strip().lower()
+            if value:
+                return value
+        return "unknown"
+
+    def _category_feedback_hints(self, bot_name: str) -> Dict[str, Any]:
+        """
+        Build category-level hot/cold hints from realized outcomes.
+
+        These hints are used in two places:
+        1) Prompt shaping (so the LLM can reason with historical edges).
+        2) Deterministic post-LLM guardrails for safety and consistency.
+        """
+        if not bool(self.cfg.get("adaptive_prompt_enabled", True)):
+            return {"enabled": False}
+
+        now = datetime.now(timezone.utc)
+        ttl = max(10, int(self.cfg.get("category_hint_cache_ttl_seconds", 120)))
+        cached = self._category_hint_cache.get(bot_name)
+        if cached and cached.get("at"):
+            age = (now - cached["at"]).total_seconds()
+            if age <= ttl:
+                return dict(cached.get("hints", {}))
+
+        window = max(20, int(self.cfg.get("adaptive_prompt_window", 120)))
+        min_samples = max(2, int(self.cfg.get("adaptive_prompt_min_samples", 6)))
+        cold_wr = float(self.cfg.get("adaptive_prompt_cold_win_rate_pct", 45.0))
+        cold_pnl = float(self.cfg.get("adaptive_prompt_cold_avg_pnl_cents", -3.0))
+        hot_wr = float(self.cfg.get("adaptive_prompt_hot_win_rate_pct", 58.0))
+        hot_pnl = float(self.cfg.get("adaptive_prompt_hot_avg_pnl_cents", 3.0))
+        max_entries = max(1, int(self.cfg.get("category_hint_max_entries", 8)))
+
+        conn = sqlite3.connect(str(self._db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT outcome, pnl_cents, request_json
+                FROM llm_decisions
+                WHERE bot_name = ?
+                  AND decision = 'approve'
+                  AND outcome IN ('win', 'loss', 'breakeven', 'expired')
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (bot_name, window),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        by_category: Dict[str, Dict[str, float]] = {}
+        for row in rows:
+            try:
+                req = json.loads(str(row["request_json"] or "{}"))
+            except Exception:
+                req = {}
+            category = self._extract_trade_category(req)
+            stats = by_category.setdefault(
+                category,
+                {"samples": 0.0, "wins": 0.0, "total_pnl": 0.0},
+            )
+            stats["samples"] += 1.0
+            if str(row["outcome"] or "").lower() == "win":
+                stats["wins"] += 1.0
+            stats["total_pnl"] += float(row["pnl_cents"] or 0)
+
+        cold: List[Dict[str, Any]] = []
+        hot: List[Dict[str, Any]] = []
+        for category, stats in by_category.items():
+            samples = int(stats["samples"])
+            if samples < min_samples:
+                continue
+            win_rate_pct = (float(stats["wins"]) / samples) * 100.0 if samples else 0.0
+            avg_pnl = float(stats["total_pnl"]) / samples if samples else 0.0
+            item = {
+                "category": category,
+                "samples": samples,
+                "win_rate_pct": round(win_rate_pct, 2),
+                "avg_pnl_cents": round(avg_pnl, 2),
+            }
+            if win_rate_pct <= cold_wr and avg_pnl <= cold_pnl:
+                cold.append(item)
+            elif win_rate_pct >= hot_wr and avg_pnl >= hot_pnl:
+                hot.append(item)
+
+        # Prioritize strongest signals.
+        cold.sort(key=lambda i: (i["win_rate_pct"], i["avg_pnl_cents"]))
+        hot.sort(key=lambda i: (-i["win_rate_pct"], -i["avg_pnl_cents"]))
+
+        hints = {
+            "enabled": True,
+            "window": window,
+            "min_samples": min_samples,
+            "cold_categories": cold[:max_entries],
+            "hot_categories": hot[:max_entries],
+            "cold_size_cap": float(self.cfg.get("adaptive_prompt_cold_size_cap", 0.70)),
+            "hot_size_boost": float(self.cfg.get("adaptive_prompt_hot_size_boost", 1.10)),
+            "reject_quant_floor": float(self.cfg.get("adaptive_prompt_reject_quant_floor", 70.0)),
+        }
+        self._category_hint_cache[bot_name] = {"at": now, "hints": dict(hints)}
+        return hints
+
+    def _apply_category_feedback_policy(
+        self,
+        bot_name: str,
+        trade_request: Dict[str, Any],
+        decision: ApprovalDecision,
+    ) -> ApprovalDecision:
+        """Apply deterministic category-level guardrails based on learned outcomes."""
+        if decision.decision != "approve":
+            return decision
+        hints = self._category_feedback_hints(bot_name)
+        if not bool(hints.get("enabled", False)):
+            return decision
+
+        category = self._extract_trade_category(trade_request)
+        if not category:
+            return decision
+
+        quant_conf = float(trade_request.get("quant_confidence", 0.0))
+        reject_floor = float(hints.get("reject_quant_floor", 70.0))
+        cold_size_cap = float(hints.get("cold_size_cap", 0.70))
+        hot_size_boost = float(hints.get("hot_size_boost", 1.10))
+
+        cold_map = {str(i.get("category", "")): i for i in hints.get("cold_categories", [])}
+        hot_map = {str(i.get("category", "")): i for i in hints.get("hot_categories", [])}
+
+        if category in cold_map:
+            c = cold_map[category]
+            if quant_conf < reject_floor:
+                decision.decision = "reject"
+                decision.size_multiplier = 0.0
+                decision.rationale = (
+                    f"{decision.rationale} | Category policy reject: {category} is cold "
+                    f"(samples={c.get('samples')}, wr={c.get('win_rate_pct')}%, avg_pnl={c.get('avg_pnl_cents')}¢) "
+                    f"and quant_confidence={quant_conf:.1f} < {reject_floor:.1f}."
+                )
+                decision.red_flags = list(decision.red_flags) + ["category_cold_reject"]
+                return decision
+
+            decision.size_multiplier = min(decision.size_multiplier, cold_size_cap)
+            decision.rationale = (
+                f"{decision.rationale} | Category size cap: {category} cold "
+                f"(samples={c.get('samples')}, wr={c.get('win_rate_pct')}%, avg_pnl={c.get('avg_pnl_cents')}¢)."
+            )
+            decision.red_flags = list(decision.red_flags) + ["category_cold_size_cap"]
+            return decision
+
+        if category in hot_map:
+            h = hot_map[category]
+            boosted = decision.size_multiplier * hot_size_boost
+            decision.size_multiplier = min(1.5, max(decision.size_multiplier, boosted))
+            decision.rationale = (
+                f"{decision.rationale} | Category boost: {category} hot "
+                f"(samples={h.get('samples')}, wr={h.get('win_rate_pct')}%, avg_pnl={h.get('avg_pnl_cents')}¢)."
+            )
+            return decision
+
+        return decision
+
     def _build_prompt(self, bot_name: str, trade_request: Dict[str, Any]) -> str:
         snapshot = self._swarm_snapshot()
         feedback = self._feedback_profile(bot_name)
+        category_hints = self._category_feedback_hints(bot_name)
         return (
             f"Bot name: {bot_name}\n"
             f"Trade request: {json.dumps(trade_request, ensure_ascii=True)}\n"
             f"Swarm snapshot: {json.dumps(snapshot, ensure_ascii=True)}\n\n"
             f"Recent realized performance profile: {json.dumps(feedback, ensure_ascii=True)}\n\n"
+            f"Category feedback hints: {json.dumps(category_hints, ensure_ascii=True)}\n\n"
             "Policy:\n"
             "1) Protect capital first.\n"
             "2) Reject trades with weak confidence or obvious concentration risk.\n"
             "3) Use size_multiplier < 1.0 when risk is elevated.\n"
-            "4) Keep rationale concise and concrete.\n"
+            "4) Follow cold/hot category hints unless current request has very strong evidence.\n"
+            "5) Keep rationale concise and concrete.\n"
         )
 
     def _feedback_profile(self, bot_name: str) -> Dict[str, Any]:
