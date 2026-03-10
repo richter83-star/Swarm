@@ -988,11 +988,21 @@ class BotRunner:
             positions = self.client.get_positions()
             pos_by_ticker = {p.get("ticker"): p for p in positions if p.get("ticker")}
             settlements = self.client.get_settlements()
+            fills: List[Dict[str, Any]] = []
+            try:
+                fills = self.client.get_fills(limit=500)
+            except Exception as exc:
+                logger.warning("Could not fetch fills for reconciliation: %s", exc)
             settlement_by_ticker = {
                 str(s.get("ticker") or s.get("market_ticker") or "").strip(): s
                 for s in settlements
                 if str(s.get("ticker") or s.get("market_ticker") or "").strip()
             }
+            fills_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
+            for fill in fills:
+                fill_ticker = str(fill.get("ticker") or fill.get("market_ticker") or "").strip()
+                if fill_ticker:
+                    fills_by_ticker.setdefault(fill_ticker, []).append(fill)
             settled_tickers = {
                 s.get("ticker") or s.get("market_ticker")
                 for s in settlements
@@ -1020,8 +1030,87 @@ class BotRunner:
                     else:
                         pos = pos_by_ticker.get(ticker, {})
                         total_pnl = int(pos.get("realized_pnl", 0) or 0)
-                    allocations = self._allocate_pnl_across_rows(total_pnl, rows)
-                    for db_id, meta, row_pnl in allocations:
+                    ticker_fills = fills_by_ticker.get(ticker, [])
+                    allocations_with_source: List[tuple[int, Dict[str, Any], int, str]] = []
+                    attributed_total = 0
+                    unattributed_rows: List[tuple[int, Dict[str, Any]]] = []
+
+                    # Prefer exact order-level attribution from fills.
+                    for db_id, meta in rows:
+                        order_id = str(meta.get("order_id", "") or "")
+                        found_fill_pnl, fill_pnl = self._sum_fill_pnl_for_order(
+                            ticker_fills, order_id
+                        )
+                        if found_fill_pnl:
+                            allocations_with_source.append((db_id, meta, fill_pnl, "fills_by_order"))
+                            attributed_total += fill_pnl
+                        else:
+                            unattributed_rows.append((db_id, meta))
+
+                    if unattributed_rows:
+                        residual_total = int(total_pnl - attributed_total)
+                        min_allowed_total, max_allowed_total = self._aggregate_allowed_pnl_bounds(
+                            unattributed_rows
+                        )
+                        residual_in_bounds = (
+                            min_allowed_total <= residual_total <= max_allowed_total
+                        )
+
+                        if not residual_in_bounds:
+                            # Settlement ticker-level totals can include unrelated historical rows.
+                            # Fail safe by excluding ambiguous rows from learning updates.
+                            logger.warning(
+                                "Ambiguous settlement allocation for %s: residual=%+d outside "
+                                "[%+d, %+d] for %d row(s). Marking unresolved rows as expired.",
+                                ticker,
+                                residual_total,
+                                min_allowed_total,
+                                max_allowed_total,
+                                len(unattributed_rows),
+                            )
+                            for db_id, meta in unattributed_rows:
+                                allocations_with_source.append(
+                                    (db_id, meta, 0, "settlement_ambiguous_expired")
+                                )
+                        elif len(unattributed_rows) == 1:
+                            db_id, meta = unattributed_rows[0]
+                            allocations_with_source.append(
+                                (db_id, meta, residual_total, "settlement_residual_single")
+                            )
+                        else:
+                            for db_id, meta, row_pnl in self._allocate_pnl_across_rows(
+                                residual_total, unattributed_rows
+                            ):
+                                allocations_with_source.append(
+                                    (db_id, meta, row_pnl, "settlement_weighted")
+                                )
+
+                    for db_id, meta, row_pnl, allocation_source in allocations_with_source:
+                        if allocation_source == "settlement_ambiguous_expired":
+                            outcome = "expired"
+                            self.learning.update_outcome(
+                                db_id,
+                                outcome,
+                                pnl_cents=0,
+                                pnl_valid=True,
+                                pnl_validation_reason="ambiguous_settlement_total",
+                                reconciliation_trace={
+                                    "ticker": ticker,
+                                    "source": allocation_source,
+                                    "total_ticker_pnl_cents": int(total_pnl),
+                                    "attributed_fill_pnl_cents": int(attributed_total),
+                                },
+                            )
+                            self._on_trade_resolved(
+                                outcome,
+                                0,
+                                ticker=ticker,
+                                trade_db_id=db_id,
+                                order_id=str(meta.get("order_id", "") or ""),
+                            )
+                            resolved_ids.append(db_id)
+                            continue
+
                         pnl_ok, pnl_reason, pnl_trace = self._validate_resolved_trade_pnl(
                             row_meta=meta,
                             pnl_cents=row_pnl,
@@ -1037,8 +1126,9 @@ class BotRunner:
                                 reconciliation_trace={
                                     **pnl_trace,
                                     "ticker": ticker,
-                                    "source": "settlement_reconcile",
+                                    "source": allocation_source,
                                     "total_ticker_pnl_cents": int(total_pnl),
+                                    "attributed_fill_pnl_cents": int(attributed_total),
                                 },
                             )
                             self.risk.record_outcome(row_pnl)
@@ -1053,8 +1143,9 @@ class BotRunner:
                                 reconciliation_trace={
                                     **pnl_trace,
                                     "ticker": ticker,
-                                    "source": "settlement_reconcile",
+                                    "source": allocation_source,
                                     "total_ticker_pnl_cents": int(total_pnl),
+                                    "attributed_fill_pnl_cents": int(attributed_total),
                                 },
                             )
                             logger.error(
@@ -1152,6 +1243,48 @@ class BotRunner:
                 running += row_pnl
             allocated.append((db_id, meta, row_pnl))
         return allocated
+
+    @staticmethod
+    def _fill_order_candidates(fill: Dict[str, Any]) -> set[str]:
+        return {
+            str(fill.get("order_id", "") or ""),
+            str(fill.get("maker_order_id", "") or ""),
+            str(fill.get("taker_order_id", "") or ""),
+        }
+
+    @classmethod
+    def _sum_fill_pnl_for_order(
+        cls,
+        fills_for_ticker: List[Dict[str, Any]],
+        order_id: str,
+    ) -> tuple[bool, int]:
+        normalized_order_id = str(order_id or "")
+        if not normalized_order_id:
+            return False, 0
+        total = 0
+        found = False
+        for fill in fills_for_ticker:
+            if normalized_order_id not in cls._fill_order_candidates(fill):
+                continue
+            try:
+                total += int(fill.get("profit_loss", 0) or 0)
+            except Exception:
+                total += 0
+            found = True
+        return found, int(total)
+
+    @classmethod
+    def _aggregate_allowed_pnl_bounds(
+        cls,
+        rows: List[tuple[int, Dict[str, Any]]],
+    ) -> tuple[int, int]:
+        min_total = 0
+        max_total = 0
+        for _, meta in rows:
+            _, _, trace = cls._validate_resolved_trade_pnl(meta, pnl_cents=0)
+            min_total += int(trace.get("min_allowed_cents", 0) or 0)
+            max_total += int(trace.get("max_allowed_cents", 0) or 0)
+        return min_total, max_total
 
     @staticmethod
     def _validate_resolved_trade_pnl(
@@ -1253,11 +1386,7 @@ class BotRunner:
                 if fill_ticker != ticker:
                     continue
                 if order_id:
-                    fill_order_candidates = {
-                        str(fill.get("order_id", "") or ""),
-                        str(fill.get("maker_order_id", "") or ""),
-                        str(fill.get("taker_order_id", "") or ""),
-                    }
+                    fill_order_candidates = self._fill_order_candidates(fill)
                     if order_id not in fill_order_candidates:
                         continue
                 try:
