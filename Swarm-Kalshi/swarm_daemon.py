@@ -31,6 +31,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
+from swarm.meta_evolver import MetaEvolverAgent
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -83,6 +87,8 @@ logger = _build_logger()
 
 _child: subprocess.Popen | None = None
 _stop_requested = False
+_daemon_meta_evolver: MetaEvolverAgent | None = None
+_last_sunday_evolver_run_date: str = ""
 
 
 def _signal_handler(signum, frame):
@@ -127,6 +133,7 @@ def _run_once() -> int:
         line = line.rstrip()
         if line:
             logger.info("[SWARM] %s", line)
+            _maybe_run_sunday_meta_evolver(line)
 
     _child.wait()
     code = _child.returncode
@@ -135,6 +142,89 @@ def _run_once() -> int:
 
 
 # ---------------------------------------------------------------------------
+
+
+def _build_agent_configs_for_evolver() -> dict:
+    """
+    Build in-memory agent config view for MetaEvolver from bot YAML files.
+    """
+    agent_configs: dict = {}
+    bot_names = ("sentinel", "oracle", "pulse", "vanguard")
+
+    for bot_name in bot_names:
+        bot_cfg_path = PROJECT_ROOT / "config" / f"{bot_name}_config.yaml"
+        if not bot_cfg_path.exists():
+            continue
+        try:
+            with open(bot_cfg_path, "r", encoding="utf-8") as fh:
+                bot_cfg = yaml.safe_load(fh) or {}
+            trading = bot_cfg.get("trading", {}) or {}
+            llm_cfg = bot_cfg.get("llm_advisor", {}) or {}
+            agent_configs[bot_name] = {
+                "temperature": float(llm_cfg.get("temperature", 0.1) or 0.1),
+                "confidence_threshold": float(
+                    trading.get("min_confidence_threshold", 65) or 65
+                ),
+                "max_signals_per_cycle": int(
+                    trading.get("max_signals_per_cycle", 3) or 3
+                ),
+            }
+        except Exception as exc:
+            logger.warning("Failed to load bot config for MetaEvolver (%s): %s", bot_name, exc)
+
+    return agent_configs
+
+def _build_meta_evolver_from_config() -> MetaEvolverAgent | None:
+    cfg_path = PROJECT_ROOT / "config" / "swarm_config.yaml"
+    if not cfg_path.exists():
+        return None
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        meta_cfg = cfg.get("meta_evolver", {}) or {}
+        if not bool(meta_cfg.get("enabled", False)):
+            return None
+        return MetaEvolverAgent(config=meta_cfg, project_root=str(PROJECT_ROOT))
+    except Exception as exc:
+        logger.warning("MetaEvolver daemon init failed: %s", exc)
+        return None
+
+
+def _maybe_run_sunday_meta_evolver(sw_line: str) -> None:
+    """
+    Trigger MetaEvolver Sunday job after weekly recalibration log line.
+    """
+    global _daemon_meta_evolver, _last_sunday_evolver_run_date
+
+    if "Weekly backtest result:" not in sw_line:
+        return
+
+    now = datetime.utcnow()
+    if now.weekday() != 6:  # Sunday
+        return
+
+    run_date = now.date().isoformat()
+    if _last_sunday_evolver_run_date == run_date:
+        return
+
+    if _daemon_meta_evolver is None:
+        _daemon_meta_evolver = _build_meta_evolver_from_config()
+    if _daemon_meta_evolver is None:
+        return
+
+    try:
+        result = _daemon_meta_evolver.execute(
+            {
+                "trigger": "sunday_post_rl_recalibration",
+                "agent_configs": _build_agent_configs_for_evolver(),
+                "source": "swarm_daemon",
+            }
+        )
+        logger.info("Sunday MetaEvolver executed: %s", result)
+        _last_sunday_evolver_run_date = run_date
+    except Exception as exc:
+        logger.warning("Sunday MetaEvolver execution failed: %s", exc)
+
 # Main daemon loop
 # ---------------------------------------------------------------------------
 

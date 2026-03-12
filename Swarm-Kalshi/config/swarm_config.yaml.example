@@ -200,6 +200,18 @@ autonomous_mode:
   disable_local_llm_advisor: true
   llm_learning_enabled: true
   lock_manual_controls: true
+
+meta_learning:
+  enabled: true
+  min_confidence_to_apply: 0.7
+  domains: ["sports", "politics", "crypto", "economics", "weather", "entertainment"]
+
+meta_evolver:
+  enabled: true
+  mutation_rate: 0.3
+  immutable_agents: ["GovernorAgent", "MetaEvolverAgent"]
+  allow_file_writes: false
+  allow_self_rewrite: false
 # --- Backtester ---
 backtester:
   max_settled_markets: 200

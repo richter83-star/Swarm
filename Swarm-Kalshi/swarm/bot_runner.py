@@ -44,6 +44,8 @@ from kalshi_agent.llm_advisor import LLMAdvisor
 from telegram.notifier import TelegramNotifier
 from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
+from swarm.meta_learning import MetaLearner
+from swarm.rl_feedback import RLFeedbackBridge
 
 logger = logging.getLogger("kalshi_agent")
 
@@ -185,6 +187,21 @@ class BotRunner:
             project_root=str(self.project_root),
         )
 
+        self._meta_learning_cfg = self.cfg.get("meta_learning", {}) or {}
+        self.meta_learner: Optional[MetaLearner] = None
+        self.rl_feedback = RLFeedbackBridge()
+
+        if bool(self._meta_learning_cfg.get("enabled", False)):
+            try:
+                self.meta_learner = MetaLearner(
+                    config=self._meta_learning_cfg,
+                    project_root=str(self.project_root),
+                    bot_name=self.bot_name,
+                )
+            except Exception as exc:
+                logger.warning("MetaLearner init failed: %s", exc)
+
+
         # Category and keyword filters
         self._category_filters = set(
             c.lower() for c in self.cfg.get("category_filters", [])
@@ -234,6 +251,10 @@ class BotRunner:
                     "order_id": str(row.get("order_id", "") or ""),
                     "count": int(row.get("count", 1) or 1),
                     "entry_price": int(row.get("entry_price", 0) or 0),
+                    "title": str(row.get("title", "") or ""),
+                    "category": str(row.get("category", "") or ""),
+                    "confidence": float(row.get("confidence", 0.0) or 0.0),
+                    "kelly_used": float(row.get("count", 1) or 1),
                 }
         if self._pending_trades:
             logger.info("Restored %d pending trade(s) from DB.", len(self._pending_trades))
@@ -547,6 +568,85 @@ class BotRunner:
         from datetime import timedelta
         return (datetime.now(timezone.utc) - self._last_backtest_date) >= timedelta(days=7)
 
+    @staticmethod
+    def _normalize_meta_domain(category: str) -> str:
+        allowed = {"sports", "politics", "crypto", "economics", "weather", "entertainment"}
+        value = str(category or "").strip().lower()
+        if value in allowed:
+            return value
+        alias_map = {
+            "finance": "economics",
+            "business": "economics",
+            "elections": "politics",
+            "government": "politics",
+            "climate": "weather",
+            "science": "weather",
+            "movies": "entertainment",
+            "tv": "entertainment",
+        }
+        for src, dst in alias_map.items():
+            if src in value:
+                return dst
+        return "entertainment"
+
+    def _apply_meta_strategy_before_analysis(self, opportunities: List[Any]) -> None:
+        if self.meta_learner is None:
+            return
+        if not opportunities:
+            return
+
+        try:
+            if self.meta_learner.task_count() < 10:
+                return
+
+            target = opportunities[0]
+            task_description = str(getattr(target, "title", "") or "")
+            domain = self._normalize_meta_domain(str(getattr(target, "category", "") or ""))
+
+            strategy, confidence, hyperparams = self.meta_learner.predict_strategy(
+                task_description=task_description,
+                domain=domain,
+            )
+
+            min_conf = float(self._meta_learning_cfg.get("min_confidence_to_apply", 0.7) or 0.7)
+            if confidence <= min_conf:
+                return
+
+            if "temperature" not in hyperparams:
+                return
+
+            old_temp = float(self.cfg.get("llm_advisor", {}).get("temperature", 0.1) or 0.1)
+            new_temp = round(max(0.0, min(1.0, float(hyperparams["temperature"]))), 3)
+            if abs(new_temp - old_temp) < 1e-9:
+                return
+
+            self.cfg.setdefault("llm_advisor", {})["temperature"] = new_temp
+            if hasattr(self.llm_advisor, "cfg") and isinstance(self.llm_advisor.cfg, dict):
+                self.llm_advisor.cfg["temperature"] = new_temp
+
+            reason = (
+                f"meta_predict_strategy strategy={strategy} domain={domain} confidence={confidence:.3f}"
+            )
+            self.meta_learner.log_config_mutation(
+                bot_name=self.bot_name,
+                config_key="llm_advisor.temperature",
+                old_value=old_temp,
+                new_value=new_temp,
+                reason=reason,
+                source="meta_learning",
+            )
+            logger.info(
+                "MetaLearner applied temperature mutation for %s: %.3f -> %.3f (%s)",
+                self.bot_name,
+                old_temp,
+                new_temp,
+                reason,
+            )
+        except Exception as exc:
+            # Never block trade flow.
+            logger.warning("MetaLearner pre-analysis hook failed: %s", exc)
+
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -685,6 +785,8 @@ class BotRunner:
         for opp in specialist_opps[:top_n]:
             self.scanner.enrich(opp)
             self.behavior.wait()
+
+        self._apply_meta_strategy_before_analysis(specialist_opps[:top_n])
 
         signals = self.analysis.analyse(specialist_opps[:top_n])
         if not signals:
@@ -939,6 +1041,10 @@ class BotRunner:
                 "order_id": str(order_id or ""),
                 "count": int(count),
                 "entry_price": int(signal.suggested_price),
+                "title": str(signal.title or ""),
+                "category": str(signal.category or ""),
+                "confidence": float(signal.confidence or 0.0),
+                "kelly_used": float(base_count),
             }
             self._trade_count += 1
             self.behavior.record_action(traded=True)
@@ -1479,6 +1585,23 @@ class BotRunner:
             )
         except Exception as exc:
             logger.warning("Central LLM outcome feedback update failed: %s", exc)
+        try:
+            if self.meta_learner is not None and trade_db_id is not None:
+                meta = self._pending_trades.get(int(trade_db_id), {})
+                self.rl_feedback.record_outcome(
+                    meta_learner=self.meta_learner,
+                    bot_name=self.bot_name,
+                    ticker=ticker,
+                    market_title=str(meta.get("title", "") or ticker),
+                    market_category=self._normalize_meta_domain(str(meta.get("category", "") or "")),
+                    confidence_at_entry=float(meta.get("confidence", 0.0) or 0.0),
+                    outcome=outcome,
+                    pnl_cents=int(pnl_cents),
+                    kelly_used=float(meta.get("kelly_used", meta.get("count", 0.0)) or 0.0),
+                )
+        except Exception as exc:
+            # Never block reconciliation.
+            logger.warning("Meta RL feedback hook failed: %s", exc)
 
         # Refresh trend (momentum_multiplier, hot/cold categories, calibration bias).
         # Cheap — one DB query over the last 20 settled trades.
