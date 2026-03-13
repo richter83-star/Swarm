@@ -264,11 +264,20 @@ class MarketScanner:
 
     def _parse_market(self, m: Dict[str, Any], now: datetime) -> Optional[MarketOpportunity]:
         try:
-            yes_bid = m.get("yes_bid") or 0
-            yes_ask = m.get("yes_ask") or 0
-            no_bid = m.get("no_bid") or 0
-            no_ask = m.get("no_ask") or 0
-            last_price = m.get("last_price") or 0
+            # API returns prices as dollar strings with _dollars suffix; convert to cents.
+            def _cents(key_new: str, key_old: str) -> int:
+                v = m.get(key_new) or m.get(key_old) or 0
+                return int(round(float(v) * 100))
+
+            def _count(key_new: str, key_old: str) -> int:
+                v = m.get(key_new) or m.get(key_old) or 0
+                return int(float(v))
+
+            yes_bid = _cents("yes_bid_dollars", "yes_bid")
+            yes_ask = _cents("yes_ask_dollars", "yes_ask")
+            no_bid = _cents("no_bid_dollars", "no_bid")
+            no_ask = _cents("no_ask_dollars", "no_ask")
+            last_price = _cents("last_price_dollars", "last_price")
 
             if yes_bid and yes_ask:
                 mid = (yes_bid + yes_ask) / 2.0
@@ -301,9 +310,9 @@ class MarketScanner:
                 no_ask=no_ask,
                 last_price=last_price,
                 mid_price=mid,
-                volume_24h=m.get("volume_24h") or 0,
-                open_interest=m.get("open_interest") or 0,
-                liquidity=m.get("liquidity") or 0,
+                volume_24h=_count("volume_24h_fp", "volume_24h"),
+                open_interest=_count("open_interest_fp", "open_interest"),
+                liquidity=_cents("liquidity_dollars", "liquidity"),
                 close_time=close_time,
                 expiration_time=exp_time,
                 created_time=created_time,
