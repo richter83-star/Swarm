@@ -43,19 +43,24 @@ logger = logging.getLogger(__name__)
 # These are expert-seeded estimates based on Kalshi market patterns.
 CATEGORY_PRIORS: Dict[str, Dict[str, float]] = {
     # Politics / Elections
+    # Note: politics markets exhibit "electability panic" — sharp sentiment-driven
+    # drops after primary results that often mean-revert as election day approaches.
+    # These dislocations represent genuine edge opportunities for contrarian trades.
     "politics": {
-        "expected_win_rate": 0.52,
-        "edge_quality": 0.6,
+        "expected_win_rate": 0.53,
+        "edge_quality": 0.68,
         "volatility": 0.7,
         "resolution_yes_rate": 0.45,
         "liquidity_factor": 1.2,
+        "narrative_dislocation_prone": True,
     },
     "elections": {
-        "expected_win_rate": 0.50,
-        "edge_quality": 0.5,
+        "expected_win_rate": 0.52,
+        "edge_quality": 0.62,
         "volatility": 0.8,
         "resolution_yes_rate": 0.50,
         "liquidity_factor": 1.5,
+        "narrative_dislocation_prone": True,
     },
     "government": {
         "expected_win_rate": 0.53,
@@ -183,6 +188,46 @@ SERIES_PRIORS: Dict[str, Dict[str, float]] = {
         "edge_reliability": 0.55,
         "consensus_trackable": False,
         "mean_reversion_strength": 0.4,
+    },
+    # Political series — tend to exhibit narrative-driven dislocations
+    # that mean-revert as event date approaches
+    "KXELECT": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.62,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.55,
+        "electability_panic_prone": True,
+    },
+    "KXPRES": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.60,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.50,
+        "electability_panic_prone": True,
+    },
+    "KXPRESMENTION": {
+        "yes_bias": -0.03,
+        "edge_reliability": 0.50,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.30,
+    },
+    "KXLAGODAYS": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.55,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.35,
+    },
+    "KXEOWEEK": {
+        "yes_bias": 0.05,
+        "edge_reliability": 0.58,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.40,
+    },
+    "KXDHSFUNDING": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.52,
+        "consensus_trackable": False,
+        "mean_reversion_strength": 0.30,
     },
 }
 

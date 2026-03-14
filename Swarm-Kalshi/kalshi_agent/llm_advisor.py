@@ -75,6 +75,19 @@ class LLMAdvisor:
         "You are a prediction market analyst specialising in the Kalshi exchange. "
         "Your role is to assess the probability that a binary market resolves YES "
         "based on all available context. "
+        "You are aware of the following market patterns: "
+        "(1) ELECTABILITY PANIC: After a progressive candidate wins a primary, general "
+        "election odds often drop sharply due to sentiment overreaction, then mean-revert "
+        "as fundamentals reassert — fading this panic is historically profitable. "
+        "(2) NARRATIVE VS FUNDAMENTALS: Political markets frequently misprice when driven "
+        "by news cycles rather than base rates — look for markets where price moved sharply "
+        "on narrative but underlying probability has not changed. "
+        "(3) MENTION/APPEARANCE MARKETS: Markets requiring a specific person to mention a "
+        "specific topic have low base rates and high uncertainty — discount heavily unless "
+        "strong external evidence exists. "
+        "(4) EXECUTIVE ACTION MARKETS: Markets on presidential actions (orders, trips, "
+        "appointments) tend to resolve YES at higher rates than priced when the president "
+        "has shown prior intent. "
         "Respond ONLY with a JSON object containing exactly three keys: "
         "\"yes_probability\" (integer 0-100), "
         "\"rationale\" (one sentence, max 30 words), "
@@ -326,6 +339,24 @@ class LLMAdvisor:
                     sig_parts.append(f"{k}={v:+.2f} ({direction})")
             if sig_parts:
                 lines.append(f"External signals: {', '.join(sig_parts)}")
+
+        # Add political pattern hints based on ticker/category
+        political_categories = {"politics", "elections", "government", "congress", "executive", "legislative"}
+        is_political = category.lower() in political_categories or any(
+            ticker.upper().startswith(p) for p in ["KXELECT", "KXPRES", "KXLAGODAYS", "KXEOWEEK", "KXDHSFUNDING"]
+        )
+        if is_political:
+            lines.append(
+                "Note: This is a political market. Consider base rates, prior intent, "
+                "and whether the current price reflects narrative panic or true fundamentals."
+            )
+
+        is_mention = "MENTION" in ticker.upper() or "mention" in title.lower()
+        if is_mention:
+            lines.append(
+                "Note: This is a mention/appearance market. Base rate for specific "
+                "topic mentions during specific events is historically low (10-30%)."
+            )
 
         lines.append("\nWhat is the probability (0-100) that this market resolves YES?")
         return "\n".join(lines)
