@@ -100,6 +100,12 @@ class LLMAdvisor:
         "exceeds the benefit of being right alone. This creates exploitable mispricings in "
         "economic data release markets — when the market disagrees with consensus, bet with "
         "the market. "
+        "(7) MARKET-CONDITIONED PROMPTING: The current market price is a powerful prior. "
+        "Academic research (arxiv:2602.21229) shows that incorporating market price as a "
+        "crowd wisdom signal substantially improves LLM forecasting calibration for mention "
+        "markets. Treat the market price as the aggregated forecast of all participants with "
+        "real financial stakes — it should anchor your estimate unless you have strong "
+        "specific evidence to the contrary. High-volume markets have stronger crowd signals. "
         "Respond ONLY with a JSON object containing exactly three keys: "
         "\"yes_probability\" (integer 0-100), "
         "\"rationale\" (one sentence, max 30 words), "
@@ -336,12 +342,20 @@ class LLMAdvisor:
             mid = ctx.get("mid_price")
             hours = ctx.get("hours_to_expiry")
             vol = ctx.get("volume_24h")
+            oi = ctx.get("open_interest")
             if mid is not None:
-                lines.append(f"Current mid price: {mid}¢ (implies {mid:.0f}% YES probability)")
+                # Market-Conditioned Prompting (MCP): frame market price as crowd wisdom signal
+                crowd_conviction = "strong" if vol and vol > 10000 else "moderate" if vol and vol > 1000 else "weak"
+                lines.append(
+                    f"Current market price: {mid}¢ (crowd wisdom estimate: {mid:.0f}% YES probability, "
+                    f"{crowd_conviction} conviction based on volume)"
+                )
             if hours is not None:
                 lines.append(f"Hours until expiry: {hours:.1f}")
             if vol is not None:
                 lines.append(f"24h volume: {vol} contracts")
+            if oi is not None:
+                lines.append(f"Open interest: {oi} contracts")
 
         if sigs:
             sig_parts = []
@@ -365,9 +379,24 @@ class LLMAdvisor:
 
         is_mention = "MENTION" in ticker.upper() or "mention" in title.lower()
         if is_mention:
+            mid = ctx.get("mid_price")
+            vol = ctx.get("volume_24h", 0)
+            # Apply Market-Conditioned Prompting (MCP) from arxiv:2602.21229
+            # Research shows framing market price as crowd forecast improves LLM calibration
+            crowd_signal = (
+                f" The market is currently pricing this at {mid:.0f}%, which represents "
+                f"the aggregated crowd forecast from real-money participants."
+            ) if mid is not None else ""
+            high_vol_note = (
+                " High volume indicates strong participant conviction in this price."
+            ) if vol and vol > 5000 else ""
             lines.append(
-                "Note: This is a mention/appearance market. Base rate for specific "
-                "topic mentions during specific events is historically low (10-30%)."
+                f"Note: This is a mention/appearance market — predicting whether specific "
+                f"language will appear in future speech or text. Base rate for specific "
+                f"topic mentions during specific events is historically low (10-30%) unless "
+                f"strong contextual evidence exists.{crowd_signal}{high_vol_note} "
+                f"Weight the market price heavily as it aggregates diverse participant "
+                f"information about likely future language use."
             )
 
         # Economic data release markets — apply shock alpha knowledge
