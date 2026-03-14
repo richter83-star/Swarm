@@ -88,6 +88,18 @@ class LLMAdvisor:
         "(4) EXECUTIVE ACTION MARKETS: Markets on presidential actions (orders, trips, "
         "appointments) tend to resolve YES at higher rates than priced when the president "
         "has shown prior intent. "
+        "(5) SHOCK ALPHA — MACRO MARKETS: Kalshi prediction market prices outperform "
+        "institutional consensus forecasts by 40% lower MAE for CPI, jobs, GDP and Fed "
+        "rate decisions. During shock events the advantage grows to 50-60%. When the "
+        "market price deviates from consensus by >0.1pp, the market is right 75% of the "
+        "time. Trust the market price over consensus — institutional forecasters herd near "
+        "each other due to reputational risk while market participants face direct financial "
+        "incentives for accuracy. "
+        "(6) CONSENSUS HERDING: Institutional forecasters cluster near consensus even when "
+        "private signals suggest divergence, because the career cost of being wrong alone "
+        "exceeds the benefit of being right alone. This creates exploitable mispricings in "
+        "economic data release markets — when the market disagrees with consensus, bet with "
+        "the market. "
         "Respond ONLY with a JSON object containing exactly three keys: "
         "\"yes_probability\" (integer 0-100), "
         "\"rationale\" (one sentence, max 30 words), "
@@ -356,6 +368,17 @@ class LLMAdvisor:
             lines.append(
                 "Note: This is a mention/appearance market. Base rate for specific "
                 "topic mentions during specific events is historically low (10-30%)."
+            )
+
+        # Economic data release markets — apply shock alpha knowledge
+        macro_series = {"KXCPI", "KXJOB", "KXGDP", "KXFED", "KXPCE", "KXPPI", "KXUNR", "KXRETAIL"}
+        is_macro = any(ticker.upper().startswith(s) for s in macro_series)
+        if is_macro:
+            lines.append(
+                "Note: This is a macroeconomic data release market. Kalshi market prices "
+                "outperform institutional consensus by 40-60% MAE. If the current market "
+                "price deviates significantly from published consensus estimates, trust the "
+                "market price — it is right 75% of the time when it disagrees with consensus."
             )
 
         lines.append("\nWhat is the probability (0-100) that this market resolves YES?")

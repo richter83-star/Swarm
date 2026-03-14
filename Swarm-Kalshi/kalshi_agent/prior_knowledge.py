@@ -77,26 +77,34 @@ CATEGORY_PRIORS: Dict[str, Dict[str, float]] = {
         "liquidity_factor": 0.8,
     },
     # Economics / Finance
+    # Kalshi research: markets beat consensus by 40% MAE overall, 50-60% during shocks.
+    # When market deviates from consensus by >0.1pp, market wins 75% of the time.
+    # This applies across CPI, jobs, GDP — any market with trackable consensus estimates.
     "economics": {
-        "expected_win_rate": 0.55,
-        "edge_quality": 0.7,
+        "expected_win_rate": 0.57,
+        "edge_quality": 0.75,
         "volatility": 0.5,
         "resolution_yes_rate": 0.50,
         "liquidity_factor": 1.3,
+        "consensus_beatable": True,
+        "shock_alpha": True,
     },
     "finance": {
-        "expected_win_rate": 0.54,
-        "edge_quality": 0.65,
+        "expected_win_rate": 0.55,
+        "edge_quality": 0.68,
         "volatility": 0.55,
         "resolution_yes_rate": 0.52,
         "liquidity_factor": 1.1,
+        "consensus_beatable": True,
     },
     "fed": {
-        "expected_win_rate": 0.56,
-        "edge_quality": 0.75,
+        "expected_win_rate": 0.58,
+        "edge_quality": 0.80,
         "volatility": 0.4,
         "resolution_yes_rate": 0.55,
         "liquidity_factor": 1.4,
+        "consensus_beatable": True,
+        "shock_alpha": True,
     },
     # Climate / Weather / Science
     "climate": {
@@ -153,29 +161,63 @@ CATEGORY_PRIORS: Dict[str, Dict[str, float]] = {
 
 # Series-level edge priors for known recurring Kalshi series
 SERIES_PRIORS: Dict[str, Dict[str, float]] = {
+    # CPI: Kalshi markets show 40% lower MAE vs consensus overall,
+    # 50-60% lower during shocks. When market deviates >0.1pp from
+    # consensus, market wins 75% of cases. High edge reliability.
     "KXCPI": {
         "yes_bias": 0.02,
-        "edge_reliability": 0.7,
+        "edge_reliability": 0.82,
         "consensus_trackable": True,
-        "mean_reversion_strength": 0.6,
+        "mean_reversion_strength": 0.4,
+        "shock_alpha": True,
+        "consensus_deviation_win_rate": 0.75,
     },
     "KXJOB": {
         "yes_bias": 0.0,
-        "edge_reliability": 0.65,
+        "edge_reliability": 0.70,
         "consensus_trackable": True,
-        "mean_reversion_strength": 0.5,
+        "mean_reversion_strength": 0.45,
+        "shock_alpha": True,
     },
     "KXGDP": {
         "yes_bias": 0.03,
-        "edge_reliability": 0.6,
+        "edge_reliability": 0.68,
         "consensus_trackable": True,
-        "mean_reversion_strength": 0.55,
+        "mean_reversion_strength": 0.45,
+        "shock_alpha": True,
     },
     "KXFED": {
         "yes_bias": 0.05,
-        "edge_reliability": 0.8,
+        "edge_reliability": 0.85,
         "consensus_trackable": True,
-        "mean_reversion_strength": 0.7,
+        "mean_reversion_strength": 0.65,
+        "shock_alpha": True,
+    },
+    "KXPCE": {
+        "yes_bias": 0.01,
+        "edge_reliability": 0.75,
+        "consensus_trackable": True,
+        "mean_reversion_strength": 0.45,
+        "shock_alpha": True,
+    },
+    "KXPPI": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.68,
+        "consensus_trackable": True,
+        "mean_reversion_strength": 0.4,
+        "shock_alpha": True,
+    },
+    "KXUNR": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.70,
+        "consensus_trackable": True,
+        "mean_reversion_strength": 0.45,
+    },
+    "KXRETAIL": {
+        "yes_bias": 0.0,
+        "edge_reliability": 0.65,
+        "consensus_trackable": True,
+        "mean_reversion_strength": 0.40,
     },
     "KXHIGHNY": {
         "yes_bias": -0.05,
