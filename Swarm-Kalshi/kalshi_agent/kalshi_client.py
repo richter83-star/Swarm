@@ -90,14 +90,13 @@ class KalshiClient:
     @staticmethod
     def _load_private_key(path: str):
         """Load an RSA private key from a PEM file."""
-        key_path = Path(path)
+        key_path = Path(path).resolve()
         if not key_path.exists():
-            logger.warning(
-                "Private key file not found at '%s'. "
-                "Authentication will fail until a valid key is provided.",
-                path,
+            raise FileNotFoundError(
+                f"Private key file not found at '{key_path}'. "
+                "Set 'api.private_key_path' in swarm_config.yaml to an absolute path, "
+                "or set the KALSHI_KEY_PATH environment variable."
             )
-            return None
         with open(key_path, "rb") as fh:
             return serialization.load_pem_private_key(
                 fh.read(), password=None, backend=default_backend()

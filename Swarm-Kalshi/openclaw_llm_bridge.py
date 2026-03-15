@@ -12,8 +12,11 @@ import json
 import logging
 from pathlib import Path
 
-# Add OpenClaw workspace to path for session communication
-sys.path.insert(0, "C:/Users/17146/.openclaw/workspace")
+# Add OpenClaw workspace to path for session communication.
+# Set the OPENCLAW_WORKSPACE environment variable to your OpenClaw workspace path.
+_openclaw_workspace = os.environ.get("OPENCLAW_WORKSPACE", "")
+if _openclaw_workspace:
+    sys.path.insert(0, _openclaw_workspace)
 
 logger = logging.getLogger(__name__)
 
