@@ -806,4 +806,5 @@ class LearningEngine:
         return [dict(r) for r in rows]
 
     def close(self) -> None:
+        self.checkpoint()
         self._conn.close()
