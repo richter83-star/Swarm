@@ -845,16 +845,22 @@ class BotRunner:
             self.behavior.wait()
             return
 
-        # Filter to specialist categories
-        specialist_opps = [
-            opp for opp in opportunities
-            if self._matches_specialist({
+        # Filter to specialist categories; also backfill inferred category onto
+        # each opportunity so analysis engine and meta-learner see it (the raw
+        # Kalshi API payload often omits the `category` field entirely).
+        specialist_opps = []
+        for opp in opportunities:
+            market_dict = {
                 "ticker": opp.ticker,
                 "category": opp.category,
                 "title": opp.title,
                 "event_ticker": opp.event_ticker,
-            })
-        ]
+            }
+            inferred_cat, _src, _conf = self._infer_market_category(market_dict)
+            if not opp.category and inferred_cat:
+                opp.category = inferred_cat
+            if self._matches_specialist(market_dict | {"category": opp.category}):
+                specialist_opps.append(opp)
 
         if not specialist_opps:
             logger.info("No specialist-matched opportunities for %s.", self.bot_name)
@@ -1073,6 +1079,12 @@ class BotRunner:
                 "event_ticker": signal.event_ticker,
             }
         )
+        # Backfill inferred category onto signal so it's stored in the trade DB.
+        # The raw API often omits `category`; without this the meta-learner sees
+        # only one "unknown" bucket and can't build per-category multipliers.
+        if not signal.category and route_category:
+            signal.category = route_category
+
         signal.rationale = (
             f"{signal.rationale} | ROUTE:source={route_source} "
             f"assigned={route_category or 'unknown'} conf={route_conf:.2f} "

@@ -259,10 +259,8 @@ class AnalysisEngine:
             price = min(99, max(1, int(no_ask_effective) + buffer)) if opp.no_ask else int(100 - fair_value)
             return "no", no_edge, price
 
-        if abs(yes_edge) >= abs(no_edge):
-            return "yes", yes_edge, min(99, max(1, int(opp.yes_ask or opp.mid_price)))
-        else:
-            return "no", no_edge, min(99, max(1, int(no_ask_effective)))
+        # Both sides have negative edge — no profitable trade exists
+        return None, 0, 0
 
     def _fair_value(self, opp: MarketOpportunity) -> float:
         """
@@ -287,13 +285,13 @@ class AnalysisEngine:
                     base_fv = opp.mid_price * 0.55 + (imbalance * 100) * 0.45
                 else:
                     momentum_tilt = self._price_velocity(opp) * 0.5
-                    base_fv = opp.mid_price * 0.85 + 50.0 * 0.15 + momentum_tilt
+                    base_fv = opp.mid_price + momentum_tilt
             else:
                 momentum_tilt = self._price_velocity(opp) * 0.5
-                base_fv = opp.mid_price * 0.85 + 50.0 * 0.15 + momentum_tilt
+                base_fv = opp.mid_price + momentum_tilt
         else:
             momentum_tilt = self._price_velocity(opp) * 0.5
-            base_fv = opp.mid_price * 0.85 + 50.0 * 0.15 + momentum_tilt
+            base_fv = opp.mid_price + momentum_tilt
 
         # --- External signals tilt ---
         if self.external_signals is not None:
