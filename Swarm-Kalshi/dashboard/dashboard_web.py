@@ -721,7 +721,6 @@ def create_app(
             })
         return jsonify(activities)
 
-    @app.route("/api/ollama/chat", methods=["POST"])
     @app.route("/api/llm/chat", methods=["POST"])
     def api_llm_chat():
         """Send a prompt to the configured central LLM provider and return the response."""

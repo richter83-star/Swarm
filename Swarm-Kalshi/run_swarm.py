@@ -57,6 +57,26 @@ def ensure_directories() -> None:
         (PROJECT_ROOT / d).mkdir(parents=True, exist_ok=True)
 
 
+def validate_config_or_exit() -> None:
+    """Load and validate swarm_config.yaml; exit on fatal errors."""
+    import yaml
+    from swarm.config_validator import validate_config, ConfigValidationError
+
+    config_path = PROJECT_ROOT / "config" / "swarm_config.yaml"
+    if not config_path.exists():
+        logger.error("Config file not found: %s", config_path)
+        raise SystemExit(1)
+
+    with config_path.open("r", encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    try:
+        validate_config(cfg, project_root=PROJECT_ROOT)
+    except ConfigValidationError as exc:
+        logger.error("Startup aborted:\n%s", exc)
+        raise SystemExit(1)
+
+
 def start_dashboard(coordinator=None, host="0.0.0.0", port=8080) -> threading.Thread:
     """Start the Flask dashboard in a background thread."""
     from dashboard.dashboard_web import create_app
@@ -181,6 +201,7 @@ Examples:
 
     setup_logging(args.log_level)
     ensure_directories()
+    validate_config_or_exit()
 
     print(r"""
     ╔══════════════════════════════════════════════════════════╗
