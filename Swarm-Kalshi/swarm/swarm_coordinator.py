@@ -38,6 +38,7 @@ from kalshi_agent.kalshi_client import KalshiClient
 from swarm.balance_manager import BalanceManager
 from swarm.conflict_resolver import ConflictResolver
 from swarm.market_router import MarketRouter
+from swarm.meta_learning import SwarmMetaAggregator
 from telegram.notifier import TelegramNotifier
 from telegram.bot import TelegramCommandBot
 
@@ -168,6 +169,13 @@ class SwarmCoordinator:
         self._trade_guard_file.parent.mkdir(parents=True, exist_ok=True)
         self._last_known_balance_cents: int = 0
         self._bot_learning_db_paths: Dict[str, Path] = self._resolve_bot_learning_db_paths()
+
+        # Cross-bot meta-learning aggregator
+        meta_learning_cfg = self.cfg.get("meta_learning", {}) or {}
+        self._meta_aggregator = SwarmMetaAggregator(
+            project_root=str(self.project_root),
+            config=meta_learning_cfg,
+        )
 
         # Telegram integration
         tg_cfg = self.cfg.get("telegram", {})
@@ -1148,12 +1156,30 @@ class SwarmCoordinator:
                 self.conflict_resolver.prune_stale_claims()
                 self._run_auto_scale()
                 self._write_trade_guard_snapshot()
+                self._run_meta_aggregation()
                 time.sleep(check_interval)
             except Exception as exc:
                 logger.exception("Coordinator error: %s", exc)
                 time.sleep(10)
 
         self._shutdown()
+
+    def _run_meta_aggregation(self) -> None:
+        """
+        Run cross-bot meta-learning aggregation if the interval has elapsed.
+
+        Reads all bot trade DBs, computes swarm-wide category edge rates and
+        feature importance, and writes ``data/swarm_meta_insights.json`` so
+        each bot can blend swarm-wide signals into its local confidence scores.
+
+        Failures are logged and suppressed — this must never block the main loop.
+        """
+        if not self._meta_aggregator.should_aggregate():
+            return
+        try:
+            self._meta_aggregator.aggregate(self._bot_learning_db_paths)
+        except Exception as exc:
+            logger.warning("Meta aggregation failed: %s", exc)
 
     def _shutdown(self) -> None:
         """Graceful shutdown of the entire swarm."""

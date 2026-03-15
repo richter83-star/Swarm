@@ -44,7 +44,7 @@ from kalshi_agent.llm_advisor import LLMAdvisor
 from telegram.notifier import TelegramNotifier
 from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
-from swarm.meta_learning import MetaLearner
+from swarm.meta_learning import MetaLearner, SwarmMetaAggregator, CrossBotInsights
 from swarm.rl_feedback import RLFeedbackBridge
 
 logger = logging.getLogger("kalshi_agent")
@@ -200,6 +200,15 @@ class BotRunner:
                 )
             except Exception as exc:
                 logger.warning("MetaLearner init failed: %s", exc)
+
+        # Swarm-wide meta insights (loaded fresh each scan cycle from coordinator output)
+        self._swarm_insights: Optional[CrossBotInsights] = None
+        self._swarm_insights_max_age = int(
+            self._meta_learning_cfg.get("insights_max_age_seconds", 7200)
+        )
+        self._swarm_insights_file = str(
+            self._meta_learning_cfg.get("insights_file", "data/swarm_meta_insights.json")
+        )
 
 
         # Category and keyword filters
@@ -646,6 +655,92 @@ class BotRunner:
             # Never block trade flow.
             logger.warning("MetaLearner pre-analysis hook failed: %s", exc)
 
+    def _refresh_swarm_insights(self) -> None:
+        """Reload cross-bot meta insights from the coordinator's JSON file."""
+        try:
+            self._swarm_insights = SwarmMetaAggregator.load_insights(
+                project_root=str(self.project_root),
+                max_age_seconds=self._swarm_insights_max_age,
+                insights_file=self._swarm_insights_file,
+            )
+        except Exception as exc:
+            logger.debug("Swarm insights load failed (non-fatal): %s", exc)
+            self._swarm_insights = None
+
+    def _apply_swarm_multiplier_to_signals(
+        self, signals: List[Any]
+    ) -> List[Any]:
+        """
+        Blend swarm-wide category edge into each signal's confidence score.
+
+        For each signal the final confidence is:
+            confidence = own_confidence * blended_multiplier
+
+        where ``blended_multiplier`` is the weighted average of the bot's own
+        LearningEngine category multiplier (weight depends on own data density)
+        and the swarm-wide multiplier derived from all bots' settled trades.
+
+        This is intentionally capped and conservative:
+        - Requires ``min_trades_threshold`` settled swarm trades for the category.
+        - Max multiplier shift: ±30% (same as own LearningEngine cap).
+        - If no swarm data is available the signals pass through unchanged.
+        """
+        if not signals or self._swarm_insights is None:
+            return signals
+
+        adjusted: List[Any] = []
+        for sig in signals:
+            try:
+                category = str(getattr(sig, "category", "") or "").lower()
+
+                # Own LearningEngine multiplier for this category
+                own_trades = 0
+                own_mult = 1.0
+                if self.learning is not None:
+                    row = self.learning._conn.execute(
+                        "SELECT trades, wins FROM category_stats WHERE category = ?",
+                        (category,),
+                    ).fetchone()
+                    if row:
+                        own_trades = int(row["trades"] or 0)
+                        if own_trades >= 5:
+                            own_mult = self.learning.get_category_multiplier(category)
+
+                if self.meta_learner is not None:
+                    blended = self.meta_learner.get_swarm_category_multiplier(
+                        category=category,
+                        own_multiplier=own_mult,
+                        insights=self._swarm_insights,
+                        own_trades=own_trades,
+                    )
+                else:
+                    swarm_mult = self._swarm_insights.get_category_multiplier(category)
+                    blended = swarm_mult if swarm_mult is not None else own_mult
+
+                if abs(blended - 1.0) < 1e-6:
+                    adjusted.append(sig)
+                    continue
+
+                old_conf = sig.confidence
+                sig.confidence = round(max(0.0, min(100.0, sig.confidence * blended)), 2)
+
+                if abs(sig.confidence - old_conf) > 0.5:
+                    logger.debug(
+                        "Swarm meta-adjust %s [%s]: conf %.1f→%.1f (mult=%.3f "
+                        "hot=%s cold=%s own_trades=%d)",
+                        sig.ticker, category,
+                        old_conf, sig.confidence, blended,
+                        category in self._swarm_insights.hot_categories,
+                        category in self._swarm_insights.cold_categories,
+                        own_trades,
+                    )
+
+            except Exception as exc:
+                logger.debug("Swarm multiplier failed for signal: %s", exc)
+
+            adjusted.append(sig)
+
+        return adjusted
 
     # ------------------------------------------------------------------
     # Main loop
@@ -786,9 +881,11 @@ class BotRunner:
             self.scanner.enrich(opp)
             self.behavior.wait()
 
+        self._refresh_swarm_insights()
         self._apply_meta_strategy_before_analysis(specialist_opps[:top_n])
 
         signals = self.analysis.analyse(specialist_opps[:top_n])
+        signals = self._apply_swarm_multiplier_to_signals(signals)
         if not signals:
             logger.info("No signals above confidence threshold.")
             self.behavior.record_action(traded=False)
