@@ -19,6 +19,9 @@ numpy>=1.24.0
 
 # Database (built-in sqlite3, no extra package needed)
 
+# Testing
+pytest>=7.4.0
+
 # Optional: News API for external signals
 # newsapi-python>=0.2.7
 

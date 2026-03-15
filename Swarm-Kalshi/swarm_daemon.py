@@ -11,7 +11,7 @@ Features
 * Resets back-off counter when the child process runs healthily for ≥ 30 min.
 * Dual logging: stdout + logs/daemon.log (rotating, 10 MB × 5 files).
 * Graceful SIGINT / SIGTERM passthrough to the child process.
-* Targets run_swarm_with_ollama_brain.py (LLM brain mode).
+* Targets run_swarm.py with centralized Anthropic LLM approval enabled.
 
 Usage
 -----
@@ -39,7 +39,7 @@ from swarm.meta_evolver import MetaEvolverAgent
 # Configuration
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent
-SWARM_SCRIPT = str(PROJECT_ROOT / "run_swarm_with_ollama_brain.py")
+SWARM_SCRIPT = str(PROJECT_ROOT / "run_swarm.py")
 
 BACKOFF_BASE      = 30      # seconds — first retry delay
 BACKOFF_FACTOR    = 2       # doubles each failure

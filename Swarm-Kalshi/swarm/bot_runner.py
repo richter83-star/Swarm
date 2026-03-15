@@ -181,7 +181,7 @@ class BotRunner:
 
         self.notifier = TelegramNotifier(self.cfg.get("telegram", {}))
 
-        # Centralized LLM controller (Ollama) can approve/reject every trade.
+        # Centralized LLM controller (Anthropic) can approve/reject every trade.
         self.central_llm = CentralLLMController(
             config=self.cfg.get("central_llm", {}),
             project_root=str(self.project_root),

@@ -2,7 +2,11 @@
 central_llm_controller.py
 =========================
 
-Centralized, Ollama-backed trade approval layer for swarm bots.
+Centralized LLM trade approval layer for swarm bots.
+
+Uses the Anthropic API (Claude) as the default provider. Ollama is
+supported as an optional local fallback via ``central_llm.provider: ollama``
+in the config.
 
 Each bot asks this controller for approval before placing any order. The
 controller logs all decisions to a shared SQLite DB so every bot follows one
@@ -62,7 +66,7 @@ class CentralLLMController:
         "wide_spread_confidence_floor": 80.0,
         "longshot_price_threshold_cents": 10.0,
         "longshot_confidence_floor": 80.0,
-        # When Ollama times out/unavailable, allow strong quant signals through.
+        # When the LLM times out/is unavailable, allow strong quant signals through.
         "allow_quant_fallback_on_error": True,
         "max_red_flags": 2,
         "default_size_multiplier": 1.0,
