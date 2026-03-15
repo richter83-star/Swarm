@@ -238,7 +238,7 @@ dashboard:
   host: 0.0.0.0
   port: 8080
   auth:
-    enabled: false
+    enabled: true
     username: admin
     password: ""                          # use DASHBOARD_PASS env var
   refresh_interval_seconds: 15
