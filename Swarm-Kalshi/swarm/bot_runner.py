@@ -1349,10 +1349,22 @@ class BotRunner:
                             self.risk.record_outcome(row_pnl)
                         else:
                             outcome = "pnl_invalid"
+                            # P0-3 fix: clamp the recorded value to the theoretical max loss
+                            # so that downstream learning/autoscale never sees an impossible loss.
+                            count_meta = max(1, int(meta.get("count", 1) or 1))
+                            entry_meta = max(0, int(meta.get("entry_price", 0) or 0))
+                            max_theoretical_loss = -(count_meta * entry_meta)
+                            clamped_pnl = max(row_pnl, max_theoretical_loss)
+                            logger.warning(
+                                "P&L invariant failed for %s trade_id=%d: %s "
+                                "raw_pnl=%+d clamped_pnl=%+d trace=%s",
+                                ticker, db_id, pnl_reason,
+                                row_pnl, clamped_pnl, pnl_trace,
+                            )
                             self.learning.update_outcome(
                                 db_id,
                                 outcome,
-                                pnl_cents=row_pnl,
+                                pnl_cents=clamped_pnl,
                                 pnl_valid=False,
                                 pnl_validation_reason=pnl_reason,
                                 reconciliation_trace={
@@ -1361,12 +1373,12 @@ class BotRunner:
                                     "source": allocation_source,
                                     "total_ticker_pnl_cents": int(total_pnl),
                                     "attributed_fill_pnl_cents": int(attributed_total),
+                                    "raw_pnl_cents": int(row_pnl),
                                 },
                             )
-                            logger.error(
-                                "P&L invariant failed for %s trade_id=%d: %s trace=%s",
-                                ticker, db_id, pnl_reason, pnl_trace,
-                            )
+                            # Do NOT feed pnl_invalid row into risk state — use 0 so the
+                            # risk manager, LLM controller and meta-RL are not poisoned.
+                            row_pnl = 0
                         self._on_trade_resolved(
                             outcome,
                             row_pnl,
@@ -1611,28 +1623,76 @@ class BotRunner:
                 found = True
 
             if found:
-                outcome = self._outcome_from_pnl(fill_pnl)
-                self.learning.update_outcome(
-                    db_id,
-                    outcome,
+                # P0-3 fix: validate fill P&L against theoretical bounds before recording.
+                row_meta_for_validation = self._pending_trades.get(int(db_id), {})
+                if not row_meta_for_validation:
+                    # Build a minimal meta dict from the known count/entry if available.
+                    row_meta_for_validation = {"count": count, "entry_price": 0}
+                pnl_ok, pnl_reason, pnl_trace = self._validate_resolved_trade_pnl(
+                    row_meta=row_meta_for_validation,
                     pnl_cents=fill_pnl,
-                    pnl_valid=True,
-                    pnl_validation_reason="ok",
-                    reconciliation_trace={
-                        "source": "force_resolve_fills",
-                        "ticker": ticker,
-                        "order_id": order_id,
-                    },
                 )
-                self.risk.record_outcome(fill_pnl)
-                self._on_trade_resolved(
-                    outcome,
-                    fill_pnl,
-                    ticker=ticker,
-                    trade_db_id=db_id,
-                    order_id=order_id,
-                )
-                logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
+                if not pnl_ok:
+                    count_fr = max(1, int(row_meta_for_validation.get("count", count) or count))
+                    entry_fr = max(0, int(row_meta_for_validation.get("entry_price", 0) or 0))
+                    max_theoretical_loss = -(count_fr * entry_fr)
+                    raw_fill_pnl = fill_pnl
+                    fill_pnl = max(fill_pnl, max_theoretical_loss)
+                    logger.warning(
+                        "Force-resolve P&L invariant failed for %s db_id=%d: %s "
+                        "raw_pnl=%+d clamped_pnl=%+d trace=%s",
+                        ticker, db_id, pnl_reason, raw_fill_pnl, fill_pnl, pnl_trace,
+                    )
+                    outcome = "pnl_invalid"
+                    self.learning.update_outcome(
+                        db_id,
+                        outcome,
+                        pnl_cents=fill_pnl,
+                        pnl_valid=False,
+                        pnl_validation_reason=pnl_reason,
+                        reconciliation_trace={
+                            "source": "force_resolve_fills",
+                            "ticker": ticker,
+                            "order_id": order_id,
+                            "raw_pnl_cents": int(raw_fill_pnl),
+                            **pnl_trace,
+                        },
+                    )
+                    # Do NOT feed pnl_invalid row into risk state — pass 0 downstream.
+                    self._on_trade_resolved(
+                        outcome,
+                        0,
+                        ticker=ticker,
+                        trade_db_id=db_id,
+                        order_id=order_id,
+                    )
+                    logger.info(
+                        "Force-resolved %s as pnl_invalid (raw %+d¢ clamped %+d¢).",
+                        ticker, raw_fill_pnl, fill_pnl,
+                    )
+                else:
+                    outcome = self._outcome_from_pnl(fill_pnl)
+                    self.learning.update_outcome(
+                        db_id,
+                        outcome,
+                        pnl_cents=fill_pnl,
+                        pnl_valid=True,
+                        pnl_validation_reason="ok",
+                        reconciliation_trace={
+                            "source": "force_resolve_fills",
+                            "ticker": ticker,
+                            "order_id": order_id,
+                        },
+                    )
+                    self.risk.record_outcome(fill_pnl)
+                    self._on_trade_resolved(
+                        outcome,
+                        fill_pnl,
+                        ticker=ticker,
+                        trade_db_id=db_id,
+                        order_id=order_id,
+                    )
+                    logger.info("Force-resolved %s via fills: %s (%+d¢)", ticker, outcome, fill_pnl)
             else:
                 # No fills found — mark as expired/neutral
                 self.learning.update_outcome(
