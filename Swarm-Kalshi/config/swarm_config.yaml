@@ -5,7 +5,7 @@
 
 # --- API credentials (required) ---
 api:
-  key_id: 6c09cd68-6325-4363-ba9c-d68fc892f94e           # From Kalshi dashboard
+  key_id: 6a31ef42-f0dd-4232-91b7-710eb7db549d           # From Kalshi dashboard
   private_key_path: keys/kalshi-private.key
   base_url: https://api.elections.kalshi.com/trade-api/v2
   demo_mode: false                        # Set true to use demo environment
