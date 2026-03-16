@@ -53,10 +53,10 @@ trading:
   min_volume_24h: 50
   min_hours_to_expiry: 2
   max_hours_to_expiry: 720               # 30 days
-  max_position_pct: 0.05                 # max % of balance per position
-  max_open_positions: 10
+  max_position_pct: 0.03                 # max % of balance per position
+  max_open_positions: 3
   open_positions_scope: per_bot          # per_bot (recommended) or account
-  max_trades_per_day: 20
+  max_trades_per_day: 5
   daily_loss_limit_cents: 3000           # per-bot ($30)
   min_balance_cents: 500                 # stop trading if balance drops below
   max_drawdown_pct: 0.10                 # 10% peak-to-trough halt
@@ -99,7 +99,7 @@ learning:
   min_trades_for_review: 10
   learning_rate: 0.05
   decay_factor: 0.95
-  min_confidence_threshold: 65
+  min_confidence_threshold: 72
 
 # --- Human-like behavior ---
 human_behavior:
