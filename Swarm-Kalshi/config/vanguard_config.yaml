@@ -4,4 +4,4 @@ bot:
   description: General catch-all specialist
 learning:
   db_path: data/vanguard.db
-excluded_categories: [politics, elections, economics, weather]
+excluded_categories: [politics, elections, economics, weather, sports]

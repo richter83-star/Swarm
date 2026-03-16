@@ -355,6 +355,14 @@ class MarketScanner:
             return False
         if opp.mid_price <= 0 or opp.mid_price >= 100:
             return False
+
+        # Reject near-zero (longshot) and near-certain contracts.
+        # These offer almost no edge and high binary risk.
+        min_mid = float(self.cfg.get("min_mid_price_cents", 5))
+        max_mid = float(self.cfg.get("max_mid_price_cents", 95))
+        if opp.mid_price < min_mid or opp.mid_price > max_mid:
+            return False
+
         return True
 
     def _passes_focus_filters(self, opp: MarketOpportunity, now: datetime) -> bool:
