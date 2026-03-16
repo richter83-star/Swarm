@@ -24,6 +24,11 @@ swarm:
   market_status_cache_ttl_seconds: 120   # cache market status lookups for count grouping
   conflict_db_path: data/conflict_claims.db   # persistent claim store (v4)
   stale_claim_hours: 24                        # prune claims older than this
+  budget_allocation:
+    sentinel: 0.25    # politics/elections — steady performer
+    oracle: 0.35      # economics/Fed — confirmed edge (News/Fed markets winning)
+    pulse: 0.15       # weather/science — weak edge, reduced until proven
+    vanguard: 0.25    # general catch-all
 
 # --- Auto-scale policy (KPI-driven bot budget rebalancing) ---
 auto_scale:
@@ -54,6 +59,8 @@ trading:
   min_liquidity_cents: 1000
   min_volume_24h: 50
   min_hours_to_expiry: 2
+  min_mid_price_cents: 5            # skip near-zero longshots (1–5¢ contracts have binary risk, tiny edge)
+  max_mid_price_cents: 95           # skip near-certain contracts (95–99¢)
   max_hours_to_expiry: 720               # 30 days
   max_position_pct: 0.01                 # max % of balance per position (conservative)
   max_open_positions: 10
@@ -165,8 +172,8 @@ central_llm:
   low_volume_confidence_floor: 85
   wide_spread_threshold_cents: 5
   wide_spread_confidence_floor: 80
-  longshot_price_threshold_cents: 10
-  longshot_confidence_floor: 80
+  longshot_price_threshold_cents: 15   # raised: reject more near-zero longshots
+  longshot_confidence_floor: 85        # raised: require stronger signal before entering cheap contracts
   max_red_flags: 2
   default_size_multiplier: 1.0
   fail_open: false

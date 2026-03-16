@@ -41,8 +41,8 @@ class BalanceManager:
         self._allocations: Dict[str, float] = dict(
             config.get("budget_allocation", {
                 "sentinel": 0.25,
-                "oracle": 0.30,
-                "pulse": 0.20,
+                "oracle": 0.35,   # boosted: News/Fed edge confirmed (3/4 winning)
+                "pulse": 0.15,    # reduced: weather markets showing weak edge
                 "vanguard": 0.25,
             })
         )
