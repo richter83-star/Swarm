@@ -9,13 +9,19 @@ Provides a web UI at localhost:8080 with:
 - Individual bot detail tabs
 - Performance analytics with Chart.js
 - Bot controls (start/stop/pause, budget allocation, etc.)
+- Risk monitor (per-bot drawdown, balance, daily P&L, can_trade)
+- Advanced analytics (Sharpe, Sortino, profit factor, streaks)
+- Open positions table
+- System tab (auto-scale changes, meta-insights, uptime)
 - Auto-refresh every 15 seconds
+- Background equity snapshot writer (every 5 minutes)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -23,7 +29,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -124,10 +130,10 @@ def create_app(
             db_path = f"data/{bot_name}.db"
         return project_root / db_path
 
-    _table_column_cache: Dict[tuple[str, str], set[str]] = {}
+    _table_column_cache: Dict[tuple, set] = {}
     _table_column_lock = threading.Lock()
 
-    def _get_table_columns(bot_name: str, table_name: str) -> set[str]:
+    def _get_table_columns(bot_name: str, table_name: str) -> set:
         """Return cached column names for a table in a bot DB."""
         db_path = get_bot_db_path(bot_name)
         cache_key = (str(db_path), table_name)
@@ -136,7 +142,7 @@ def create_app(
             if cached is not None:
                 return cached
 
-        columns: set[str] = set()
+        columns: set = set()
         if db_path.exists():
             try:
                 conn = _sqlite_connect(db_path)
@@ -150,7 +156,7 @@ def create_app(
             _table_column_cache[cache_key] = columns
         return columns
 
-    def _trade_scope(bot_name: str) -> tuple[str, tuple]:
+    def _trade_scope(bot_name: str) -> tuple:
         """Return WHERE clause and params for bot-scoped trades queries."""
         if "bot_name" in _get_table_columns(bot_name, "trades"):
             return "bot_name = ?", (bot_name,)
@@ -169,7 +175,6 @@ def create_app(
                 rows = conn.execute(query, params).fetchall()
                 return [dict(r) for r in rows]
             except sqlite3.OperationalError as exc:
-                # Retry once on transient lock contention to avoid false-zero dashboards.
                 if "locked" in str(exc).lower() and attempt == 0:
                     time.sleep(0.2)
                     continue
@@ -253,7 +258,6 @@ def create_app(
 
     def get_bot_daily_summaries(bot_name: str, limit: int = 30) -> List[Dict]:
         """Get daily summaries for a bot."""
-        # If trades are shared across bots, derive bot-scoped daily stats from trades.
         if "bot_name" in _get_table_columns(bot_name, "trades"):
             where_clause, where_params = _trade_scope(bot_name)
             return query_bot_db(
@@ -293,7 +297,6 @@ def create_app(
 
     def get_bot_category_stats(bot_name: str) -> List[Dict]:
         """Get category performance for a bot."""
-        # If trades are shared across bots, derive category stats from trades.
         if "bot_name" in _get_table_columns(bot_name, "trades"):
             where_clause, where_params = _trade_scope(bot_name)
             return query_bot_db(
@@ -370,6 +373,205 @@ def create_app(
                 "cumulative_pnl": running,
             })
         return result
+
+    # ------------------------------------------------------------------
+    # NEW: Advanced analytics helpers
+    # ------------------------------------------------------------------
+
+    def _compute_advanced_analytics(bot_name: str) -> Dict[str, Any]:
+        """Compute Sharpe, Sortino, profit factor, max drawdown, streaks, best/worst trade."""
+        where_clause, where_params = _trade_scope(bot_name)
+        rows = query_bot_db(
+            bot_name,
+            """
+            SELECT pnl_cents, outcome, timestamp
+            FROM trades WHERE """
+            + where_clause
+            + """ AND outcome IN ('win', 'loss')
+            ORDER BY id ASC
+            """,
+            where_params,
+        )
+
+        if not rows:
+            return {
+                "sharpe": 0.0, "sortino": 0.0, "profit_factor": 0.0,
+                "max_drawdown_pct": 0.0, "win_streak": 0, "loss_streak": 0,
+                "best_trade_cents": 0, "worst_trade_cents": 0,
+            }
+
+        pnls = [float(r["pnl_cents"] or 0) for r in rows]
+        outcomes = [r["outcome"] for r in rows]
+
+        # Sharpe ratio (annualised using 252 trading periods)
+        n = len(pnls)
+        mean_pnl = sum(pnls) / n
+        variance = sum((p - mean_pnl) ** 2 for p in pnls) / n if n > 1 else 0.0
+        std_pnl = math.sqrt(variance)
+        sharpe = (mean_pnl / std_pnl) * math.sqrt(252) if std_pnl > 0 else 0.0
+
+        # Sortino ratio (downside deviation only)
+        downside = [p for p in pnls if p < 0]
+        if downside:
+            ds_var = sum(p ** 2 for p in downside) / len(downside)
+            ds_std = math.sqrt(ds_var)
+            sortino = (mean_pnl / ds_std) * math.sqrt(252) if ds_std > 0 else 0.0
+        else:
+            sortino = float("inf") if mean_pnl > 0 else 0.0
+
+        # Profit factor
+        gross_profit = sum(p for p in pnls if p > 0)
+        gross_loss = abs(sum(p for p in pnls if p < 0))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0)
+
+        # Max drawdown (from cumulative peak)
+        cum = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for p in pnls:
+            cum += p
+            if cum > peak:
+                peak = cum
+            dd = (peak - cum) / abs(peak) * 100.0 if peak != 0 else 0.0
+            if dd > max_dd:
+                max_dd = dd
+
+        # Win/loss streaks
+        win_streak = 0
+        loss_streak = 0
+        cur_win = 0
+        cur_loss = 0
+        for o in outcomes:
+            if o == "win":
+                cur_win += 1
+                cur_loss = 0
+                win_streak = max(win_streak, cur_win)
+            else:
+                cur_loss += 1
+                cur_win = 0
+                loss_streak = max(loss_streak, cur_loss)
+
+        return {
+            "sharpe": round(sharpe, 3),
+            "sortino": round(min(sortino, 999.0), 3),
+            "profit_factor": round(min(profit_factor, 999.0), 3),
+            "max_drawdown_pct": round(max_dd, 2),
+            "win_streak": win_streak,
+            "loss_streak": loss_streak,
+            "best_trade_cents": int(max(pnls)),
+            "worst_trade_cents": int(min(pnls)),
+        }
+
+    def _get_open_positions(bot_name: str) -> List[Dict]:
+        """Return pending/open trades from a bot's DB."""
+        where_clause, where_params = _trade_scope(bot_name)
+        rows = query_bot_db(
+            bot_name,
+            """
+            SELECT id, timestamp, ticker, side, entry_price, count,
+                   COALESCE(entry_price_cents, entry_price) AS entry_price_cents
+            FROM trades
+            WHERE """
+            + where_clause
+            + """ AND outcome = 'pending'
+            ORDER BY id DESC LIMIT 100
+            """,
+            where_params,
+        )
+        now = datetime.now(timezone.utc)
+        result = []
+        for r in rows:
+            ts = r.get("timestamp", "")
+            try:
+                dt_obj = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                hours_held = round((now - dt_obj).total_seconds() / 3600.0, 1)
+            except Exception:
+                hours_held = None
+            entry_cents = r.get("entry_price_cents") or r.get("entry_price") or 0
+            result.append({
+                "bot": bot_name,
+                "ticker": r.get("ticker", ""),
+                "side": r.get("side", ""),
+                "entry_price_cents": int(entry_cents),
+                "count": r.get("count", 0),
+                "timestamp": ts,
+                "hours_held": hours_held,
+            })
+        return result
+
+    # ------------------------------------------------------------------
+    # Equity snapshot writer (background thread)
+    # ------------------------------------------------------------------
+
+    _equity_snapshots_path = project_root / "data" / "equity_snapshots.json"
+    _equity_writer_started = False
+    _equity_writer_lock = threading.Lock()
+
+    def _load_equity_snapshots() -> List[Dict]:
+        try:
+            if _equity_snapshots_path.exists():
+                with open(_equity_snapshots_path) as fh:
+                    data = json.load(fh)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+        return []
+
+    def _append_equity_snapshot():
+        """Compute current total PnL from all bot DBs and append a snapshot."""
+        try:
+            per_bot_pnl: Dict[str, int] = {}
+            total_pnl = 0
+            for bot_name in BOT_NAMES:
+                perf = get_bot_performance(bot_name)
+                pnl = int(perf.get("total_pnl", 0) or 0)
+                per_bot_pnl[bot_name] = pnl
+                total_pnl += pnl
+
+            snapshot = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "total_pnl_cents": total_pnl,
+                "per_bot_pnl": per_bot_pnl,
+            }
+
+            # Read existing, append, keep last 2016 snapshots (~7 days at 5min)
+            snapshots = _load_equity_snapshots()
+            snapshots.append(snapshot)
+            if len(snapshots) > 2016:
+                snapshots = snapshots[-2016:]
+
+            _equity_snapshots_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = _equity_snapshots_path.with_suffix(".tmp")
+            with open(tmp_path, "w") as fh:
+                json.dump(snapshots, fh)
+            tmp_path.replace(_equity_snapshots_path)
+        except Exception as exc:
+            logger.debug("Equity snapshot write failed: %s", exc)
+
+    def _equity_writer_thread():
+        """Background thread: append equity snapshot every 5 minutes."""
+        INTERVAL = 300
+        while True:
+            try:
+                time.sleep(INTERVAL)
+                _append_equity_snapshot()
+            except Exception:
+                pass
+
+    def _start_equity_writer():
+        nonlocal _equity_writer_started
+        with _equity_writer_lock:
+            if not _equity_writer_started:
+                _equity_writer_started = True
+                t = threading.Thread(target=_equity_writer_thread, daemon=True, name="equity-writer")
+                t.start()
+
+    _start_equity_writer()
+
+    # ------------------------------------------------------------------
+    # LLM context helpers
+    # ------------------------------------------------------------------
 
     def get_recent_central_llm_decisions(limit: int = 12) -> List[Dict[str, Any]]:
         """Read recent centralized LLM trade decisions from shared DB."""
@@ -572,7 +774,7 @@ def create_app(
         )
 
     # ------------------------------------------------------------------
-    # Routes -- API endpoints
+    # Routes -- API endpoints (existing)
     # ------------------------------------------------------------------
 
     @app.route("/api/swarm/status")
@@ -709,7 +911,6 @@ def create_app(
         if coordinator:
             return jsonify(coordinator.get_activity_log(limit=50))
 
-        # Fallback: read from log files
         activities = []
         for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
@@ -720,6 +921,208 @@ def create_app(
                 "detail": "",
             })
         return jsonify(activities)
+
+    # ------------------------------------------------------------------
+    # Routes -- NEW API endpoints
+    # ------------------------------------------------------------------
+
+    @app.route("/api/risk")
+    def api_risk():
+        """Per-bot risk cards: drawdown, balance, daily P&L, can_trade, consecutive losses, open positions."""
+        result: Dict[str, Any] = {}
+        global_daily_loss = 0
+        global_exposure = 0
+
+        coordinator = app.config.get("COORDINATOR")
+        coordinator_cfg = swarm_cfg if isinstance(swarm_cfg, dict) else {}
+
+        for bot_name in BOT_NAMES:
+            status = get_bot_status(bot_name)
+            risk = status.get("risk", {}) if isinstance(status, dict) else {}
+            if not isinstance(risk, dict):
+                risk = {}
+
+            balance_cents = int(risk.get("balance_cents", 0) or 0)
+            daily_pnl_cents = int(risk.get("daily_pnl_cents", 0) or 0)
+            drawdown_pct = float(risk.get("drawdown_pct", 0.0) or 0.0)
+            can_trade = bool(risk.get("can_trade", True))
+            consecutive_losses = int(risk.get("consecutive_losses", 0) or 0)
+            open_positions = int(risk.get("open_positions", 0) or 0)
+
+            global_daily_loss += daily_pnl_cents
+            global_exposure += balance_cents
+
+            result[bot_name] = {
+                "balance_cents": balance_cents,
+                "balance_dollars": round(balance_cents / 100.0, 2),
+                "daily_pnl_cents": daily_pnl_cents,
+                "daily_pnl_dollars": round(daily_pnl_cents / 100.0, 2),
+                "drawdown_pct": round(drawdown_pct, 2),
+                "can_trade": can_trade,
+                "consecutive_losses": consecutive_losses,
+                "open_positions": open_positions,
+            }
+
+        # Global risk limits from config
+        global_loss_limit_cents = int(coordinator_cfg.get("global_daily_loss_limit_cents", 15000))
+        global_exposure_limit_cents = int(coordinator_cfg.get("global_exposure_limit_cents", 50000))
+
+        result["_global"] = {
+            "global_daily_pnl_cents": global_daily_loss,
+            "global_daily_pnl_dollars": round(global_daily_loss / 100.0, 2),
+            "global_daily_loss_limit_cents": global_loss_limit_cents,
+            "global_daily_loss_limit_dollars": round(global_loss_limit_cents / 100.0, 2),
+            "global_exposure_cents": global_exposure,
+            "global_exposure_dollars": round(global_exposure / 100.0, 2),
+            "global_exposure_limit_cents": global_exposure_limit_cents,
+            "global_exposure_limit_dollars": round(global_exposure_limit_cents / 100.0, 2),
+            "loss_limit_used_pct": round(abs(global_daily_loss) / global_loss_limit_cents * 100, 1) if global_loss_limit_cents > 0 else 0.0,
+        }
+
+        return jsonify(result)
+
+    @app.route("/api/equity-curve")
+    def api_equity_curve():
+        """Return time series of total PnL. Reads from equity_snapshots.json or falls back to DB aggregation."""
+        snapshots = _load_equity_snapshots()
+        if snapshots:
+            # Return last 288 snapshots (24h at 5min intervals)
+            recent = snapshots[-288:]
+            return jsonify({
+                "source": "equity_snapshots",
+                "points": recent,
+                "count": len(recent),
+            })
+
+        # Fallback: aggregate per-bot cumulative PnL and sum
+        combined: Dict[int, int] = {}
+        max_len = 0
+        for bot_name in BOT_NAMES:
+            series = get_cumulative_pnl(bot_name)
+            max_len = max(max_len, len(series))
+            for i, pt in enumerate(series):
+                combined[i] = combined.get(i, 0) + int(pt.get("cumulative_pnl", 0) or 0)
+
+        points = [
+            {"timestamp": None, "trade_num": i + 1, "total_pnl_cents": combined.get(i, 0)}
+            for i in range(max_len)
+        ]
+        return jsonify({
+            "source": "db_aggregation",
+            "points": points,
+            "count": len(points),
+        })
+
+    @app.route("/api/analytics/advanced")
+    def api_analytics_advanced():
+        """Advanced analytics: Sharpe, Sortino, profit factor, max drawdown, streaks, best/worst trade."""
+        result = {}
+        for bot_name in BOT_NAMES:
+            result[bot_name] = _compute_advanced_analytics(bot_name)
+        return jsonify(result)
+
+    @app.route("/api/meta-insights")
+    def api_meta_insights():
+        """Read data/swarm_meta_insights.json and return its contents."""
+        insights_path = project_root / "data" / "swarm_meta_insights.json"
+        try:
+            if insights_path.exists():
+                with open(insights_path) as fh:
+                    data = json.load(fh)
+                return jsonify({"success": True, "insights": data})
+        except Exception as exc:
+            logger.debug("Failed reading meta insights: %s", exc)
+        return jsonify({"success": False, "insights": {}, "error": "File not found or unreadable"})
+
+    @app.route("/api/position-counts")
+    def api_position_counts():
+        """Return position count reconciliation from coordinator.get_swarm_status()."""
+        coordinator = app.config.get("COORDINATOR")
+        if coordinator:
+            try:
+                status = coordinator.get_swarm_status()
+                pos_counts = status.get("position_counts", {})
+                return jsonify({"success": True, "position_counts": pos_counts})
+            except Exception as exc:
+                logger.debug("Failed getting position counts: %s", exc)
+
+        # Fallback: count pending rows per bot
+        counts: Dict[str, Any] = {}
+        total_pending = 0
+        for bot_name in BOT_NAMES:
+            where_clause, where_params = _trade_scope(bot_name)
+            rows = query_bot_db(
+                bot_name,
+                "SELECT COUNT(*) AS cnt FROM trades WHERE " + where_clause + " AND outcome = 'pending'",
+                where_params,
+            )
+            cnt = int((rows[0].get("cnt", 0) if rows else 0) or 0)
+            counts[bot_name] = cnt
+            total_pending += cnt
+
+        return jsonify({
+            "success": True,
+            "position_counts": {
+                "per_bot": counts,
+                "total_pending": total_pending,
+                "source": "db_fallback",
+            },
+        })
+
+    @app.route("/api/positions")
+    def api_positions():
+        """Return all open/pending positions across all bots."""
+        all_positions: List[Dict] = []
+        for bot_name in BOT_NAMES:
+            all_positions.extend(_get_open_positions(bot_name))
+        all_positions.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        return jsonify(all_positions)
+
+    @app.route("/api/system")
+    def api_system():
+        """Return system-level info: auto-scale changes, meta-insights, uptime, conflicts."""
+        coordinator = app.config.get("COORDINATOR")
+        auto_scale = {}
+        conflicts = {}
+        uptime_seconds = None
+
+        if coordinator:
+            try:
+                status = coordinator.get_swarm_status()
+                auto_scale = status.get("auto_scale", {})
+                conflicts = status.get("conflicts", {})
+            except Exception as exc:
+                logger.debug("System status fetch failed: %s", exc)
+
+            try:
+                for bot_name in BOT_NAMES:
+                    bot = coordinator.bots.get(bot_name)
+                    if bot and bot.started_at:
+                        started = bot.started_at
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        uptime_seconds = int((datetime.now(timezone.utc) - started).total_seconds())
+                        break
+            except Exception:
+                pass
+
+        # Meta-insights summary
+        meta_insights = {}
+        insights_path = project_root / "data" / "swarm_meta_insights.json"
+        try:
+            if insights_path.exists():
+                with open(insights_path) as fh:
+                    meta_insights = json.load(fh)
+        except Exception:
+            pass
+
+        return jsonify({
+            "auto_scale": auto_scale,
+            "conflicts": conflicts,
+            "meta_insights": meta_insights,
+            "uptime_seconds": uptime_seconds,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
     @app.route("/api/llm/chat", methods=["POST"])
     def api_llm_chat():
@@ -894,6 +1297,12 @@ def create_app(
             "context_summary": context_summary,
         })
 
+    # Keep the /api/ollama/chat alias for backward compatibility with existing HTML
+    @app.route("/api/ollama/chat", methods=["POST"])
+    def api_ollama_chat_compat():
+        """Backward-compatible alias for /api/llm/chat."""
+        return api_llm_chat()
+
     # ------------------------------------------------------------------
     # Routes -- Control endpoints
     # ------------------------------------------------------------------
@@ -1001,8 +1410,8 @@ def create_app(
         if _manual_controls_locked():
             return _manual_controls_forbidden()
         import glob as _glob
-        project_root = Path(app.config.get("PROJECT_ROOT", "."))
-        data_dir = project_root / "data"
+        project_root_path = Path(app.config.get("PROJECT_ROOT", "."))
+        data_dir = project_root_path / "data"
         deleted = []
         errors = []
         patterns = ["sentinel", "oracle", "pulse", "vanguard"]
@@ -1017,20 +1426,12 @@ def create_app(
 
     @app.route("/api/alerts")
     def api_alerts():
-        """
-        Return active alerts for the swarm.
-
-        Alert types:
-        - bot_crashed: a bot is in error/stopped state unexpectedly
-        - daily_loss_limit: global or per-bot daily loss limit hit
-        - trade_failed: recent trade error in activity log
-        - stale_pending: pending trades older than 48h
-        """
+        """Return active alerts for the swarm."""
         alerts = []
         coordinator = app.config.get("COORDINATOR")
 
-        # -- Bot crash alerts --
-        for bot_name in ["sentinel", "oracle", "pulse", "vanguard"]:
+        # Bot crash alerts
+        for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
             state = status.get("state", "unknown")
             if state in ("error", "stopped") and status.get("pid"):
@@ -1042,8 +1443,8 @@ def create_app(
                     "timestamp": status.get("timestamp", ""),
                 })
 
-        # -- Daily loss limit alerts (per-bot) --
-        for bot_name in ["sentinel", "oracle", "pulse", "vanguard"]:
+        # Daily loss limit alerts (per-bot)
+        for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
             risk = status.get("risk", {})
             daily_pnl = risk.get("daily_pnl_cents", 0)
@@ -1057,9 +1458,8 @@ def create_app(
                     "timestamp": status.get("timestamp", ""),
                 })
 
-        # -- Stale pending trade alerts --
-        from datetime import datetime, timezone, timedelta
-        for bot_name in ["sentinel", "oracle", "pulse", "vanguard"]:
+        # Stale pending trade alerts
+        for bot_name in BOT_NAMES:
             try:
                 db_path = get_bot_db_path(bot_name)
                 if db_path.exists():
@@ -1081,7 +1481,7 @@ def create_app(
             except Exception as exc:
                 logger.debug("Alert check failed for %s: %s", bot_name, exc)
 
-        # -- Recent trade failure alerts from activity log --
+        # Recent trade failure alerts from activity log
         if coordinator:
             activity = coordinator.get_activity_log(limit=20)
         else:

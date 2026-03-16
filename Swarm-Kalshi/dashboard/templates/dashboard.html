@@ -9,115 +9,205 @@
 /* ===== Reset & Variables ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;
-  --text-dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;
-  --yellow:#d29922;--purple:#bc8cff;
+  --bg:#070b10;--surface:#0d1117;--surface2:#131920;--border:#1e2a35;
+  --text:#cdd6e0;--text-dim:#6b7c8d;--accent:#4facf7;
+  --green:#2dd4a0;--red:#f05a5a;--yellow:#f5a623;--purple:#a78bfa;
+  --orange:#fb923c;
   --sentinel:#e74c3c;--oracle:#3498db;--pulse:#2ecc71;--vanguard:#f39c12;
+  --card-glow-green:rgba(45,212,160,.08);
+  --card-glow-red:rgba(240,90,90,.08);
+  --card-glow-blue:rgba(79,172,247,.08);
 }
-body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
 a{color:var(--accent);text-decoration:none}
 
-/* ===== Layout ===== */
-.header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.header h1{font-size:1.3rem;font-weight:600;display:flex;align-items:center;gap:10px}
-.header h1 .logo{font-size:1.6rem}
-.header-right{display:flex;align-items:center;gap:16px;font-size:.85rem;color:var(--text-dim)}
-.header-right .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.header-right .status-dot.running{background:var(--green)}
-.header-right .status-dot.stopped{background:var(--red)}
-.header-right .status-dot.unknown{background:var(--yellow)}
+/* ===== Header ===== */
+.header{
+  background:linear-gradient(135deg,#0a111a 0%,#0f1923 100%);
+  border-bottom:1px solid var(--border);
+  padding:14px 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;
+  box-shadow:0 2px 20px rgba(0,0,0,.5);
+}
+.header h1{font-size:1.25rem;font-weight:700;display:flex;align-items:center;gap:10px;
+  background:linear-gradient(90deg,#4facf7,#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header h1 .logo{font-size:1.5rem;-webkit-text-fill-color:initial}
+.header-right{display:flex;align-items:center;gap:20px;font-size:.82rem;color:var(--text-dim)}
+.header-right .status-dot{width:9px;height:9px;border-radius:50%;display:inline-block;box-shadow:0 0 6px currentColor}
+.header-right .status-dot.running{background:var(--green);color:var(--green)}
+.header-right .status-dot.stopped{background:var(--red);color:var(--red)}
+.header-right .status-dot.unknown{background:var(--yellow);color:var(--yellow)}
+.alert-badge{background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;font-size:.72rem;font-weight:700;margin-left:6px;cursor:pointer}
 
-.container{max-width:1440px;margin:0 auto;padding:20px 24px}
+/* ===== Layout ===== */
+.container{max-width:1600px;margin:0 auto;padding:22px 28px}
 
 /* ===== Tabs ===== */
-.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0}
-.tab{padding:10px 20px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;font-size:.9rem;transition:all .2s}
-.tab:hover{color:var(--text)}
+.tabs{display:flex;gap:2px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;overflow-x:auto;flex-wrap:nowrap}
+.tab{padding:10px 18px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;font-size:.85rem;transition:all .2s;white-space:nowrap;user-select:none}
+.tab:hover{color:var(--text);background:rgba(255,255,255,.03);border-radius:6px 6px 0 0}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 .tab-content{display:none}
 .tab-content.active{display:block}
 
 /* ===== Cards ===== */
 .grid{display:grid;gap:16px}
-.grid-4{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-.grid-3{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
-.grid-2{grid-template-columns:repeat(auto-fit,minmax(400px,1fr))}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;position:relative;overflow:hidden}
+.grid-4{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.grid-5{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:20px;
+  position:relative;
+  overflow:hidden;
+  transition:box-shadow .2s;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(79,172,247,.3),transparent);
+}
+.card:hover{box-shadow:0 4px 24px rgba(0,0,0,.4)}
+
 .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.card-title{font-size:.85rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-.card-value{font-size:1.8rem;font-weight:700}
+.card-title{font-size:.78rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;font-weight:600}
+.card-value{font-size:2rem;font-weight:700;letter-spacing:-.5px;line-height:1.2}
 .card-value.positive{color:var(--green)}
 .card-value.negative{color:var(--red)}
+.card-sub{font-size:.78rem;color:var(--text-dim);margin-top:4px}
+
+/* Gradient metric cards */
+.metric-card-green{background:linear-gradient(135deg,var(--surface) 0%,var(--card-glow-green));border-color:rgba(45,212,160,.2)}
+.metric-card-red{background:linear-gradient(135deg,var(--surface) 0%,var(--card-glow-red));border-color:rgba(240,90,90,.2)}
+.metric-card-blue{background:linear-gradient(135deg,var(--surface) 0%,var(--card-glow-blue));border-color:rgba(79,172,247,.2)}
 
 /* ===== Bot Cards ===== */
 .bot-card{border-left:3px solid var(--border);transition:transform .15s,box-shadow .15s}
-.bot-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
-.bot-card .bot-name{font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px}
-.bot-card .bot-specialist{font-size:.8rem;color:var(--text-dim);margin-top:2px}
-.bot-card .bot-state{display:inline-flex;align-items:center;gap:4px;font-size:.75rem;padding:3px 10px;border-radius:12px;font-weight:600}
-.bot-card .bot-state.running{background:rgba(63,185,80,.15);color:var(--green)}
-.bot-card .bot-state.paused{background:rgba(210,153,34,.15);color:var(--yellow)}
-.bot-card .bot-state.stopped{background:rgba(248,81,73,.15);color:var(--red)}
-.bot-card .bot-state.error{background:rgba(248,81,73,.15);color:var(--red)}
-.bot-card .bot-state.unknown{background:rgba(139,148,158,.15);color:var(--text-dim)}
+.bot-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.bot-card .bot-name{font-size:1.05rem;font-weight:700;display:flex;align-items:center;gap:8px}
+.bot-card .bot-specialist{font-size:.75rem;color:var(--text-dim);margin-top:2px}
+.bot-card .bot-state{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600}
+.bot-card .bot-state.running{background:rgba(45,212,160,.15);color:var(--green)}
+.bot-card .bot-state.paused{background:rgba(245,166,35,.15);color:var(--yellow)}
+.bot-card .bot-state.stopped{background:rgba(240,90,90,.15);color:var(--red)}
+.bot-card .bot-state.error{background:rgba(240,90,90,.15);color:var(--red)}
+.bot-card .bot-state.unknown{background:rgba(107,124,141,.15);color:var(--text-dim)}
 .bot-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
-.bot-metric{text-align:center;padding:8px;background:rgba(255,255,255,.03);border-radius:6px}
-.bot-metric .label{font-size:.7rem;color:var(--text-dim);text-transform:uppercase}
-.bot-metric .value{font-size:1.1rem;font-weight:700;margin-top:2px}
-.bot-controls{display:flex;gap:6px;margin-top:12px}
-.btn{padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:.78rem;cursor:pointer;transition:all .15s}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
+.bot-metric{text-align:center;padding:9px 6px;background:rgba(255,255,255,.03);border-radius:7px;border:1px solid var(--border)}
+.bot-metric .label{font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}
+.bot-metric .value{font-size:1.05rem;font-weight:700;margin-top:3px}
+.bot-controls{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+
+/* ===== Buttons ===== */
+.btn{padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.03);color:var(--text);font-size:.78rem;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(79,172,247,.08)}
 .btn.btn-green{border-color:var(--green);color:var(--green)}
-.btn.btn-green:hover{background:rgba(63,185,80,.15)}
+.btn.btn-green:hover{background:rgba(45,212,160,.15)}
 .btn.btn-red{border-color:var(--red);color:var(--red)}
-.btn.btn-red:hover{background:rgba(248,81,73,.15)}
+.btn.btn-red:hover{background:rgba(240,90,90,.15)}
 .btn.btn-yellow{border-color:var(--yellow);color:var(--yellow)}
-.btn.btn-yellow:hover{background:rgba(210,153,34,.15)}
+.btn.btn-yellow:hover{background:rgba(245,166,35,.15)}
 
 /* ===== Tables ===== */
 .table-wrap{overflow-x:auto;margin-top:12px}
 table{width:100%;border-collapse:collapse;font-size:.82rem}
-th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--border);color:var(--text-dim);font-weight:600;text-transform:uppercase;font-size:.72rem;letter-spacing:.5px}
-td{padding:8px 12px;border-bottom:1px solid var(--border)}
-tr:hover td{background:rgba(255,255,255,.02)}
+th{text-align:left;padding:10px 14px;border-bottom:2px solid var(--border);color:var(--text-dim);font-weight:600;text-transform:uppercase;font-size:.68rem;letter-spacing:.6px;white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.04)}
+tr:hover td{background:rgba(79,172,247,.04)}
 .pnl-pos{color:var(--green)}
 .pnl-neg{color:var(--red)}
 
 /* ===== Charts ===== */
-.chart-container{position:relative;height:300px;margin-top:12px}
+.chart-container{position:relative;height:320px;margin-top:12px}
+.chart-container-lg{position:relative;height:420px;margin-top:12px}
+.chart-container-sm{position:relative;height:220px;margin-top:12px}
 
 /* ===== Activity Feed ===== */
-.activity-feed{max-height:400px;overflow-y:auto}
-.activity-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.82rem}
-.activity-item .time{color:var(--text-dim);min-width:70px;font-size:.75rem}
-.activity-item .bot-tag{padding:2px 8px;border-radius:4px;font-size:.72rem;font-weight:600;min-width:70px;text-align:center}
+.activity-feed{max-height:500px;overflow-y:auto}
+.activity-item{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.82rem}
+.activity-item .time{color:var(--text-dim);min-width:72px;font-size:.72rem;padding-top:2px}
+.activity-item .bot-tag{padding:2px 8px;border-radius:4px;font-size:.68rem;font-weight:600;min-width:72px;text-align:center;align-self:flex-start;margin-top:2px}
 .activity-item .detail{color:var(--text)}
 
 /* ===== Global Controls ===== */
-.global-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+.global-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:16px 20px;background:var(--surface2);border:1px solid var(--border);border-radius:10px}
 .global-controls .btn{padding:8px 18px;font-size:.85rem}
 
 /* ===== LLM Chat ===== */
-.llm-feed{height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.02);padding:12px}
-.llm-msg{padding:10px 12px;border-radius:8px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;font-size:.9rem}
-.llm-msg.user{background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.25)}
-.llm-msg.assistant{background:rgba(63,185,80,.10);border:1px solid rgba(63,185,80,.2)}
-.llm-msg.error{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.25)}
-.llm-input{width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.9rem}
-.llm-meta{font-size:.78rem;color:var(--text-dim)}
-.llm-checkbox{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text-dim);font-size:.85rem}
+.llm-feed{height:460px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015);padding:14px}
+.llm-msg{padding:11px 14px;border-radius:8px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;font-size:.88rem;line-height:1.55}
+.llm-msg.user{background:rgba(79,172,247,.1);border:1px solid rgba(79,172,247,.2)}
+.llm-msg.assistant{background:rgba(45,212,160,.08);border:1px solid rgba(45,212,160,.15)}
+.llm-msg.error{background:rgba(240,90,90,.08);border:1px solid rgba(240,90,90,.2)}
+.llm-input{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.88rem;resize:vertical}
+.llm-input:focus{outline:none;border-color:var(--accent)}
+.llm-meta{font-size:.76rem;color:var(--text-dim)}
+.llm-checkbox{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text-dim);font-size:.84rem}
+
+/* ===== Risk Cards ===== */
+.risk-card{border-left:3px solid var(--border)}
+.risk-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.risk-metric{padding:8px 10px;background:rgba(255,255,255,.03);border-radius:6px;border:1px solid var(--border)}
+.risk-metric .rl{font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}
+.risk-metric .rv{font-size:1.1rem;font-weight:700;margin-top:2px}
+
+.status-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:.72rem;font-weight:700}
+.status-pill.ok{background:rgba(45,212,160,.15);color:var(--green);border:1px solid rgba(45,212,160,.3)}
+.status-pill.warn{background:rgba(245,166,35,.15);color:var(--yellow);border:1px solid rgba(245,166,35,.3)}
+.status-pill.danger{background:rgba(240,90,90,.15);color:var(--red);border:1px solid rgba(240,90,90,.3)}
+
+.progress-bar-wrap{margin-top:8px}
+.progress-bar-track{height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
+.progress-bar-fill{height:100%;border-radius:3px;transition:width .4s}
+.progress-bar-fill.ok{background:linear-gradient(90deg,var(--green),#0ea5e9)}
+.progress-bar-fill.warn{background:linear-gradient(90deg,var(--yellow),#fb923c)}
+.progress-bar-fill.danger{background:linear-gradient(90deg,var(--red),#7c3aed)}
+
+/* ===== Analytics stat cards ===== */
+.stat-card{text-align:center;padding:16px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px}
+.stat-card .sv{font-size:1.6rem;font-weight:700;line-height:1}
+.stat-card .sl{font-size:.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;margin-top:6px}
+.stat-card .sh{font-size:.78rem;color:var(--text-dim);margin-top:4px}
+
+/* ===== Tooltip ===== */
+[data-tip]{position:relative;cursor:help}
+[data-tip]:hover::after{
+  content:attr(data-tip);position:absolute;bottom:130%;left:50%;transform:translateX(-50%);
+  background:#1c2733;color:var(--text);border:1px solid var(--border);border-radius:6px;
+  padding:6px 10px;font-size:.75rem;white-space:nowrap;z-index:200;pointer-events:none;
+  box-shadow:0 4px 16px rgba(0,0,0,.5);max-width:240px;white-space:normal;text-align:center;
+}
+
+/* ===== System tab ===== */
+.insight-item{padding:10px 14px;border-left:3px solid var(--accent);background:rgba(79,172,247,.05);border-radius:0 6px 6px 0;margin-bottom:8px;font-size:.84rem}
+.scale-change{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;margin-bottom:6px;font-size:.82rem}
+.scale-change .bot-chip{padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:700}
+.scale-change .arrow{color:var(--accent)}
+.scale-change.promote .arrow{color:var(--green)}
+.scale-change.demote .arrow{color:var(--red)}
+
+/* ===== Uptime badge ===== */
+.uptime-badge{background:linear-gradient(135deg,rgba(45,212,160,.1),rgba(79,172,247,.1));border:1px solid rgba(79,172,247,.2);border-radius:8px;padding:12px 16px;text-align:center}
+.uptime-badge .uv{font-size:1.5rem;font-weight:700;color:var(--accent)}
+.uptime-badge .ul{font-size:.75rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
 
 /* ===== Scrollbar ===== */
-::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--text-dim)}
+::-webkit-scrollbar-thumb{background:#1e2a35;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#2a3a4a}
 
 /* ===== Responsive ===== */
-@media(max-width:768px){
-  .grid-4,.grid-3,.grid-2{grid-template-columns:1fr}
-  .header{flex-direction:column;gap:8px}
-  .tabs{overflow-x:auto;flex-wrap:nowrap}
+@media(max-width:900px){
+  .grid-4,.grid-3,.grid-2,.grid-5{grid-template-columns:1fr}
+  .header{flex-direction:column;gap:8px;padding:12px 16px}
+  .container{padding:16px}
+  .tabs{gap:0}
+  .tab{padding:8px 12px;font-size:.78rem}
 }
 </style>
 </head>
@@ -129,6 +219,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="header-right">
     <span>Swarm: <span class="status-dot" id="swarm-dot"></span> <span id="swarm-state">Loading...</span></span>
     <span id="last-update">—</span>
+    <span id="alert-indicator" style="display:none">
+      <span class="alert-badge" onclick="switchTab('activity')" id="alert-count-badge">0 alerts</span>
+    </span>
   </div>
 </div>
 
@@ -143,7 +236,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="tab" data-tab="pulse">🟢 Pulse</div>
     <div class="tab" data-tab="vanguard">🟡 Vanguard</div>
     <div class="tab" data-tab="analytics">Analytics</div>
+    <div class="tab" data-tab="risk">Risk Monitor</div>
+    <div class="tab" data-tab="positions">Positions</div>
     <div class="tab" data-tab="activity">Activity</div>
+    <div class="tab" data-tab="system">System</div>
     <div class="tab" data-tab="llm">LLM Chat</div>
     <div class="tab" data-tab="controls">Controls</div>
   </div>
@@ -152,20 +248,20 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="tab-content active" id="tab-overview">
     <!-- Global Metrics -->
     <div class="grid grid-4" style="margin-bottom:20px">
-      <div class="card">
-        <div class="card-title">Total Trades</div>
+      <div class="card metric-card-blue">
+        <div class="card-title" data-tip="Total completed trades (wins + losses) across all bots">Total Trades</div>
         <div class="card-value" id="g-total-trades">0</div>
       </div>
-      <div class="card">
-        <div class="card-title">Overall Win Rate</div>
+      <div class="card metric-card-green">
+        <div class="card-title" data-tip="Percentage of trades that resulted in a profit">Overall Win Rate</div>
         <div class="card-value" id="g-win-rate">0%</div>
       </div>
       <div class="card">
-        <div class="card-title">Total P&L</div>
+        <div class="card-title" data-tip="Combined net profit/loss in dollars across all bots">Total P&amp;L</div>
         <div class="card-value" id="g-total-pnl">$0.00</div>
       </div>
       <div class="card">
-        <div class="card-title">Active Bots</div>
+        <div class="card-title" data-tip="Number of bots currently in running state">Active Bots</div>
         <div class="card-value" id="g-active-bots">0 / 4</div>
       </div>
     </div>
@@ -176,13 +272,19 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <!-- Charts Row -->
     <div class="grid grid-2" style="margin-top:20px">
       <div class="card">
-        <div class="card-title">Total P&L by Bot</div>
+        <div class="card-title">Total P&amp;L by Bot</div>
         <div class="chart-container"><canvas id="chart-pnl-all"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Win Rate by Bot</div>
         <div class="chart-container"><canvas id="chart-wr-bar"></canvas></div>
       </div>
+    </div>
+
+    <!-- Equity Curve -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-title">Swarm Equity Curve (Total P&amp;L Over Time)</div>
+      <div class="chart-container-lg"><canvas id="chart-equity-curve"></canvas></div>
     </div>
   </div>
 
@@ -192,12 +294,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="grid grid-4" style="margin-bottom:20px">
       <div class="card"><div class="card-title">Trades</div><div class="card-value" id="{{ bot_name }}-trades">0</div></div>
       <div class="card"><div class="card-title">Win Rate</div><div class="card-value" id="{{ bot_name }}-wr">0%</div></div>
-      <div class="card"><div class="card-title">P&L</div><div class="card-value" id="{{ bot_name }}-pnl">$0.00</div></div>
+      <div class="card"><div class="card-title">P&amp;L</div><div class="card-value" id="{{ bot_name }}-pnl">$0.00</div></div>
       <div class="card"><div class="card-title">Avg Confidence</div><div class="card-value" id="{{ bot_name }}-conf">0</div></div>
     </div>
     <div class="grid grid-2">
       <div class="card">
-        <div class="card-title">Cumulative P&L</div>
+        <div class="card-title">Cumulative P&amp;L</div>
         <div class="chart-container"><canvas id="chart-pnl-{{ bot_name }}"></canvas></div>
       </div>
       <div class="card">
@@ -209,7 +311,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="card-title">Recent Trades</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Price</th><th>Qty</th><th>Conf</th><th>Outcome</th><th>P&L</th></tr></thead>
+          <thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Price</th><th>Qty</th><th>Conf</th><th>Outcome</th><th>P&amp;L</th></tr></thead>
           <tbody id="{{ bot_name }}-trades-table"></tbody>
         </table>
       </div>
@@ -219,7 +321,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="card-title">Category Performance</div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Category</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L</th></tr></thead>
+            <thead><tr><th>Category</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&amp;L</th></tr></thead>
             <tbody id="{{ bot_name }}-cat-table"></tbody>
           </table>
         </div>
@@ -234,24 +336,124 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
   <!-- ===== ANALYTICS TAB ===== -->
   <div class="tab-content" id="tab-analytics">
+    <!-- Advanced stats grid per bot -->
+    <div id="advanced-stats-grid" class="grid grid-4" style="margin-bottom:20px"></div>
+
     <div class="grid grid-2">
       <div class="card">
-        <div class="card-title">P&L Comparison</div>
-        <div class="chart-container"><canvas id="chart-pnl-compare"></canvas></div>
+        <div class="card-title">P&amp;L Comparison</div>
+        <div class="chart-container-lg"><canvas id="chart-pnl-compare"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Trade Distribution</div>
-        <div class="chart-container"><canvas id="chart-trade-dist"></canvas></div>
+        <div class="chart-container-lg"><canvas id="chart-trade-dist"></canvas></div>
       </div>
     </div>
     <div class="grid grid-2" style="margin-top:16px">
       <div class="card">
-        <div class="card-title">Daily P&L Heatmap</div>
+        <div class="card-title">Daily P&amp;L Heatmap</div>
         <div class="chart-container"><canvas id="chart-daily-pnl"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">ROI by Bot</div>
         <div class="chart-container"><canvas id="chart-roi"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Sharpe / Profit Factor / Drawdown per bot -->
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title" data-tip="Sharpe ratio: risk-adjusted return (higher is better, >1 is good)">Sharpe Ratio by Bot</div>
+        <div class="chart-container-sm"><canvas id="chart-sharpe"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Profit Factor: gross profit / gross loss (>1.5 is healthy)">Profit Factor by Bot</div>
+        <div class="chart-container-sm"><canvas id="chart-pf"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Streaks table -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Win/Loss Streaks &amp; Extremes</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Bot</th>
+            <th data-tip="Best consecutive winning run">Best Win Streak</th>
+            <th data-tip="Longest consecutive losing run">Worst Loss Streak</th>
+            <th data-tip="Single highest profit trade">Best Trade</th>
+            <th data-tip="Single largest loss trade">Worst Trade</th>
+            <th data-tip="Maximum peak-to-trough drawdown">Max Drawdown</th>
+            <th data-tip="Sortino ratio: downside-risk-adjusted return">Sortino</th>
+          </tr></thead>
+          <tbody id="streaks-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== RISK MONITOR TAB ===== -->
+  <div class="tab-content" id="tab-risk">
+    <!-- Global risk summary -->
+    <div class="grid grid-4" style="margin-bottom:20px" id="global-risk-cards">
+      <div class="card metric-card-blue">
+        <div class="card-title" data-tip="Total daily P&L across all bots today">Global Daily P&amp;L</div>
+        <div class="card-value" id="g-daily-pnl">$0.00</div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Maximum daily loss allowed before trading halts">Daily Loss Limit</div>
+        <div class="card-value" id="g-loss-limit">—</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-track"><div class="progress-bar-fill ok" id="loss-limit-bar" style="width:0%"></div></div>
+          <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px" id="loss-limit-pct">0% used</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Total combined balance across all bots">Global Exposure</div>
+        <div class="card-value" id="g-exposure">$0.00</div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Number of bots currently blocked from trading">Bots Halted</div>
+        <div class="card-value" id="g-bots-halted">0</div>
+      </div>
+    </div>
+
+    <!-- Per-bot risk cards -->
+    <div class="grid grid-4" id="risk-bot-cards"></div>
+  </div>
+
+  <!-- ===== POSITIONS TAB ===== -->
+  <div class="tab-content" id="tab-positions">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Open / Pending Positions</div>
+        <span id="positions-count" style="font-size:.8rem;color:var(--text-dim)">0 positions</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Bot</th>
+            <th data-tip="Market ticker symbol">Ticker</th>
+            <th data-tip="YES or NO side">Side</th>
+            <th data-tip="Entry price in dollars">Entry Price</th>
+            <th data-tip="Number of contracts">Contracts</th>
+            <th data-tip="Approximate cost basis">Cost Basis</th>
+            <th data-tip="Hours since position was opened">Hours Held</th>
+            <th data-tip="Trade entry timestamp">Opened At</th>
+          </tr></thead>
+          <tbody id="positions-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title">Positions by Bot</div>
+        <div class="chart-container-sm"><canvas id="chart-pos-by-bot"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Position Age Distribution</div>
+        <div class="chart-container-sm"><canvas id="chart-pos-age"></canvas></div>
       </div>
     </div>
   </div>
@@ -261,6 +463,53 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="card">
       <div class="card-title">Activity Feed</div>
       <div class="activity-feed" id="activity-feed"></div>
+    </div>
+  </div>
+
+  <!-- ===== SYSTEM TAB ===== -->
+  <div class="tab-content" id="tab-system">
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="uptime-badge">
+        <div class="uv" id="sys-uptime">—</div>
+        <div class="ul">Uptime</div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Auto-scale: last evaluation time">Last Auto-Scale</div>
+        <div class="card-value" style="font-size:1rem" id="sys-last-scale">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Conflict resolver: active conflicts">Active Conflicts</div>
+        <div class="card-value" id="sys-conflicts">0</div>
+      </div>
+      <div class="card">
+        <div class="card-title" data-tip="Position count reconciliation">Open Positions (Reconciled)</div>
+        <div class="card-value" id="sys-pos-count">0</div>
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <!-- Auto-scale changes -->
+      <div class="card">
+        <div class="card-title" data-tip="Recent auto-scale allocation changes between bots">Auto-Scale Changes</div>
+        <div id="auto-scale-changes" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Meta-learning insights -->
+      <div class="card">
+        <div class="card-title" data-tip="Insights from swarm meta-learning aggregator">Meta-Learning Insights</div>
+        <div id="meta-insights-content" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- Position count reconciliation detail -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Position Count Reconciliation</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Source</th><th>Count</th><th>Details</th></tr></thead>
+          <tbody id="pos-reconcile-table"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -328,7 +577,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
   </div>
 
-</div>
+</div><!-- /container -->
 
 <script>
 // ===== Configuration =====
@@ -338,27 +587,58 @@ const REFRESH_MS = {{ refresh_interval }} * 1000;
 const MANUAL_CONTROLS_LOCKED = {{ manual_controls_locked | tojson }};
 const LLM_HISTORY = [];
 
+const CHART_OPTS = {
+  scales: {
+    x: { ticks: { color: '#6b7c8d' }, grid: { color: 'rgba(255,255,255,.05)' } },
+    y: { ticks: { color: '#6b7c8d' }, grid: { color: 'rgba(255,255,255,.05)' } },
+  },
+  plugins: { legend: { labels: { color: '#cdd6e0', font: { size: 11 } } } },
+  responsive: true,
+  maintainAspectRatio: false,
+};
+
 // ===== Chart instances =====
 const charts = {};
 
 // ===== Tab switching =====
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  const content = document.getElementById('tab-' + tabName);
+  if (tab) tab.classList.add('active');
+  if (content) content.classList.add('active');
+  // Trigger data load for newly activated tab
+  if (BOT_NAMES.includes(tabName)) refreshBotDetail(tabName);
+  else if (tabName === 'analytics') refreshAnalytics();
+  else if (tabName === 'activity') refreshActivity();
+  else if (tabName === 'risk') refreshRisk();
+  else if (tabName === 'positions') refreshPositions();
+  else if (tabName === 'system') refreshSystem();
+  else if (tabName === 'llm') document.getElementById('llm-input')?.focus();
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-  });
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
 
 // ===== Utility functions =====
 function fmt$(cents) {
+  if (cents == null || isNaN(cents)) return '$0.00';
   const d = cents / 100;
-  const s = d >= 0 ? '+$' + d.toFixed(2) : '-$' + Math.abs(d).toFixed(2);
-  return s;
+  return d >= 0 ? '+$' + d.toFixed(2) : '-$' + Math.abs(d).toFixed(2);
 }
-function pnlClass(cents) { return cents >= 0 ? 'positive pnl-pos' : 'negative pnl-neg'; }
+function fmtDollars(dollars) {
+  if (dollars == null || isNaN(dollars)) return '$0.00';
+  return dollars >= 0 ? '+$' + dollars.toFixed(2) : '-$' + Math.abs(dollars).toFixed(2);
+}
+function pnlClass(v) { return v >= 0 ? 'positive pnl-pos' : 'negative pnl-neg'; }
 function stateClass(s) { return ['running','paused','stopped','error','unknown'].includes(s) ? s : 'unknown'; }
+function pillClass(v, warnAt, dangerAt) {
+  if (v >= dangerAt) return 'danger';
+  if (v >= warnAt) return 'warn';
+  return 'ok';
+}
 
 function makeChart(id, cfg) {
   const el = document.getElementById(id);
@@ -390,14 +670,16 @@ async function refreshOverview() {
   document.getElementById('g-total-trades').textContent = gm.total_trades || 0;
   const wrEl = document.getElementById('g-win-rate');
   wrEl.textContent = (gm.overall_win_rate || 0).toFixed(1) + '%';
+  wrEl.className = 'card-value ' + ((gm.overall_win_rate || 0) >= 50 ? 'positive' : 'negative');
   const pnlEl = document.getElementById('g-total-pnl');
-  pnlEl.textContent = fmt$(gm.total_pnl_cents || 0);
-  pnlEl.className = 'card-value ' + pnlClass(gm.total_pnl_cents || 0);
+  const pnlCents = gm.total_pnl_cents || 0;
+  pnlEl.textContent = fmt$(pnlCents);
+  pnlEl.className = 'card-value ' + pnlClass(pnlCents);
 
   // Active bots count
   let active = 0;
   const bots = data.bots || {};
-  BOT_NAMES.forEach(n => { if ((bots[n]||{}).state === 'running') active++; });
+  BOT_NAMES.forEach(n => { if ((bots[n]||{}).state === 'running' || (bots[n]||{}).process_state === 'running') active++; });
   document.getElementById('g-active-bots').textContent = active + ' / 4';
 
   // Bot cards
@@ -406,12 +688,62 @@ async function refreshOverview() {
 
   // Update last-update time
   document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+
+  // Check alerts
+  checkAlerts();
+
+  // Refresh equity curve
+  refreshEquityCurve();
+}
+
+async function refreshEquityCurve() {
+  const data = await fetchJSON('/api/equity-curve');
+  if (!data || !data.points || !data.points.length) return;
+  const pts = data.points;
+  const labels = pts.map((p, i) => p.timestamp ? p.timestamp.slice(11,16) : ('T' + (i+1)));
+  const values = pts.map(p => (p.total_pnl_cents != null ? p.total_pnl_cents : (p.cumulative_pnl_cents ?? 0)) / 100);
+  makeChart('chart-equity-curve', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Total P&L ($)',
+        data: values,
+        borderColor: '#4facf7',
+        backgroundColor: 'rgba(79,172,247,.08)',
+        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+      }]
+    },
+    options: {
+      ...CHART_OPTS,
+      scales: {
+        x: { ticks: { color: '#6b7c8d', maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#6b7c8d', callback: v => '$'+v.toFixed(2) }, grid: { color: 'rgba(255,255,255,.05)' } },
+      },
+      plugins: { legend: { display: false } },
+    }
+  });
+}
+
+async function checkAlerts() {
+  const data = await fetchJSON('/api/alerts');
+  if (!data) return;
+  const count = data.count || 0;
+  const badge = document.getElementById('alert-count-badge');
+  const indicator = document.getElementById('alert-indicator');
+  if (count > 0) {
+    badge.textContent = count + ' alert' + (count > 1 ? 's' : '');
+    indicator.style.display = 'inline';
+  } else {
+    indicator.style.display = 'none';
+  }
 }
 
 function renderOverviewCharts(bots) {
   const labels = BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n);
   const pnlData = BOT_NAMES.map(n => ((bots[n] || {}).performance || {}).total_pnl || 0);
   const wrData = BOT_NAMES.map(n => ((bots[n] || {}).performance || {}).win_rate || 0);
+  const colors = BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#4facf7');
 
   makeChart('chart-pnl-all', {
     type: 'bar',
@@ -420,17 +752,13 @@ function renderOverviewCharts(bots) {
       datasets: [{
         label: 'P&L (¢)',
         data: pnlData,
-        backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff'),
+        backgroundColor: colors.map(c => c + 'bb'),
+        borderColor: colors,
+        borderWidth: 1,
         borderRadius: 6,
       }]
     },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
-      },
-      plugins: { legend: { display: false } }
-    }
+    options: { ...CHART_OPTS, plugins: { legend: { display: false } } }
   });
 
   makeChart('chart-wr-bar', {
@@ -440,14 +768,16 @@ function renderOverviewCharts(bots) {
       datasets: [{
         label: 'Win Rate %',
         data: wrData,
-        backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff'),
+        backgroundColor: wrData.map(v => v >= 50 ? 'rgba(45,212,160,.7)' : 'rgba(240,90,90,.7)'),
+        borderColor: wrData.map(v => v >= 50 ? '#2dd4a0' : '#f05a5a'),
+        borderWidth: 1,
         borderRadius: 6,
       }]
     },
-    options: { responsive: true, maintainAspectRatio: false,
+    options: { ...CHART_OPTS,
       scales: {
-        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
-        y: { min: 0, max: 100, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+        x: { ticks: { color: '#6b7c8d' }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { min: 0, max: 100, ticks: { color: '#6b7c8d' }, grid: { color: 'rgba(255,255,255,.05)' } },
       },
       plugins: { legend: { display: false } }
     }
@@ -474,8 +804,8 @@ function renderBotCards(bots) {
       </div>
       <div class="bot-metrics">
         <div class="bot-metric"><div class="label">Trades</div><div class="value">${perf.total_trades||0}</div></div>
-        <div class="bot-metric"><div class="label">Win Rate</div><div class="value">${(perf.win_rate||0).toFixed(1)}%</div></div>
-        <div class="bot-metric"><div class="label">P&L</div><div class="value ${pnlClass(pnl)}">${fmt$(pnl)}</div></div>
+        <div class="bot-metric"><div class="label">Win Rate</div><div class="value ${(perf.win_rate||0)>=50?'pnl-pos':'pnl-neg'}">${(perf.win_rate||0).toFixed(1)}%</div></div>
+        <div class="bot-metric"><div class="label">P&amp;L</div><div class="value ${pnlClass(pnl)}">${fmt$(pnl)}</div></div>
         <div class="bot-metric"><div class="label">Avg Conf</div><div class="value">${(perf.avg_confidence||0).toFixed(0)}</div></div>
       </div>
     </div>`;
@@ -498,30 +828,29 @@ async function refreshBotDetail(name) {
     document.getElementById(`${name}-trades`).textContent = perf.total_trades || 0;
     const wrEl = document.getElementById(`${name}-wr`);
     wrEl.textContent = (perf.win_rate || 0).toFixed(1) + '%';
+    wrEl.className = 'card-value ' + ((perf.win_rate||0)>=50?'positive':'negative');
     const pnlEl = document.getElementById(`${name}-pnl`);
     pnlEl.textContent = fmt$(perf.total_pnl || 0);
     pnlEl.className = 'card-value ' + pnlClass(perf.total_pnl || 0);
     document.getElementById(`${name}-conf`).textContent = (perf.avg_confidence || 0).toFixed(0);
   }
 
-  // Trades table
   if (trades) {
     const tbody = document.getElementById(`${name}-trades-table`);
     tbody.innerHTML = trades.slice(0, 30).map(t => `
       <tr>
         <td>${(t.timestamp||'').slice(0,16)}</td>
-        <td>${t.ticker||''}</td>
-        <td>${t.side||''}</td>
+        <td><strong>${t.ticker||''}</strong></td>
+        <td><span class="${t.side==='YES'?'pnl-pos':'pnl-neg'}">${t.side||''}</span></td>
         <td>${t.entry_price||0}¢</td>
         <td>${t.count||0}</td>
         <td>${(t.confidence||0).toFixed(0)}</td>
-        <td><span class="${t.outcome==='win'?'pnl-pos':'pnl-neg'}">${t.outcome||'pending'}</span></td>
+        <td><span class="${t.outcome==='win'?'pnl-pos':t.outcome==='pending'?'':'pnl-neg'}">${t.outcome||'pending'}</span></td>
         <td class="${(t.pnl_cents||0)>=0?'pnl-pos':'pnl-neg'}">${fmt$(t.pnl_cents||0)}</td>
       </tr>
     `).join('');
   }
 
-  // Category table
   if (cats) {
     const tbody = document.getElementById(`${name}-cat-table`);
     tbody.innerHTML = cats.map(c => `
@@ -529,15 +858,14 @@ async function refreshBotDetail(name) {
         <td>${c.category||'—'}</td>
         <td>${c.trades||0}</td>
         <td>${c.wins||0}</td>
-        <td>${(c.win_rate||0).toFixed(1)}%</td>
+        <td class="${(c.win_rate||0)>=50?'pnl-pos':'pnl-neg'}">${(c.win_rate||0).toFixed(1)}%</td>
         <td class="${(c.total_pnl_cents||0)>=0?'pnl-pos':'pnl-neg'}">${fmt$(c.total_pnl_cents||0)}</td>
       </tr>
     `).join('');
   }
 
-  // Cumulative PnL chart
   if (cpnl && cpnl.length) {
-    const color = BOT_DISPLAY[name]?.color || '#58a6ff';
+    const color = BOT_DISPLAY[name]?.color || '#4facf7';
     makeChart(`chart-pnl-${name}`, {
       type: 'line',
       data: {
@@ -546,36 +874,33 @@ async function refreshBotDetail(name) {
           label: 'Cumulative P&L (¢)',
           data: cpnl.map(p => p.cumulative_pnl),
           borderColor: color,
-          backgroundColor: color + '20',
-          fill: true, tension: .3, pointRadius: 1,
+          backgroundColor: color + '18',
+          fill: true, tension: .3, pointRadius: 0, borderWidth: 2,
         }]
       },
-      options: { responsive: true, maintainAspectRatio: false,
-        scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
-        plugins: { legend: { display: false } }
+      options: { ...CHART_OPTS, plugins: { legend: { display: false } },
+        scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#6b7c8d' } } }
       }
     });
   }
 
-  // Calibration chart
   if (cal && cal.length) {
+    const color = BOT_DISPLAY[name]?.color || '#4facf7';
     makeChart(`chart-cal-${name}`, {
       type: 'bar',
       data: {
         labels: cal.map(c => c.bucket + '-' + (c.bucket+9) + '%'),
         datasets: [
-          { label: 'Expected', data: cal.map(c => c.bucket), backgroundColor: '#30363d', borderRadius: 4 },
-          { label: 'Actual', data: cal.map(c => c.n > 0 ? Math.round(c.wins/c.n*100) : 0), backgroundColor: BOT_DISPLAY[name]?.color || '#58a6ff', borderRadius: 4 },
+          { label: 'Expected', data: cal.map(c => c.bucket), backgroundColor: 'rgba(255,255,255,.1)', borderRadius: 4 },
+          { label: 'Actual', data: cal.map(c => c.n > 0 ? Math.round(c.wins/c.n*100) : 0), backgroundColor: color + 'bb', borderRadius: 4 },
         ]
       },
-      options: { responsive: true, maintainAspectRatio: false,
-        scales: { x: { ticks: { color: '#8b949e' } }, y: { max: 100, grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
-        plugins: { legend: { labels: { color: '#c9d1d9' } } }
+      options: { ...CHART_OPTS,
+        scales: { x: { ticks: { color: '#6b7c8d' } }, y: { max: 100, grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#6b7c8d' } } },
       }
     });
   }
 
-  // Weight history chart
   if (wts && wts.length) {
     const keys = ['edge','liquidity','volume','timing','momentum'];
     const colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#bc8cff'];
@@ -588,9 +913,8 @@ async function refreshBotDetail(name) {
           borderColor: colors[i], tension: .3, pointRadius: 0, borderWidth: 2,
         }))
       },
-      options: { responsive: true, maintainAspectRatio: false,
-        scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
-        plugins: { legend: { labels: { color: '#c9d1d9', font: { size: 10 } } } }
+      options: { ...CHART_OPTS,
+        scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#6b7c8d' } } },
       }
     });
   }
@@ -598,7 +922,81 @@ async function refreshBotDetail(name) {
 
 // ===== Refresh analytics =====
 async function refreshAnalytics() {
-  const data = await fetchJSON('/api/performance/all');
+  const [data, adv] = await Promise.all([
+    fetchJSON('/api/performance/all'),
+    fetchJSON('/api/analytics/advanced'),
+  ]);
+
+  if (adv) {
+    // Advanced stats grid
+    const grid = document.getElementById('advanced-stats-grid');
+    grid.innerHTML = BOT_NAMES.map(name => {
+      const a = adv[name] || {};
+      const d = BOT_DISPLAY[name] || {};
+      return `<div class="card" style="border-left:3px solid ${d.color}">
+        <div style="font-size:.85rem;font-weight:700;margin-bottom:12px;color:${d.color}">${d.name||name}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="stat-card" data-tip="Risk-adjusted return vs standard deviation">
+            <div class="sv" style="color:${(a.sharpe||0)>=1?'var(--green)':(a.sharpe||0)>=0?'var(--yellow)':'var(--red)'}">${(a.sharpe||0).toFixed(2)}</div>
+            <div class="sl">Sharpe</div>
+          </div>
+          <div class="stat-card" data-tip="Gross profit / gross loss ratio">
+            <div class="sv" style="color:${(a.profit_factor||0)>=1.5?'var(--green)':(a.profit_factor||0)>=1?'var(--yellow)':'var(--red)'}">${(a.profit_factor||0).toFixed(2)}</div>
+            <div class="sl">Prof. Factor</div>
+          </div>
+          <div class="stat-card" data-tip="Maximum peak-to-trough drawdown">
+            <div class="sv" style="color:${(a.max_drawdown_pct||0)<=5?'var(--green)':(a.max_drawdown_pct||0)<=15?'var(--yellow)':'var(--red)'}">${(a.max_drawdown_pct||0).toFixed(1)}%</div>
+            <div class="sl">Max DD</div>
+          </div>
+          <div class="stat-card" data-tip="Downside-risk adjusted return">
+            <div class="sv" style="color:${(a.sortino||0)>=1?'var(--green)':(a.sortino||0)>=0?'var(--yellow)':'var(--red)'}">${Math.min(a.sortino||0,99).toFixed(2)}</div>
+            <div class="sl">Sortino</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Streaks table
+    const tbody = document.getElementById('streaks-table');
+    tbody.innerHTML = BOT_NAMES.map(name => {
+      const a = adv[name] || {};
+      const d = BOT_DISPLAY[name] || {};
+      return `<tr>
+        <td><span style="color:${d.color};font-weight:700">${d.name||name}</span></td>
+        <td class="pnl-pos">${a.win_streak||0}</td>
+        <td class="pnl-neg">${a.loss_streak||0}</td>
+        <td class="pnl-pos">${fmt$(a.best_trade_cents||0)}</td>
+        <td class="pnl-neg">${fmt$(a.worst_trade_cents||0)}</td>
+        <td class="${(a.max_drawdown_pct||0)<=10?'pnl-pos':'pnl-neg'}">${(a.max_drawdown_pct||0).toFixed(1)}%</td>
+        <td class="${(a.sortino||0)>=0?'pnl-pos':'pnl-neg'}">${Math.min(a.sortino||0,99).toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+
+    // Sharpe chart
+    const sharpeData = BOT_NAMES.map(n => (adv[n]||{}).sharpe||0);
+    const pfData = BOT_NAMES.map(n => Math.min((adv[n]||{}).profit_factor||0,5));
+    const labels = BOT_NAMES.map(n => BOT_DISPLAY[n]?.name||n);
+    const colors = BOT_NAMES.map(n => BOT_DISPLAY[n]?.color||'#4facf7');
+    makeChart('chart-sharpe', {
+      type: 'bar',
+      data: { labels, datasets: [{
+        label: 'Sharpe Ratio', data: sharpeData,
+        backgroundColor: sharpeData.map(v => v>=1?'rgba(45,212,160,.7)':v>=0?'rgba(245,166,35,.7)':'rgba(240,90,90,.7)'),
+        borderRadius: 6,
+      }]},
+      options: { ...CHART_OPTS, plugins: { legend: { display: false } } }
+    });
+    makeChart('chart-pf', {
+      type: 'bar',
+      data: { labels, datasets: [{
+        label: 'Profit Factor', data: pfData,
+        backgroundColor: pfData.map(v => v>=1.5?'rgba(45,212,160,.7)':v>=1?'rgba(245,166,35,.7)':'rgba(240,90,90,.7)'),
+        borderRadius: 6,
+      }]},
+      options: { ...CHART_OPTS, plugins: { legend: { display: false } } }
+    });
+  }
+
   if (!data) return;
 
   // P&L comparison (line)
@@ -609,7 +1007,7 @@ async function refreshAnalytics() {
       datasets.push({
         label: BOT_DISPLAY[name]?.name || name,
         data: cpnl.map(p => p.cumulative_pnl),
-        borderColor: BOT_DISPLAY[name]?.color || '#58a6ff',
+        borderColor: BOT_DISPLAY[name]?.color || '#4facf7',
         tension: .3, pointRadius: 0, borderWidth: 2,
       });
     }
@@ -618,9 +1016,8 @@ async function refreshAnalytics() {
   makeChart('chart-pnl-compare', {
     type: 'line',
     data: { labels: Array.from({length:maxLen},(_,i)=>i+1), datasets },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
-      plugins: { legend: { labels: { color: '#c9d1d9' } } }
+    options: { ...CHART_OPTS,
+      scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#6b7c8d' } } },
     }
   });
 
@@ -630,10 +1027,11 @@ async function refreshAnalytics() {
     type: 'doughnut',
     data: {
       labels: BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n),
-      datasets: [{ data: tradeCounts, backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#58a6ff') }]
+      datasets: [{ data: tradeCounts, backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color || '#4facf7'),
+        borderColor: 'var(--bg)', borderWidth: 3 }]
     },
     options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'right', labels: { color: '#c9d1d9' } } }
+      plugins: { legend: { position: 'right', labels: { color: '#cdd6e0', padding: 16 } } }
     }
   });
 
@@ -645,7 +1043,7 @@ async function refreshAnalytics() {
       dailyDatasets.push({
         label: BOT_DISPLAY[name]?.name || name,
         data: daily.slice(0,14).reverse().map(d => d.pnl_cents || 0),
-        backgroundColor: BOT_DISPLAY[name]?.color || '#58a6ff',
+        backgroundColor: BOT_DISPLAY[name]?.color + 'aa' || '#4facf7aa',
         borderRadius: 4,
       });
     }
@@ -654,10 +1052,7 @@ async function refreshAnalytics() {
   makeChart('chart-daily-pnl', {
     type: 'bar',
     data: { labels: dailyLabels.length ? dailyLabels : ['No data'], datasets: dailyDatasets },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { x: { ticks: { color: '#8b949e' } }, y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } } },
-      plugins: { legend: { labels: { color: '#c9d1d9' } } }
-    }
+    options: { ...CHART_OPTS }
   });
 
   // ROI bar
@@ -667,12 +1062,160 @@ async function refreshAnalytics() {
     data: {
       labels: BOT_NAMES.map(n => BOT_DISPLAY[n]?.name || n),
       datasets: [{ label: 'ROI %', data: rois,
-        backgroundColor: rois.map(r => r >= 0 ? '#3fb950' : '#f85149'), borderRadius: 6 }]
+        backgroundColor: rois.map(r => r >= 0 ? 'rgba(45,212,160,.7)' : 'rgba(240,90,90,.7)'), borderRadius: 6 }]
     },
-    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-      scales: { x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } }, y: { ticks: { color: '#c9d1d9' } } },
+    options: { ...CHART_OPTS, indexAxis: 'y',
+      scales: { x: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#6b7c8d' } }, y: { ticks: { color: '#cdd6e0' } } },
       plugins: { legend: { display: false } }
     }
+  });
+}
+
+// ===== Refresh risk monitor =====
+async function refreshRisk() {
+  const data = await fetchJSON('/api/risk');
+  if (!data) return;
+
+  const g = data._global || {};
+  const dailyPnl = g.global_daily_pnl_dollars || 0;
+  const lossLimitUsed = g.loss_limit_used_pct || 0;
+
+  // Global cards
+  const gdEl = document.getElementById('g-daily-pnl');
+  gdEl.textContent = fmtDollars(dailyPnl);
+  gdEl.className = 'card-value ' + pnlClass(dailyPnl);
+
+  const llEl = document.getElementById('g-loss-limit');
+  llEl.textContent = '$' + (g.global_daily_loss_limit_dollars || 0).toFixed(2);
+
+  const barEl = document.getElementById('loss-limit-bar');
+  const pct = Math.min(lossLimitUsed, 100);
+  barEl.style.width = pct + '%';
+  const barClass = pct >= 80 ? 'danger' : pct >= 50 ? 'warn' : 'ok';
+  barEl.className = 'progress-bar-fill ' + barClass;
+  document.getElementById('loss-limit-pct').textContent = pct.toFixed(1) + '% used';
+
+  const expEl = document.getElementById('g-exposure');
+  expEl.textContent = '$' + (g.global_exposure_dollars || 0).toFixed(2);
+
+  let halted = 0;
+
+  // Per-bot risk cards
+  const container = document.getElementById('risk-bot-cards');
+  let html = '';
+  BOT_NAMES.forEach(name => {
+    const b = data[name] || {};
+    const d = BOT_DISPLAY[name] || {};
+    const canTrade = b.can_trade !== false;
+    const dd = b.drawdown_pct || 0;
+    const consLoss = b.consecutive_losses || 0;
+    const dailyPnlBot = b.daily_pnl_dollars || 0;
+
+    if (!canTrade) halted++;
+
+    const ddClass = dd >= 15 ? 'danger' : dd >= 8 ? 'warn' : 'ok';
+    const clClass = consLoss >= 5 ? 'danger' : consLoss >= 3 ? 'warn' : 'ok';
+    const dpClass = dailyPnlBot >= 0 ? 'ok' : dailyPnlBot < -50 ? 'danger' : 'warn';
+
+    html += `
+    <div class="card risk-card" style="border-left-color:${d.color}">
+      <div class="card-header">
+        <div style="font-weight:700;color:${d.color}">${d.name||name}</div>
+        <span class="status-pill ${canTrade?'ok':'danger'}">${canTrade?'✓ CAN TRADE':'✗ HALTED'}</span>
+      </div>
+      <div class="risk-row">
+        <div class="risk-metric" data-tip="Current account balance for this bot">
+          <div class="rl">Balance</div>
+          <div class="rv">$${(b.balance_dollars||0).toFixed(2)}</div>
+        </div>
+        <div class="risk-metric" data-tip="Today's realised P&L for this bot">
+          <div class="rl">Daily P&amp;L</div>
+          <div class="rv ${dpClass==='ok'?'pnl-pos':dpClass==='danger'?'pnl-neg':''}">${fmtDollars(dailyPnlBot)}</div>
+        </div>
+        <div class="risk-metric" data-tip="Peak-to-trough drawdown percentage">
+          <div class="rl">Drawdown</div>
+          <div class="rv" style="color:${ddClass==='danger'?'var(--red)':ddClass==='warn'?'var(--yellow)':'var(--green)'}">${dd.toFixed(1)}%</div>
+        </div>
+        <div class="risk-metric" data-tip="Number of consecutive losses in a row">
+          <div class="rl">Consec. Losses</div>
+          <div class="rv" style="color:${clClass==='danger'?'var(--red)':clClass==='warn'?'var(--yellow)':'var(--text)'}">${consLoss}</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:.75rem;color:var(--text-dim)">
+        Open Positions: <strong style="color:var(--text)">${b.open_positions||0}</strong>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
+  document.getElementById('g-bots-halted').textContent = halted;
+}
+
+// ===== Refresh positions =====
+async function refreshPositions() {
+  const data = await fetchJSON('/api/positions');
+  if (!data) return;
+
+  document.getElementById('positions-count').textContent = data.length + ' position' + (data.length !== 1 ? 's' : '');
+
+  const tbody = document.getElementById('positions-table');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:24px">No open positions</td></tr>';
+  } else {
+    tbody.innerHTML = data.map(p => {
+      const d = BOT_DISPLAY[p.bot] || {};
+      const costBasis = ((p.entry_price_cents||0) * (p.count||0) / 100).toFixed(2);
+      const hoursHeld = p.hours_held != null ? p.hours_held.toFixed(1) + 'h' : '—';
+      const heldClass = (p.hours_held||0) > 48 ? 'pnl-neg' : (p.hours_held||0) > 24 ? '' : '';
+      return `<tr>
+        <td><span style="color:${d.color};font-weight:700">${d.name||p.bot}</span></td>
+        <td><strong>${p.ticker||'—'}</strong></td>
+        <td><span class="${p.side==='YES'?'pnl-pos':'pnl-neg'}">${p.side||'—'}</span></td>
+        <td>$${((p.entry_price_cents||0)/100).toFixed(2)}</td>
+        <td>${p.count||0}</td>
+        <td>$${costBasis}</td>
+        <td class="${heldClass}">${hoursHeld}</td>
+        <td style="font-size:.75rem;color:var(--text-dim)">${(p.timestamp||'').slice(0,16)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Positions by bot chart
+  const countByBot = {};
+  BOT_NAMES.forEach(n => countByBot[n] = 0);
+  data.forEach(p => { if (countByBot[p.bot] !== undefined) countByBot[p.bot]++; });
+  makeChart('chart-pos-by-bot', {
+    type: 'doughnut',
+    data: {
+      labels: BOT_NAMES.map(n => BOT_DISPLAY[n]?.name||n),
+      datasets: [{
+        data: BOT_NAMES.map(n => countByBot[n]),
+        backgroundColor: BOT_NAMES.map(n => BOT_DISPLAY[n]?.color||'#4facf7'),
+        borderColor: 'var(--bg)', borderWidth: 3,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { color: '#cdd6e0' } } }
+    }
+  });
+
+  // Age distribution
+  const ageBuckets = {'<1h':0,'1-6h':0,'6-24h':0,'24-48h':0,'>48h':0};
+  data.forEach(p => {
+    const h = p.hours_held || 0;
+    if (h < 1) ageBuckets['<1h']++;
+    else if (h < 6) ageBuckets['1-6h']++;
+    else if (h < 24) ageBuckets['6-24h']++;
+    else if (h < 48) ageBuckets['24-48h']++;
+    else ageBuckets['>48h']++;
+  });
+  const ageColors = ['rgba(45,212,160,.7)','rgba(79,172,247,.7)','rgba(245,166,35,.7)','rgba(240,90,90,.6)','rgba(240,90,90,.9)'];
+  makeChart('chart-pos-age', {
+    type: 'bar',
+    data: {
+      labels: Object.keys(ageBuckets),
+      datasets: [{ label: 'Positions', data: Object.values(ageBuckets), backgroundColor: ageColors, borderRadius: 5 }]
+    },
+    options: { ...CHART_OPTS, plugins: { legend: { display: false } } }
   });
 }
 
@@ -682,38 +1225,118 @@ async function refreshActivity() {
   if (!data) return;
   const feed = document.getElementById('activity-feed');
   feed.innerHTML = data.map(a => {
-    const color = BOT_DISPLAY[a.bot]?.color || '#8b949e';
+    const d = BOT_DISPLAY[a.bot] || {};
+    const color = d.color || '#6b7c8d';
     const time = (a.timestamp||'').slice(11,19);
     return `<div class="activity-item">
       <span class="time">${time}</span>
       <span class="bot-tag" style="background:${color}22;color:${color}">${a.bot}</span>
-      <span class="detail"><strong>${a.action}</strong> ${a.detail||''}</span>
+      <span class="detail"><strong>${a.action}</strong>${a.detail?' — '+a.detail:''}</span>
     </div>`;
   }).join('');
 }
 
+// ===== Refresh system =====
+async function refreshSystem() {
+  const [sysData, posData] = await Promise.all([
+    fetchJSON('/api/system'),
+    fetchJSON('/api/position-counts'),
+  ]);
+
+  if (sysData) {
+    // Uptime
+    const upEl = document.getElementById('sys-uptime');
+    if (sysData.uptime_seconds != null) {
+      const s = sysData.uptime_seconds;
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      upEl.textContent = h + 'h ' + m + 'm';
+    } else {
+      upEl.textContent = '—';
+    }
+
+    // Last auto-scale
+    const asEl = document.getElementById('sys-last-scale');
+    const as = sysData.auto_scale || {};
+    if (as.last_evaluated_at) {
+      asEl.textContent = as.last_evaluated_at.slice(0,16).replace('T',' ');
+    } else {
+      asEl.textContent = as.enabled ? 'Not yet' : 'Disabled';
+    }
+
+    // Conflicts
+    const cfEl = document.getElementById('sys-conflicts');
+    const cf = sysData.conflicts || {};
+    cfEl.textContent = cf.active_conflicts != null ? cf.active_conflicts : (cf.conflicts ? cf.conflicts.length : 0);
+
+    // Auto-scale changes
+    const changesEl = document.getElementById('auto-scale-changes');
+    const changes = as.changes || [];
+    if (changes.length) {
+      changesEl.innerHTML = changes.map(c => {
+        const d = BOT_DISPLAY[c.bot] || {};
+        const dir = c.delta_pct > 0 ? 'promote' : 'demote';
+        return `<div class="scale-change ${dir}">
+          <span class="bot-chip" style="background:${d.color||'#4facf7'}22;color:${d.color||'#4facf7'}">${d.name||c.bot}</span>
+          <span>${c.old_pct}%</span>
+          <span class="arrow">${c.delta_pct>0?'↑':'↓'} ${Math.abs(c.delta_pct).toFixed(1)}%</span>
+          <span>${c.new_pct}%</span>
+          <span style="color:var(--text-dim);font-size:.78rem">${c.reason||''}</span>
+        </div>`;
+      }).join('');
+    } else {
+      changesEl.innerHTML = '<div style="color:var(--text-dim);font-size:.84rem;padding:8px">No recent allocation changes.</div>';
+    }
+
+    // Meta-insights
+    const miEl = document.getElementById('meta-insights-content');
+    const mi = sysData.meta_insights || {};
+    if (Object.keys(mi).length) {
+      const rendered = Object.entries(mi).map(([k, v]) => {
+        const val = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+        return `<div class="insight-item"><strong>${k}:</strong> ${val}</div>`;
+      }).join('');
+      miEl.innerHTML = rendered;
+    } else {
+      miEl.innerHTML = '<div style="color:var(--text-dim);font-size:.84rem;padding:8px">No meta-insights available (data/swarm_meta_insights.json not found).</div>';
+    }
+  }
+
+  if (posData) {
+    const pc = posData.position_counts || {};
+    const totalPending = pc.total_pending || pc.engine_pending_rows || 0;
+    document.getElementById('sys-pos-count').textContent = totalPending;
+
+    const tbody = document.getElementById('pos-reconcile-table');
+    const rows = [];
+    if (pc.engine_pending_rows != null) rows.push(['DB Pending Rows', pc.engine_pending_rows, 'Trades with outcome=pending in bot DBs']);
+    if (pc.engine_open_positions_sum != null) rows.push(['Status File Open Positions', pc.engine_open_positions_sum, 'Sum from bot status JSON files']);
+    if (pc.per_bot) {
+      Object.entries(pc.per_bot).forEach(([bot, cnt]) => {
+        const d = BOT_DISPLAY[bot] || {};
+        rows.push([`${d.name||bot} (DB)`, cnt, 'Pending rows in ' + bot + '.db']);
+      });
+    }
+    if (pc.source === 'db_fallback') rows.push(['Source', 'db_fallback', 'No coordinator available; reading directly from SQLite']);
+    tbody.innerHTML = rows.map(([src, cnt, detail]) =>
+      `<tr><td style="font-weight:600">${src}</td><td>${cnt}</td><td style="color:var(--text-dim)">${detail}</td></tr>`
+    ).join('');
+  }
+}
+
 // ===== Controls =====
 async function controlBot(action, name) {
-  if (MANUAL_CONTROLS_LOCKED) {
-    alert('Manual controls are locked by autonomous mode.');
-    return;
-  }
+  if (MANUAL_CONTROLS_LOCKED) { alert('Manual controls are locked by autonomous mode.'); return; }
   await fetch(`/api/control/${action}/${name}`, { method: 'POST' });
   setTimeout(refreshOverview, 1000);
 }
 async function controlAll(action) {
-  if (MANUAL_CONTROLS_LOCKED) {
-    alert('Manual controls are locked by autonomous mode.');
-    return;
-  }
+  if (MANUAL_CONTROLS_LOCKED) { alert('Manual controls are locked by autonomous mode.'); return; }
   await fetch(`/api/control/${action}`, { method: 'POST' });
   setTimeout(refreshOverview, 1000);
 }
 async function resetAllData() {
-  if (MANUAL_CONTROLS_LOCKED) {
-    alert('Manual controls are locked by autonomous mode.');
-    return;
-  }
+  if (MANUAL_CONTROLS_LOCKED) { alert('Manual controls are locked by autonomous mode.'); return; }
   if (!confirm('Delete ALL bot databases? This cannot be undone.\n\nStop the bots first, then reset.')) return;
   const res = await fetch('/api/control/reset_data', { method: 'POST' });
   const data = await res.json();
@@ -725,10 +1348,7 @@ async function resetAllData() {
   }
 }
 async function updateBudget(name) {
-  if (MANUAL_CONTROLS_LOCKED) {
-    alert('Manual controls are locked by autonomous mode.');
-    return;
-  }
+  if (MANUAL_CONTROLS_LOCKED) { alert('Manual controls are locked by autonomous mode.'); return; }
   const pct = parseInt(document.getElementById(`budget-${name}`).value) || 25;
   await fetch('/api/control/budget', {
     method: 'POST', headers: {'Content-Type':'application/json'},
@@ -736,6 +1356,7 @@ async function updateBudget(name) {
   });
 }
 
+// ===== LLM Chat =====
 function appendLLMMessage(role, text) {
   const feed = document.getElementById('llm-feed');
   if (!feed) return;
@@ -745,7 +1366,6 @@ function appendLLMMessage(role, text) {
   feed.appendChild(div);
   feed.scrollTop = feed.scrollHeight;
 }
-
 function clearLLMChat() {
   const feed = document.getElementById('llm-feed');
   if (!feed) return;
@@ -753,7 +1373,6 @@ function clearLLMChat() {
   LLM_HISTORY.length = 0;
   document.getElementById('llm-status').textContent = 'Chat cleared.';
 }
-
 async function sendLLMChat() {
   const inputEl = document.getElementById('llm-input');
   const modelEl = document.getElementById('llm-model');
@@ -762,47 +1381,34 @@ async function sendLLMChat() {
   const sendBtn = document.getElementById('llm-send-btn');
   const statusEl = document.getElementById('llm-status');
   if (!inputEl || !modelEl || !systemEl || !includeContextEl || !sendBtn || !statusEl) return;
-
   const prompt = (inputEl.value || '').trim();
   if (!prompt) return;
-
   const model = (modelEl.value || '').trim();
   const system = (systemEl.value || '').trim();
   const includeContext = !!includeContextEl.checked;
-
   appendLLMMessage('user', prompt);
   inputEl.value = '';
   sendBtn.disabled = true;
   statusEl.textContent = 'Sending...';
-
   try {
     const res = await fetch('/api/ollama/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        model,
-        system,
-        include_context: includeContext,
-        history: LLM_HISTORY.slice(-12),
-      }),
+      body: JSON.stringify({ prompt, model, system, include_context: includeContext, history: LLM_HISTORY.slice(-12) }),
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      const err = data.error || `HTTP ${res.status}`;
-      appendLLMMessage('error', `Error: ${err}`);
-      statusEl.textContent = `Failed: ${err}`;
+      appendLLMMessage('error', `Error: ${data.error || 'HTTP ' + res.status}`);
+      statusEl.textContent = `Failed: ${data.error || ''}`;
       return;
     }
     appendLLMMessage('assistant', data.response || '(empty response)');
     LLM_HISTORY.push({ role: 'user', content: prompt });
     LLM_HISTORY.push({ role: 'assistant', content: data.response || '' });
     if (LLM_HISTORY.length > 40) LLM_HISTORY.splice(0, LLM_HISTORY.length - 40);
-
     const ctx = data.context_summary;
     if (ctx) {
-      statusEl.textContent =
-        `Model ${data.model} in ${data.latency_ms} ms | Context: trades=${ctx.total_trades}, decisions=${ctx.recent_central_decisions}`;
+      statusEl.textContent = `Model ${data.model} in ${data.latency_ms} ms | Context: trades=${ctx.total_trades}, decisions=${ctx.recent_central_decisions}`;
     } else {
       statusEl.textContent = `Model ${data.model} responded in ${data.latency_ms} ms`;
     }
@@ -818,33 +1424,19 @@ async function sendLLMChat() {
 async function refreshAll() {
   await refreshOverview();
   const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-  if (activeTab && BOT_NAMES.includes(activeTab)) {
-    await refreshBotDetail(activeTab);
-  } else if (activeTab === 'analytics') {
-    await refreshAnalytics();
-  } else if (activeTab === 'activity') {
-    await refreshActivity();
-  }
+  if (activeTab && BOT_NAMES.includes(activeTab)) await refreshBotDetail(activeTab);
+  else if (activeTab === 'analytics') await refreshAnalytics();
+  else if (activeTab === 'activity') await refreshActivity();
+  else if (activeTab === 'risk') await refreshRisk();
+  else if (activeTab === 'positions') await refreshPositions();
+  else if (activeTab === 'system') await refreshSystem();
 }
 
-// Tab change triggers refresh
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    const t = tab.dataset.tab;
-    if (BOT_NAMES.includes(t)) refreshBotDetail(t);
-    else if (t === 'analytics') refreshAnalytics();
-    else if (t === 'activity') refreshActivity();
-    else if (t === 'llm') document.getElementById('llm-input')?.focus();
-  });
-});
-
+// LLM input enter key
 const llmInput = document.getElementById('llm-input');
 if (llmInput) {
   llmInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendLLMChat();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLLMChat(); }
   });
 }
 
