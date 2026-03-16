@@ -350,6 +350,23 @@ class CentralLLMController:
             decision = "reject"
             rationale = f"{rationale} | size_multiplier was 0.0."
 
+        # Evidence quality guardrail: reduce size when evidence is weak.
+        evidence_quality = trade_request.get("evidence_quality")
+        if (
+            decision == "approve"
+            and evidence_quality is not None
+            and float(evidence_quality) < 0.5
+        ):
+            quality_penalty = 0.2
+            size_multiplier = max(0.0, size_multiplier - quality_penalty)
+            rationale = (
+                f"{rationale} | Evidence quality guardrail applied "
+                f"(evidence_quality={float(evidence_quality):.2f} < 0.5; "
+                f"size_multiplier reduced by {quality_penalty})."
+            )
+            if "weak_evidence" not in red_flags:
+                red_flags = list(red_flags) + ["weak_evidence"]
+
         # Keep quant confidence visible in logs for auditing.
         rationale = f"{rationale} | quant_confidence={quant_conf:.1f}"
 
@@ -742,18 +759,51 @@ class CentralLLMController:
         snapshot = self._swarm_snapshot()
         feedback = self._feedback_profile(bot_name)
         category_hints = self._category_feedback_hints(bot_name)
+
+        # Extract and format research evidence block (strip from raw JSON to avoid duplication)
+        research_summary = str(trade_request.get("research_summary") or "")
+        evidence_quality = trade_request.get("evidence_quality")  # float 0-1 or None
+        evidence_bullets = trade_request.get("evidence_bullets") or []
+        evidence_contradictions = trade_request.get("evidence_contradictions") or []
+
+        research_block = ""
+        if research_summary or evidence_quality is not None:
+            quality_str = f"{evidence_quality:.2f}" if evidence_quality is not None else "n/a"
+            bullets_str = "\n".join(evidence_bullets[:8]) if evidence_bullets else "  (none)"
+            contradictions_str = (
+                "\n".join(f"  - {c}" for c in evidence_contradictions)
+                if evidence_contradictions else "  (none)"
+            )
+            research_block = (
+                f"\nResearch Evidence:\n"
+                f"  Quality score: {quality_str} (0=no evidence, 1=strong authoritative evidence)\n"
+                f"  Summary: {research_summary}\n"
+                f"  Key evidence bullets:\n{bullets_str}\n"
+                f"  Contradictions found:\n{contradictions_str}\n"
+            )
+
+        # Build a clean copy of trade_request without the research fields (avoid duplication)
+        _RESEARCH_KEYS = {
+            "research_summary", "evidence_quality",
+            "evidence_bullets", "num_sources", "evidence_contradictions",
+        }
+        clean_request = {k: v for k, v in trade_request.items() if k not in _RESEARCH_KEYS}
+
         return (
             f"Bot name: {bot_name}\n"
-            f"Trade request: {json.dumps(trade_request, ensure_ascii=True)}\n"
+            f"Trade request: {json.dumps(clean_request, ensure_ascii=True)}\n"
             f"Swarm snapshot: {json.dumps(snapshot, ensure_ascii=True)}\n\n"
             f"Recent realized performance profile: {json.dumps(feedback, ensure_ascii=True)}\n\n"
-            f"Category feedback hints: {json.dumps(category_hints, ensure_ascii=True)}\n\n"
+            f"Category feedback hints: {json.dumps(category_hints, ensure_ascii=True)}\n"
+            f"{research_block}\n"
             "Policy:\n"
             "1) Protect capital first.\n"
             "2) Reject trades with weak confidence or obvious concentration risk.\n"
             "3) Use size_multiplier < 1.0 when risk is elevated.\n"
             "4) Follow cold/hot category hints unless current request has very strong evidence.\n"
             "5) Keep rationale concise and concrete.\n"
+            "6) If evidence_quality is present and < 0.5, reduce size_multiplier by at least 0.2 "
+            "and flag 'weak_evidence' in red_flags.\n"
         )
 
     def _feedback_profile(self, bot_name: str) -> Dict[str, Any]:

@@ -1,0 +1,273 @@
+# =============================================================================
+# Kalshi Bot Swarm v4.0 -- swarm_config.yaml
+# Copy this file to swarm_config.yaml and fill in your credentials.
+# =============================================================================
+
+# --- API credentials (required) ---
+api:
+  key_id: 6c09cd68-6325-4363-ba9c-d68fc892f94e           # From Kalshi dashboard
+  private_key_path: keys/kalshi-private.key
+  base_url: https://api.elections.kalshi.com/trade-api/v2
+  demo_mode: false                        # Set true to use demo environment
+
+# --- Swarm-level settings ---
+swarm:
+  unassigned_market_bot: vanguard         # Which bot handles uncategorised markets
+  global_daily_loss_limit_cents: 15000    # $150 — halts ALL bots if hit
+  global_exposure_limit_cents: 50000      # $500 — max total capital at risk
+  health_check_interval: 30              # seconds between coordinator health checks
+  max_restart_attempts: 3
+  restart_cooldown_seconds: 60
+  portfolio_counts_ttl_seconds: 30       # cache account open/pending count view
+  market_status_cache_ttl_seconds: 120   # cache market status lookups for count grouping
+  conflict_db_path: data/conflict_claims.db   # persistent claim store (v4)
+  stale_claim_hours: 24                        # prune claims older than this
+
+# --- Auto-scale policy (KPI-driven bot budget rebalancing) ---
+auto_scale:
+  enabled: true
+  evaluation_interval_seconds: 300       # evaluate every 5 minutes
+  min_trades_for_scoring: 20             # require enough closed trades before scoring
+  promote_step_pct: 2.5                  # +2.5% allocation when KPI set is green
+  demote_step_pct: 5.0                   # -5.0% allocation when KPI set is red
+  min_change_to_apply_pct: 0.5           # ignore tiny changes below this threshold
+  min_allocation_pct: 10.0               # never drop a bot below 10%
+  max_allocation_pct: 40.0               # never exceed 40% on any single bot
+  promote_min_win_rate_pct: 56.0
+  promote_min_roi_pct: 0.8
+  promote_min_sharpe: 0.08
+  promote_min_total_pnl_cents: 100
+  promote_max_drawdown_pct: 6.0
+  require_can_trade_for_promotion: true
+  demote_win_rate_below_pct: 48.0
+  demote_roi_below_pct: -0.5
+  demote_sharpe_below: -0.05
+  demote_total_pnl_below_cents: -100
+  demote_drawdown_above_pct: 10.0
+
+# --- Trading defaults (inherited by all bots unless overridden) ---
+trading:
+  default_order_type: limit               # "limit" or "market"
+  min_confidence_threshold: 65           # 0-100; signals below this are skipped
+  min_liquidity_cents: 1000
+  min_volume_24h: 50
+  min_hours_to_expiry: 2
+  max_hours_to_expiry: 720               # 30 days
+  max_position_pct: 0.05                 # max % of balance per position
+  max_open_positions: 10
+  open_positions_scope: per_bot          # per_bot (recommended) or account
+  max_trades_per_day: 20
+  daily_loss_limit_cents: 3000           # per-bot ($30)
+  min_balance_cents: 500                 # stop trading if balance drops below
+  max_drawdown_pct: 0.10                 # 10% peak-to-trough halt
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+  limit_spread_buffer_cents: 1
+  max_signals_per_cycle: 3              # v4: execute up to N signals per scan
+  market_scan_max_pages: 50             # scanner page cap (50*1000=50k markets scanned)
+  scan_mode: recent_focus               # recent_focus | full_universe
+  recent_trade_seed_pages: 3            # pages from /markets/trades seed feed
+  recent_trade_seed_page_size: 200      # page size for recent trade seed (max 200)
+  recent_trade_seed_top_tickers: 80     # only evaluate top-N most-active tickers
+  market_cache_ttl_seconds: 180         # cache market snapshots to reduce API load
+  focus_min_liquidity_cents: 1500       # prefer deeper books
+  focus_min_volume_24h: 150             # prefer actively traded markets
+  focus_min_open_interest: 25
+  focus_min_recent_trades: 1
+  recent_activity_max_age_hours: 24
+  focus_max_hours_to_expiry: 240        # prefer nearer-term markets (~10 days)
+  stale_trade_hours: 48                 # v4: force-resolve trades older than this
+  exit_loss_threshold_cents: -20        # v4: exit position if unrealized loss >= this
+
+# --- Risk overrides (merged with trading section) ---
+risk:
+  daily_loss_limit_cents: 3000
+  max_drawdown_pct: 0.10
+  drawdown_pause_cooldown_minutes: 120
+  drawdown_auto_reset_peak_after_cooldown: true
+  drawdown_auto_reset_requires_flat_positions: false
+  drawdown_cooldown_extend_minutes: 15
+  drawdown_reentry_buffer_pct: 0.02
+  risk_block_log_throttle_seconds: 30
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+
+# --- Learning engine ---
+learning:
+  db_path: data/swarm_learning.db       # overridden per-bot to separate DBs
+  rolling_window: 50
+  min_trades_for_review: 10
+  learning_rate: 0.05
+  decay_factor: 0.95
+  min_confidence_threshold: 65
+
+# --- Human-like behavior ---
+human_behavior:
+  action_delay_mean: 8.0                # seconds between actions
+  action_delay_std: 3.0
+  action_delay_min: 2.0
+  action_delay_max: 20.0
+  session_duration_min: 15             # minutes
+  session_duration_max: 90
+  idle_period_min: 30                  # minutes between sessions
+  idle_period_max: 180
+  browse_without_trade_prob: 0.30
+  trade_size_min_multiplier: 0.6
+  trade_size_max_multiplier: 1.4
+  # v4: state_file is set automatically per-bot (data/{bot_name}_behavior_state.json)
+
+# --- External signals ---
+external_signals:
+  enabled: true
+  cache_ttl_seconds: 300
+  news_api_enabled: false
+  news_api_url: ""
+  news_api_key: ""                       # Optional: NewsAPI key
+  consensus_enabled: true
+  resolution_patterns_enabled: true
+  cross_reference_enabled: true
+  sentiment_weight: 0.15
+  consensus_weight: 0.25
+  resolution_pattern_weight: 0.20
+  cross_reference_weight: 0.15
+
+# --- LLM Advisor (v4 NEW) ---
+llm_advisor:
+  enabled: true
+  api_key: ""                            # Anthropic API key — or set ANTHROPIC_API_KEY env var
+  model: claude-haiku-4-5-20251001      # Cheapest/fastest model; change if desired
+  max_tokens: 300
+  temperature: 0.1
+  pre_screen_threshold: 60              # Only call LLM if quant confidence >= this
+  llm_weight: 0.20                      # 20% LLM, 80% quant in final blend
+  cache_ttl_seconds: 300
+  timeout_seconds: 10
+  max_calls_per_cycle: 5               # Hard cap per scan cycle (controls API cost)
+
+# --- Central LLM Controller (global trade gate; provider-aware) ---
+central_llm:
+  enabled: true
+  provider: anthropic
+  ollama_base_url: http://127.0.0.1:11434
+  anthropic_api_url: https://api.anthropic.com/v1/messages
+  anthropic_api_key: ""                  # or use ANTHROPIC_API_KEY env var
+  anthropic_model: claude-haiku-4-5-20251001
+  model: qwen2.5:14b                     # kept for Ollama fallback compatibility
+  timeout_seconds: 20
+  min_approved_confidence: 55
+  max_red_flags: 2
+  default_size_multiplier: 1.0
+  fail_open: false
+  learning_enabled: true
+  adaptive_window: 40
+  adaptive_min_samples: 8
+  adaptive_cold_win_rate_pct: 42
+  adaptive_cold_avg_pnl_cents: -5
+  adaptive_reject_quant_floor: 72
+  adaptive_max_size_when_cold: 0.70
+  adaptive_hot_win_rate_pct: 58
+  adaptive_hot_avg_pnl_cents: 3
+  adaptive_size_boost: 1.10
+  adaptive_prompt_enabled: true
+  adaptive_prompt_window: 120
+  adaptive_prompt_min_samples: 6
+  adaptive_prompt_cold_win_rate_pct: 45
+  adaptive_prompt_cold_avg_pnl_cents: -3
+  adaptive_prompt_hot_win_rate_pct: 58
+  adaptive_prompt_hot_avg_pnl_cents: 3
+  adaptive_prompt_cold_size_cap: 0.70
+  adaptive_prompt_hot_size_boost: 1.10
+  adaptive_prompt_reject_quant_floor: 70
+  db_path: data/central_llm_controller.db
+
+# --- Autonomous Mode (single switch for full LLM-led operation) ---
+autonomous_mode:
+  enabled: true
+  anthropic_only: true
+  require_llm_for_trade: true
+  disable_local_llm_advisor: true
+  llm_learning_enabled: true
+  lock_manual_controls: true
+
+meta_learning:
+  enabled: true
+  min_confidence_to_apply: 0.7
+  domains: ["sports", "politics", "crypto", "economics", "weather", "entertainment"]
+
+meta_evolver:
+  enabled: true
+  mutation_rate: 0.3
+  immutable_agents: ["GovernorAgent", "MetaEvolverAgent"]
+  allow_file_writes: false
+  allow_self_rewrite: false
+
+# --- Backtester ---
+backtester:
+  max_settled_markets: 200
+  min_volume_24h: 20
+  auto_run_on_empty_db: false
+  recalibrate_after: true
+  backtest_batch_delay: 0.2
+  # v4: weekly_rerun is handled automatically by BotRunner
+
+# --- Prior knowledge ---
+prior_knowledge:
+  prior_strength: 10                    # How many "virtual trades" the prior is worth
+  blend_with_observed: true
+
+# --- Research / Evidence Pipeline ---
+# Set enabled: true and configure a search API key to activate web research enrichment.
+# When enabled: false (default), enrich_trade_request() returns {} and no trades are blocked.
+research:
+  enabled: false                         # Flip to true when search API keys are configured
+  search_provider: serpapi               # serpapi | bing | tavily | fallback
+  max_queries: 6                         # max search queries per market
+  max_sources: 8                         # max sources to rank and return
+  fetch_full_content: true               # fetch full page HTML (requires bs4/lxml)
+  content_fetch_top_n: 3                 # how many top sources get full content fetched
+  source_timeout_secs: 15               # per-URL fetch timeout
+  max_content_length: 8000              # max chars of page content passed to LLM
+  extraction_provider: anthropic         # openai | anthropic
+  extraction_model: claude-haiku-4-5-20251001
+  llm_max_tokens: 1500
+  extraction_api_key: ""                # or use ANTHROPIC_API_KEY / OPENAI_API_KEY env var
+  # Domain lists (optional -- override to tune authority scoring)
+  primary_domains: {}                    # e.g. {"MACRO": ["bls.gov", "federalreserve.gov"]}
+  secondary_domains: []
+  blocked_domains: []
+
+# --- Logging ---
+logging:
+  level: INFO
+  file: logs/swarm.log
+  max_bytes: 10485760                   # 10 MB
+  backup_count: 5
+
+# --- Dashboard ---
+dashboard:
+  host: 0.0.0.0
+  port: 8080
+  auth:
+    enabled: false
+    username: admin
+    password: ""                          # use DASHBOARD_PASS env var
+  refresh_interval_seconds: 15
+
+# --- Telegram ---
+# Create a bot at https://t.me/BotFather, then get your chat_id by
+# messaging the bot and calling getUpdates, or use @userinfobot.
+telegram:
+  enabled: false
+  bot_token: ""                           # use TELEGRAM_BOT_TOKEN env var
+  chat_id: ""                             # use TELEGRAM_CHAT_ID env var
+  timeout_seconds: 8
+  notify_signals: true
+  notify_trades: true
+  notify_outcomes: true
+  notify_crashes: true
+  notify_daily_summary: true
+  signal_confidence_threshold: 70
+  commands_enabled: true
+  allowed_user_ids: []                    # e.g. [123456789]
+  poll_interval_seconds: 2
+

@@ -46,6 +46,7 @@ from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
 from swarm.meta_learning import MetaLearner, SwarmMetaAggregator, CrossBotInsights
 from swarm.rl_feedback import RLFeedbackBridge
+from research.research_orchestrator import ResearchOrchestrator
 
 logger = logging.getLogger("kalshi_agent")
 
@@ -186,6 +187,9 @@ class BotRunner:
             config=self.cfg.get("central_llm", {}),
             project_root=str(self.project_root),
         )
+
+        # Research/evidence pipeline (degrades to {} on any failure).
+        self.research = ResearchOrchestrator(config=self.cfg.get("research", {}))
 
         self._meta_learning_cfg = self.cfg.get("meta_learning", {}) or {}
         self.meta_learner: Optional[MetaLearner] = None
@@ -1016,6 +1020,9 @@ class BotRunner:
         pre_human_count = trend_count
         count = self.behavior.vary_trade_size(pre_human_count)
         human_mult = float(count / max(1, pre_human_count))
+        # Enrich with web research evidence (returns {} gracefully on any failure).
+        research_data = self.research.enrich_trade_request(signal)
+
         approval = self.central_llm.review_trade(
             bot_name=self.bot_name,
             trade_request={
@@ -1030,6 +1037,12 @@ class BotRunner:
                 "event_ticker": signal.event_ticker,
                 "volume_24h": int(getattr(signal, "volume_24h", 0) or 0),
                 "spread_cents": int(getattr(signal, "spread_cents", 0) or 0),
+                # Research enrichment fields (empty when research is disabled/failed)
+                "research_summary": research_data.get("research_summary", ""),
+                "evidence_quality": research_data.get("evidence_quality", None),
+                "evidence_bullets": research_data.get("evidence_bullets", []),
+                "num_sources": research_data.get("num_sources", 0),
+                "evidence_contradictions": research_data.get("evidence_contradictions", []),
             },
         )
 
