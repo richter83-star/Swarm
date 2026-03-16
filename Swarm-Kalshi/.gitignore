@@ -16,9 +16,11 @@ logs/*.log
 # Config with real credentials — use swarm_config.yaml.example as the template
 config/swarm_config.yaml
 
-# API keys
+# API keys and secrets
 keys/
 !keys/.gitkeep
+.env
+.env.*
 
 # IDE
 .vscode/

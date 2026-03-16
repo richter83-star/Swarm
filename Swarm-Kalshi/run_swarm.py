@@ -28,6 +28,13 @@ import os
 import signal
 import sys
 import threading
+
+# Load .env file if present (must happen before any config is read)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on environment variables
 import time
 from pathlib import Path
 

@@ -219,8 +219,8 @@ prior_knowledge:
 # Set enabled: true and configure a search API key to activate web research enrichment.
 # When enabled: false (default), enrich_trade_request() returns {} and no trades are blocked.
 research:
-  enabled: false                         # Flip to true when search API keys are configured
-  search_provider: serpapi               # serpapi | bing | tavily | fallback
+  enabled: true                          # Tavily key set in .env
+  search_provider: tavily                # serpapi | bing | tavily | fallback
   max_queries: 6                         # max search queries per market
   max_sources: 8                         # max sources to rank and return
   fetch_full_content: true               # fetch full page HTML (requires bs4/lxml)
