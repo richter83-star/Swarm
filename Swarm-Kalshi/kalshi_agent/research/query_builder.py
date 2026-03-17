@@ -33,6 +33,42 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Asset extraction helpers for price-point markets
+# ---------------------------------------------------------------------------
+
+# Maps Kalshi ticker prefix → (human name, symbol) for price markets
+_CRYPTO_ASSETS: dict[str, tuple[str, str]] = {
+    "KXBTC":   ("Bitcoin", "BTC"),
+    "KXETH":   ("Ethereum", "ETH"),
+    "KXSOL":   ("Solana", "SOL"),
+    "KXBNB":   ("Binance Coin", "BNB"),
+    "KXXRP":   ("XRP Ripple", "XRP"),
+    "KXDOGE":  ("Dogecoin", "DOGE"),
+    "KXADA":   ("Cardano", "ADA"),
+    "KXAVAX":  ("Avalanche", "AVAX"),
+}
+
+def _extract_crypto_asset(ticker: str) -> Optional[tuple[str, str]]:
+    """Return (human_name, symbol) if ticker is a known crypto price market."""
+    upper = ticker.upper()
+    for prefix, names in _CRYPTO_ASSETS.items():
+        if upper.startswith(prefix):
+            return names
+    return None
+
+
+def _extract_price_target(ticker: str) -> Optional[str]:
+    """Extract the price threshold from a ticker like KXBTC-26MAR1711-B73875 -> '$73,875'."""
+    m = re.search(r"-[BTA](\d+(?:\.\d+)?)", ticker)
+    if m:
+        val = float(m.group(1))
+        if val > 999:
+            return f"${val:,.0f}"
+        return f"${val:g}"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
 
@@ -64,12 +100,9 @@ _SITE_RESTRICTED: dict[str, list[str]] = {
         "site:fec.gov",
         "site:ballotpedia.org",
     ],
-    "CRYPTO": [
-        "site:coindesk.com",
-        "site:coingecko.com",
-        "site:blockchain.info",
-        "site:defillama.com",
-    ],
+    # CRYPTO: no site restrictions — price queries need broad sources
+    # (specific asset queries are built by _build_crypto_queries below)
+    "CRYPTO": [],
     "SPORTS": [
         "site:espn.com",
         "site:sports-reference.com",
@@ -124,6 +157,54 @@ _NEWS_SOURCES: dict[str, list[str]] = {
 
 
 # ---------------------------------------------------------------------------
+# Category-specific query overrides
+# ---------------------------------------------------------------------------
+
+def _build_crypto_queries(ticker: str, max_queries: int) -> Optional[List[SearchQuery]]:
+    """Build price-focused queries for crypto intraday markets.
+
+    For KXBTC-26MAR1711-B73875, we don't search for the exact title phrase —
+    we search for the current BTC price so the evidence extractor can compare
+    it to the threshold and produce a real quality/probability estimate.
+    Returns None if ticker is not a recognised crypto price market.
+    """
+    asset = _extract_crypto_asset(ticker)
+    if not asset:
+        return None
+    name, symbol = asset
+    price_target = _extract_price_target(ticker)
+    target_str = f" {price_target}" if price_target else ""
+
+    queries = [
+        SearchQuery(
+            query_text=f"{name} {symbol} price today USD 2026",
+            site_restriction="",
+            query_type="primary",
+            priority=1,
+        ),
+        SearchQuery(
+            query_text=f"{symbol} USD current price live March 2026",
+            site_restriction="",
+            query_type="primary",
+            priority=1,
+        ),
+        SearchQuery(
+            query_text=f"site:coingecko.com {name} price",
+            site_restriction="site:coingecko.com",
+            query_type="statistics",
+            priority=1,
+        ),
+        SearchQuery(
+            query_text=f"{name} price prediction{target_str} March 17 2026",
+            site_restriction="",
+            query_type="news",
+            priority=2,
+        ),
+    ]
+    return queries[:max_queries]
+
+
+# ---------------------------------------------------------------------------
 # Query builder
 # ---------------------------------------------------------------------------
 
@@ -165,6 +246,18 @@ def build_kalshi_queries(
         elif researchability < 70:
             max_queries = min(max_queries, 4)
         # else: full budget
+
+    # --- Category-specific overrides (bypass generic title-based queries) ---
+    if cat == "CRYPTO" and ticker:
+        crypto_queries = _build_crypto_queries(ticker, max_queries)
+        if crypto_queries:
+            log.info(
+                "[research] query_builder: ticker=%s category=%s researchability=%s "
+                "num_queries=%d query_types=%s",
+                ticker, cat, researchability, len(crypto_queries),
+                [q.query_type for q in crypto_queries],
+            )
+            return crypto_queries
 
     queries: List[SearchQuery] = []
 
