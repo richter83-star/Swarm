@@ -245,20 +245,6 @@ tr:hover td{background:rgba(79,172,247,.04)}
 }
 .config-editor:focus{outline:none;border-color:var(--accent)}
 
-/* ===== Journal ===== */
-.journal-entry{padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;position:relative}
-.journal-entry .je-meta{font-size:.72rem;color:var(--text-dim);margin-bottom:6px;display:flex;gap:12px}
-.journal-entry .je-note{font-size:.85rem;line-height:1.55}
-.journal-entry .je-del{position:absolute;top:10px;right:12px;cursor:pointer;color:var(--text-dim);font-size:.75rem;opacity:.5}
-.journal-entry .je-del:hover{color:var(--red);opacity:1}
-
-/* ===== Watchlist ===== */
-.watchlist-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-bottom:8px}
-.watchlist-item .wl-ticker{font-size:1rem;font-weight:700;color:var(--accent)}
-.watchlist-item .wl-label{font-size:.8rem;color:var(--text-dim)}
-.watchlist-item .wl-del{margin-left:auto;cursor:pointer;color:var(--text-dim);font-size:.75rem;opacity:.5}
-.watchlist-item .wl-del:hover{color:var(--red);opacity:1}
-
 /* ===== Audit Log ===== */
 .audit-feed{max-height:480px;overflow-y:auto}
 .audit-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.8rem}
@@ -283,6 +269,20 @@ tr:hover td{background:rgba(79,172,247,.04)}
 .form-row{display:flex;gap:8px;margin-bottom:10px;align-items:center}
 .form-label{font-size:.78rem;color:var(--text-dim);white-space:nowrap;min-width:80px}
 
+/* ===== Bot Selector (Bots tab) ===== */
+.bot-selector-bar{
+  display:flex;align-items:center;gap:12px;margin-bottom:24px;
+  padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+}
+.bot-selector-bar label{font-size:.82rem;color:var(--text-dim);white-space:nowrap}
+.bot-selector-select{
+  background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  color:var(--text);padding:7px 14px;font-size:.92rem;font-weight:600;cursor:pointer;
+  min-width:180px;
+}
+.bot-selector-select:focus{outline:none;border-color:var(--accent)}
+.bot-color-dot{width:11px;height:11px;border-radius:50%;display:inline-block;flex-shrink:0}
+
 /* ===== Responsive ===== */
 @media(max-width:900px){
   .grid-4,.grid-3,.grid-2,.grid-5{grid-template-columns:1fr}
@@ -302,7 +302,7 @@ tr:hover td{background:rgba(79,172,247,.04)}
     <span>Swarm: <span class="status-dot" id="swarm-dot"></span> <span id="swarm-state">Loading...</span></span>
     <span id="last-update">—</span>
     <span id="alert-indicator" style="display:none">
-      <span class="alert-badge" onclick="switchTab('activity')" id="alert-count-badge">0 alerts</span>
+      <span class="alert-badge" onclick="switchTab('system')" id="alert-count-badge">0 alerts</span>
     </span>
     <button class="kill-switch-btn" onclick="triggerKillSwitch()" title="Emergency stop all bots immediately">
       &#9888; KILL SWITCH
@@ -316,19 +316,13 @@ tr:hover td{background:rgba(79,172,247,.04)}
   <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" data-tab="overview">Overview</div>
-    <div class="tab" data-tab="sentinel">🔴 Sentinel</div>
-    <div class="tab" data-tab="oracle">🔵 Oracle</div>
-    <div class="tab" data-tab="pulse">🟢 Pulse</div>
-    <div class="tab" data-tab="vanguard">🟡 Vanguard</div>
+    <div class="tab" data-tab="bots">Bots</div>
     <div class="tab" data-tab="analytics">Analytics</div>
     <div class="tab" data-tab="risk">Risk Monitor</div>
     <div class="tab" data-tab="positions">Positions</div>
-    <div class="tab" data-tab="activity">Activity</div>
     <div class="tab" data-tab="system">System</div>
     <div class="tab" data-tab="llm">LLM Chat</div>
     <div class="tab" data-tab="controls">Controls</div>
-    <div class="tab" data-tab="watchlist">Watchlist</div>
-    <div class="tab" data-tab="journal">Journal</div>
     <div class="tab" data-tab="config">Config</div>
     <div class="tab" data-tab="admin">Admin</div>
   </div>
@@ -377,51 +371,68 @@ tr:hover td{background:rgba(79,172,247,.04)}
     </div>
   </div>
 
-  <!-- ===== BOT DETAIL TABS ===== -->
-  {% for bot_name in bot_names %}
-  <div class="tab-content" id="tab-{{ bot_name }}">
-    <div class="grid grid-4" style="margin-bottom:20px">
-      <div class="card"><div class="card-title">Trades</div><div class="card-value" id="{{ bot_name }}-trades">0</div></div>
-      <div class="card"><div class="card-title">Win Rate</div><div class="card-value" id="{{ bot_name }}-wr">0%</div></div>
-      <div class="card"><div class="card-title">P&amp;L</div><div class="card-value" id="{{ bot_name }}-pnl">$0.00</div></div>
-      <div class="card"><div class="card-title">Avg Confidence</div><div class="card-value" id="{{ bot_name }}-conf">0</div></div>
+  <!-- ===== BOTS TAB (unified) ===== -->
+  <div class="tab-content" id="tab-bots">
+    <!-- Bot Selector -->
+    <div class="bot-selector-bar">
+      <label>Bot:</label>
+      <span class="bot-color-dot" id="bot-selector-dot" style="background:var(--sentinel)"></span>
+      <select class="bot-selector-select" id="bot-selector" onchange="onBotSelectorChange()">
+        {% for bot_name in bot_names %}
+        <option value="{{ bot_name }}" style="color:{{ bots[bot_name].color }}">{{ bots[bot_name].name }} — {{ bots[bot_name].specialist }}</option>
+        {% endfor %}
+      </select>
+      <span id="bot-selector-state" style="font-size:.78rem;color:var(--text-dim);margin-left:8px"></span>
     </div>
+
+    <!-- Metric Cards -->
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card"><div class="card-title">Trades</div><div class="card-value" id="bot-detail-trades">0</div></div>
+      <div class="card"><div class="card-title">Win Rate</div><div class="card-value" id="bot-detail-wr">0%</div></div>
+      <div class="card"><div class="card-title">P&amp;L</div><div class="card-value" id="bot-detail-pnl">$0.00</div></div>
+      <div class="card"><div class="card-title">Avg Confidence</div><div class="card-value" id="bot-detail-conf">0</div></div>
+    </div>
+
+    <!-- Charts Row -->
     <div class="grid grid-2">
       <div class="card">
         <div class="card-title">Cumulative P&amp;L</div>
-        <div class="chart-container"><canvas id="chart-pnl-{{ bot_name }}"></canvas></div>
+        <div class="chart-container"><canvas id="chart-pnl-bot-detail"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Confidence Calibration</div>
-        <div class="chart-container"><canvas id="chart-cal-{{ bot_name }}"></canvas></div>
+        <div class="chart-container"><canvas id="chart-cal-bot-detail"></canvas></div>
       </div>
     </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">Recent Trades</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Price</th><th>Qty</th><th>Conf</th><th>Outcome</th><th>P&amp;L</th></tr></thead>
-          <tbody id="{{ bot_name }}-trades-table"></tbody>
-        </table>
-      </div>
-    </div>
+
+    <!-- Tables Row -->
     <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title">Recent Trades (last 30)</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Price</th><th>Qty</th><th>Conf</th><th>Outcome</th><th>P&amp;L</th></tr></thead>
+            <tbody id="bot-detail-trades-table"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="card">
         <div class="card-title">Category Performance</div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Category</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&amp;L</th></tr></thead>
-            <tbody id="{{ bot_name }}-cat-table"></tbody>
+            <tbody id="bot-detail-cat-table"></tbody>
           </table>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">Weight History</div>
-        <div class="chart-container"><canvas id="chart-wt-{{ bot_name }}"></canvas></div>
-      </div>
+    </div>
+
+    <!-- Weight History (full width) -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Weight History</div>
+      <div class="chart-container"><canvas id="chart-wt-bot-detail"></canvas></div>
     </div>
   </div>
-  {% endfor %}
 
   <!-- ===== ANALYTICS TAB ===== -->
   <div class="tab-content" id="tab-analytics">
@@ -546,14 +557,6 @@ tr:hover td{background:rgba(79,172,247,.04)}
     </div>
   </div>
 
-  <!-- ===== ACTIVITY TAB ===== -->
-  <div class="tab-content" id="tab-activity">
-    <div class="card">
-      <div class="card-title">Activity Feed</div>
-      <div class="activity-feed" id="activity-feed"></div>
-    </div>
-  </div>
-
   <!-- ===== SYSTEM TAB ===== -->
   <div class="tab-content" id="tab-system">
     <div class="grid grid-4" style="margin-bottom:20px">
@@ -593,6 +596,11 @@ tr:hover td{background:rgba(79,172,247,.04)}
         </table>
       </div>
     </div>
+    <!-- Activity Feed (merged from old Activity tab) -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Activity Feed</div>
+      <div class="activity-feed" id="activity-feed"></div>
+    </div>
   </div>
 
   <!-- ===== LLM CHAT TAB ===== -->
@@ -627,10 +635,10 @@ tr:hover td{background:rgba(79,172,247,.04)}
   <!-- ===== CONTROLS TAB ===== -->
   <div class="tab-content" id="tab-controls">
     <div class="global-controls">
-      <button class="btn btn-green" onclick="controlAll('resume_all')">▶ Resume All</button>
-      <button class="btn btn-yellow" onclick="controlAll('pause_all')">⏸ Pause All</button>
-      <button class="btn btn-red" onclick="if(confirm('Stop all bots?'))controlAll('stop_all')">⏹ Stop All</button>
-      <button class="btn btn-red" onclick="resetAllData()" style="margin-left:auto">🗑 Reset All Data</button>
+      <button class="btn btn-green" onclick="controlAll('resume_all')">&#9654; Resume All</button>
+      <button class="btn btn-yellow" onclick="controlAll('pause_all')">&#9646;&#9646; Pause All</button>
+      <button class="btn btn-red" onclick="if(confirm('Stop all bots?'))controlAll('stop_all')">&#9646; Stop All</button>
+      <button class="btn btn-red" onclick="resetAllData()" style="margin-left:auto">&#128465; Reset All Data</button>
     </div>
     <div class="grid grid-4">
       {% for bot_name in bot_names %}
@@ -653,77 +661,6 @@ tr:hover td{background:rgba(79,172,247,.04)}
         </div>
       </div>
       {% endfor %}
-    </div>
-  </div>
-
-  <!-- ===== WATCHLIST TAB ===== -->
-  <div class="tab-content" id="tab-watchlist">
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="card-title">Add Ticker to Watchlist</div>
-        <div style="margin-top:14px">
-          <div class="form-row">
-            <label class="form-label">Ticker</label>
-            <input id="wl-ticker" class="form-input" placeholder="e.g. KXBTCUSD-25APR30-T50000" />
-          </div>
-          <div class="form-row">
-            <label class="form-label">Label</label>
-            <input id="wl-label" class="form-input" placeholder="Optional description" />
-          </div>
-          <button class="btn btn-green" onclick="addToWatchlist()" style="margin-top:6px">+ Add Ticker</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">My Watchlist</div>
-        <div id="watchlist-items" style="margin-top:12px"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== JOURNAL TAB ===== -->
-  <div class="tab-content" id="tab-journal">
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="card-title">Add Journal Entry</div>
-        <div style="margin-top:14px">
-          <div class="form-row">
-            <label class="form-label">Bot</label>
-            <select id="jnl-bot" class="form-input">
-              <option value="">All bots</option>
-              {% for bot_name in bot_names %}
-              <option value="{{ bot_name }}">{{ bots[bot_name].name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-row">
-            <label class="form-label">Date</label>
-            <input id="jnl-date" type="date" class="form-input" />
-          </div>
-          <div class="form-row">
-            <label class="form-label">Trade ID</label>
-            <input id="jnl-trade-id" class="form-input" placeholder="Optional trade ID" />
-          </div>
-          <div style="margin-bottom:8px">
-            <label style="font-size:.78rem;color:var(--text-dim)">Note / Reflection</label>
-            <textarea id="jnl-note" rows="5" class="form-input" style="margin-top:4px;resize:vertical" placeholder="Enter your trading note or reflection..."></textarea>
-          </div>
-          <button class="btn btn-green" onclick="addJournalEntry()">Save Entry</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>Journal Entries</span>
-          <div style="display:flex;gap:8px">
-            <select id="jnl-filter-bot" class="form-input" style="width:auto;font-size:.76rem" onchange="refreshJournal()">
-              <option value="">All bots</option>
-              {% for bot_name in bot_names %}
-              <option value="{{ bot_name }}">{{ bots[bot_name].name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-        <div id="journal-entries" style="margin-top:12px;max-height:500px;overflow-y:auto"></div>
-      </div>
     </div>
   </div>
 
@@ -768,7 +705,7 @@ tr:hover td{background:rgba(79,172,247,.04)}
 
       <!-- Admin Actions -->
       <div class="card">
-        <div class="card-title">Database & Cache Management</div>
+        <div class="card-title">Database &amp; Cache Management</div>
         <div class="admin-actions" style="flex-direction:column;gap:10px">
           <div style="border:1px solid var(--border);border-radius:8px;padding:14px">
             <div style="font-size:.82rem;font-weight:600;margin-bottom:8px;color:var(--accent)">Database Vacuum</div>
@@ -824,15 +761,12 @@ function switchTab(tabName) {
   const content = document.getElementById('tab-' + tabName);
   if (tab) tab.classList.add('active');
   if (content) content.classList.add('active');
-  if (BOT_NAMES.includes(tabName)) refreshBotDetail(tabName);
+  if (tabName === 'bots') loadBotDetail(getCurrentBot());
   else if (tabName === 'analytics') refreshAnalytics();
-  else if (tabName === 'activity') refreshActivity();
   else if (tabName === 'risk') refreshRisk();
   else if (tabName === 'positions') refreshPositions();
   else if (tabName === 'system') refreshSystem();
   else if (tabName === 'llm') document.getElementById('llm-input')?.focus();
-  else if (tabName === 'watchlist') refreshWatchlist();
-  else if (tabName === 'journal') refreshJournal();
   else if (tabName === 'config') loadConfig();
   else if (tabName === 'admin') { refreshAdminLogs(); refreshAuditLog(); }
 }
@@ -840,12 +774,6 @@ function switchTab(tabName) {
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
-
-// Set journal date default to today
-(function() {
-  const d = document.getElementById('jnl-date');
-  if (d) d.value = new Date().toISOString().slice(0,10);
-})();
 
 // ===== Utility functions =====
 function fmt$(cents) {
@@ -1023,11 +951,10 @@ function renderBotCards(bots) {
     const perf = b.performance || {};
     const state = b.state || b.process_state || 'unknown';
     const pnl = perf.total_pnl || 0;
-    // Read can_trade from nested risk key (fix for the red bot bug)
     const risk = b.risk || {};
     const canTrade = risk.can_trade !== false;
     html += `
-    <div class="card bot-card" style="border-left-color:${d.color}">
+    <div class="card bot-card" style="border-left-color:${d.color}" onclick="switchTab('bots');document.getElementById('bot-selector').value='${name}';onBotSelectorChange()" style="cursor:pointer">
       <div class="card-header">
         <div>
           <div class="bot-name">${d.name || name}</div>
@@ -1049,8 +976,21 @@ function renderBotCards(bots) {
   container.innerHTML = html;
 }
 
-// ===== Refresh bot detail tabs =====
-async function refreshBotDetail(name) {
+// ===== Bots Tab — unified bot selector =====
+function getCurrentBot() {
+  return document.getElementById('bot-selector')?.value || BOT_NAMES[0];
+}
+
+function onBotSelectorChange() {
+  const name = getCurrentBot();
+  const d = BOT_DISPLAY[name] || {};
+  const dot = document.getElementById('bot-selector-dot');
+  if (dot) dot.style.background = d.color || '#4facf7';
+  loadBotDetail(name);
+}
+
+async function loadBotDetail(name) {
+  if (!name) return;
   const [perf, trades, cats, cal, cpnl, wts] = await Promise.all([
     fetchJSON(`/api/bot/${name}/performance`),
     fetchJSON(`/api/bot/${name}/trades?limit=50`),
@@ -1060,19 +1000,25 @@ async function refreshBotDetail(name) {
     fetchJSON(`/api/bot/${name}/weights`),
   ]);
 
+  const color = BOT_DISPLAY[name]?.color || '#4facf7';
+
+  // Update color dot in selector bar
+  const dot = document.getElementById('bot-selector-dot');
+  if (dot) dot.style.background = color;
+
   if (perf) {
-    document.getElementById(`${name}-trades`).textContent = perf.total_trades || 0;
-    const wrEl = document.getElementById(`${name}-wr`);
+    document.getElementById('bot-detail-trades').textContent = perf.total_trades || 0;
+    const wrEl = document.getElementById('bot-detail-wr');
     wrEl.textContent = (perf.win_rate || 0).toFixed(1) + '%';
     wrEl.className = 'card-value ' + ((perf.win_rate||0)>=50?'positive':'negative');
-    const pnlEl = document.getElementById(`${name}-pnl`);
+    const pnlEl = document.getElementById('bot-detail-pnl');
     pnlEl.textContent = fmt$(perf.total_pnl || 0);
     pnlEl.className = 'card-value ' + pnlClass(perf.total_pnl || 0);
-    document.getElementById(`${name}-conf`).textContent = (perf.avg_confidence || 0).toFixed(0);
+    document.getElementById('bot-detail-conf').textContent = (perf.avg_confidence || 0).toFixed(0);
   }
 
   if (trades) {
-    const tbody = document.getElementById(`${name}-trades-table`);
+    const tbody = document.getElementById('bot-detail-trades-table');
     tbody.innerHTML = trades.slice(0, 30).map(t => `
       <tr>
         <td>${(t.timestamp||'').slice(0,16)}</td>
@@ -1088,7 +1034,7 @@ async function refreshBotDetail(name) {
   }
 
   if (cats) {
-    const tbody = document.getElementById(`${name}-cat-table`);
+    const tbody = document.getElementById('bot-detail-cat-table');
     tbody.innerHTML = cats.map(c => `
       <tr>
         <td>${c.category||'—'}</td>
@@ -1101,8 +1047,7 @@ async function refreshBotDetail(name) {
   }
 
   if (cpnl && cpnl.length) {
-    const color = BOT_DISPLAY[name]?.color || '#4facf7';
-    makeChart(`chart-pnl-${name}`, {
+    makeChart('chart-pnl-bot-detail', {
       type: 'line',
       data: {
         labels: cpnl.map(p => p.trade_num),
@@ -1121,8 +1066,7 @@ async function refreshBotDetail(name) {
   }
 
   if (cal && cal.length) {
-    const color = BOT_DISPLAY[name]?.color || '#4facf7';
-    makeChart(`chart-cal-${name}`, {
+    makeChart('chart-cal-bot-detail', {
       type: 'bar',
       data: {
         labels: cal.map(c => c.bucket + '-' + (c.bucket+9) + '%'),
@@ -1140,7 +1084,7 @@ async function refreshBotDetail(name) {
   if (wts && wts.length) {
     const keys = ['edge','liquidity','volume','timing','momentum'];
     const colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#bc8cff'];
-    makeChart(`chart-wt-${name}`, {
+    makeChart('chart-wt-bot-detail', {
       type: 'line',
       data: {
         labels: wts.map((_,i) => i+1),
@@ -1369,7 +1313,6 @@ async function refreshRisk() {
   BOT_NAMES.forEach(name => {
     const b = data[name] || {};
     const d = BOT_DISPLAY[name] || {};
-    // can_trade is already correctly resolved server-side from risk key
     const canTrade = b.can_trade !== false;
     const dd = b.drawdown_pct || 0;
     const consLoss = b.consecutive_losses || 0;
@@ -1486,6 +1429,7 @@ async function refreshActivity() {
   const data = await fetchJSON('/api/activity');
   if (!data) return;
   const feed = document.getElementById('activity-feed');
+  if (!feed) return;
   feed.innerHTML = data.map(a => {
     const d = BOT_DISPLAY[a.bot] || {};
     const color = d.color || '#6b7c8d';
@@ -1579,6 +1523,9 @@ async function refreshSystem() {
       `<tr><td style="font-weight:600">${src}</td><td>${cnt}</td><td style="color:var(--text-dim)">${detail}</td></tr>`
     ).join('');
   }
+
+  // Also refresh activity feed now that it lives in System tab
+  await refreshActivity();
 }
 
 // ===== Controls =====
@@ -1677,102 +1624,6 @@ async function sendLLMChat() {
   }
 }
 
-// ===== Watchlist =====
-async function refreshWatchlist() {
-  const data = await fetchJSON('/api/watchlist');
-  const container = document.getElementById('watchlist-items');
-  if (!data || !data.length) {
-    container.innerHTML = '<div style="color:var(--text-dim);font-size:.84rem;padding:8px">No tickers on watchlist yet.</div>';
-    return;
-  }
-  container.innerHTML = data.map(w => `
-    <div class="watchlist-item">
-      <span class="wl-ticker">${w.ticker}</span>
-      ${w.label ? `<span class="wl-label">${w.label}</span>` : ''}
-      <span style="margin-left:auto;font-size:.7rem;color:var(--text-dim)">${(w.added_at||'').slice(0,10)}</span>
-      <span class="wl-del" onclick="removeFromWatchlist('${w.ticker}')">✕ Remove</span>
-    </div>
-  `).join('');
-}
-
-async function addToWatchlist() {
-  const ticker = document.getElementById('wl-ticker').value.trim().toUpperCase();
-  const label = document.getElementById('wl-label').value.trim();
-  if (!ticker) { alert('Ticker is required.'); return; }
-  const res = await fetch('/api/watchlist', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ ticker, label }),
-  });
-  const data = await res.json();
-  if (data.success) {
-    document.getElementById('wl-ticker').value = '';
-    document.getElementById('wl-label').value = '';
-    refreshWatchlist();
-  } else {
-    alert('Error: ' + data.error);
-  }
-}
-
-async function removeFromWatchlist(ticker) {
-  if (!confirm(`Remove ${ticker} from watchlist?`)) return;
-  await fetch(`/api/watchlist/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
-  refreshWatchlist();
-}
-
-// ===== Journal =====
-async function refreshJournal() {
-  const botFilter = document.getElementById('jnl-filter-bot')?.value || '';
-  let url = '/api/journal';
-  if (botFilter) url += '?bot=' + encodeURIComponent(botFilter);
-  const data = await fetchJSON(url);
-  const container = document.getElementById('journal-entries');
-  if (!data || !data.length) {
-    container.innerHTML = '<div style="color:var(--text-dim);font-size:.84rem;padding:8px">No journal entries yet.</div>';
-    return;
-  }
-  container.innerHTML = data.map(e => {
-    const botColor = e.bot_name ? (BOT_DISPLAY[e.bot_name]?.color || '#6b7c8d') : '#6b7c8d';
-    const botName = e.bot_name ? (BOT_DISPLAY[e.bot_name]?.name || e.bot_name) : 'All bots';
-    return `
-    <div class="journal-entry">
-      <div class="je-meta">
-        <span style="color:${botColor};font-weight:600">${botName}</span>
-        <span>${e.date || (e.created_at||'').slice(0,10)}</span>
-        ${e.trade_id ? `<span>Trade #${e.trade_id}</span>` : ''}
-        <span style="color:var(--text-dim);font-size:.68rem">${(e.created_at||'').slice(11,16)} UTC</span>
-      </div>
-      <div class="je-note">${escapeHtml(e.note)}</div>
-      <span class="je-del" onclick="deleteJournalEntry(${e.id})">✕ Delete</span>
-    </div>`;
-  }).join('');
-}
-
-async function addJournalEntry() {
-  const note = document.getElementById('jnl-note').value.trim();
-  if (!note) { alert('Note text is required.'); return; }
-  const bot_name = document.getElementById('jnl-bot').value;
-  const date = document.getElementById('jnl-date').value;
-  const trade_id = document.getElementById('jnl-trade-id').value.trim();
-  const res = await fetch('/api/journal', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ note, bot_name, date, trade_id }),
-  });
-  const data = await res.json();
-  if (data.success) {
-    document.getElementById('jnl-note').value = '';
-    document.getElementById('jnl-trade-id').value = '';
-    refreshJournal();
-  } else {
-    alert('Error: ' + data.error);
-  }
-}
-
-async function deleteJournalEntry(id) {
-  if (!confirm('Delete this journal entry?')) return;
-  await fetch(`/api/journal/${id}`, { method: 'DELETE' });
-  refreshJournal();
-}
-
 function escapeHtml(text) {
   return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -1858,14 +1709,11 @@ async function refreshAuditLog() {
 async function refreshAll() {
   await refreshOverview();
   const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-  if (activeTab && BOT_NAMES.includes(activeTab)) await refreshBotDetail(activeTab);
+  if (activeTab === 'bots') await loadBotDetail(getCurrentBot());
   else if (activeTab === 'analytics') await refreshAnalytics();
-  else if (activeTab === 'activity') await refreshActivity();
   else if (activeTab === 'risk') await refreshRisk();
   else if (activeTab === 'positions') await refreshPositions();
   else if (activeTab === 'system') await refreshSystem();
-  else if (activeTab === 'watchlist') await refreshWatchlist();
-  else if (activeTab === 'journal') await refreshJournal();
   else if (activeTab === 'admin') { await refreshAdminLogs(); await refreshAuditLog(); }
 }
 
