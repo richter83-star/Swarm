@@ -34,6 +34,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -257,12 +258,21 @@ class KalshiEvidenceExtractor:
             self._config.get("extraction_model", "claude-haiku-4-5-20251001")
         )
         self._max_tokens = int(self._config.get("llm_max_tokens", 1500))
-        # API key: config takes precedence, then env var
-        self._api_key = (
+        # API key: config takes precedence, then explicit env var read.
+        # Read os.environ explicitly (same pattern as LLMAdvisor) rather than
+        # relying on the SDK's internal env-var lookup, which can fail under
+        # systemd if the var was loaded after process start via _load_env_file().
+        self._api_key: Optional[str] = (
             self._config.get("extraction_api_key")
             or self._config.get("anthropic_api_key")
-            or None  # Will use ANTHROPIC_API_KEY env var in anthropic library
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or None
         )
+        if not self._api_key:
+            log.warning(
+                "[research] evidence_extractor: ANTHROPIC_API_KEY not found — "
+                "LLM extraction will fail. Set key in .env or swarm_config.yaml."
+            )
 
     async def extract(
         self,
