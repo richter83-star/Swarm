@@ -32,10 +32,38 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
+
+def _load_env_file() -> None:
+    """Load .env file (export KEY="value" format) into os.environ if keys not already set.
+    Needed because the systemd service does not source the shell .env file."""
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Handle: export KEY="value" or KEY="value" or KEY=value
+            line = line.removeprefix("export").strip()
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except Exception:
+        pass
+
+
+_load_env_file()
 
 
 # ---------------------------------------------------------------------------
