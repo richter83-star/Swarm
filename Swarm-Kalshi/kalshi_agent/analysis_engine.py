@@ -383,68 +383,80 @@ class AnalysisEngine:
         if self.llm_advisor is not None:
             self.llm_advisor.reset_cycle()
 
+        # Research pre-filter: lower threshold so research can boost borderline signals
+        research_trigger = float(self._research_cfg.get("trigger_threshold", 55))
+
         signals: List[TradeSignal] = []
         for opp in opportunities:
             signal = self._score(opp)
-            if signal and signal.confidence >= threshold:
-                # LLM second opinion
-                if self.llm_advisor is not None:
-                    ext_sigs = None
-                    if self.external_signals is not None:
-                        try:
-                            ext_sigs = self.external_signals.get_signals(
-                                opp.ticker, opp.series_ticker, opp.category, opp.title
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "External signals fetch failed for %s: %s",
-                                opp.ticker, exc,
-                            )
-                    adj_conf, llm_rationale = self.llm_advisor.adjust_confidence(
-                        ticker=opp.ticker,
-                        title=opp.title,
-                        category=opp.category,
-                        side=signal.side,
-                        quant_confidence=signal.confidence,
-                        market_context={
-                            "mid_price": opp.mid_price,
-                            "hours_to_expiry": opp.hours_to_expiry,
-                            "volume_24h": opp.volume_24h,
-                        },
-                        external_signals=ext_sigs,
-                    )
-                    if adj_conf != signal.confidence:
-                        signal.confidence = adj_conf
-                        if llm_rationale:
-                            signal.rationale += f" | LLM: {llm_rationale}"
-
-                # Research pipeline enrichment (additive layer)
-                # Run AFTER LLM adjustment but BEFORE final threshold re-check
-                if self._research_enabled:
+            if not signal:
+                continue
+            # Use lower threshold to allow research to boost borderline signals
+            effective_min = min(threshold, research_trigger) if self._research_enabled else threshold
+            if signal.confidence < effective_min:
+                continue
+            # LLM second opinion (only if already at full threshold)
+            if signal.confidence >= threshold and self.llm_advisor is not None:
+                ext_sigs = None
+                if self.external_signals is not None:
                     try:
-                        research = self.research_market(opp)
-                        if research is not None and research.quality_score >= self._research_min_quality:
-                            adj_conf, adj_rationale = self._apply_research_adjustment(
-                                confidence=signal.confidence,
-                                side=signal.side,
-                                research=research,
-                                rationale=signal.rationale,
-                            )
-                            signal.confidence = adj_conf
-                            signal.rationale = adj_rationale
-                            # Store research metadata on the signal
-                            signal.research_quality = research.quality_score
-                            signal.research_probability = research.estimated_probability
-                            signal.research_rationale = research.rationale_text
+                        ext_sigs = self.external_signals.get_signals(
+                            opp.ticker, opp.series_ticker, opp.category, opp.title
+                        )
                     except Exception as exc:
                         logger.warning(
-                            "[research] Enrichment failed for %s: %s",
+                            "External signals fetch failed for %s: %s",
                             opp.ticker, exc,
                         )
+                adj_conf, llm_rationale = self.llm_advisor.adjust_confidence(
+                    ticker=opp.ticker,
+                    title=opp.title,
+                    category=opp.category,
+                    side=signal.side,
+                    quant_confidence=signal.confidence,
+                    market_context={
+                        "mid_price": opp.mid_price,
+                        "hours_to_expiry": opp.hours_to_expiry,
+                        "volume_24h": opp.volume_24h,
+                    },
+                    external_signals=ext_sigs,
+                )
+                if adj_conf != signal.confidence:
+                    signal.confidence = adj_conf
+                    if llm_rationale:
+                        signal.rationale += f" | LLM: {llm_rationale}"
 
-                # Re-check threshold after LLM + research adjustments
-                if signal.confidence >= threshold:
-                    signals.append(signal)
+            # Research pipeline enrichment — runs on ALL signals above research_trigger
+            # so it can boost borderline signals to the final threshold
+            if self._research_enabled:
+                try:
+                    research = self.research_market(opp)
+                    if research is not None and research.quality_score >= self._research_min_quality:
+                        adj_conf, adj_rationale = self._apply_research_adjustment(
+                            confidence=signal.confidence,
+                            side=signal.side,
+                            research=research,
+                            rationale=signal.rationale,
+                        )
+                        signal.confidence = adj_conf
+                        signal.rationale = adj_rationale
+                        signal.research_quality = research.quality_score
+                        signal.research_probability = research.estimated_probability
+                        signal.research_rationale = research.rationale_text
+                        logger.info(
+                            "[research] %s → quality=%.2f prob=%.2f conf=%d",
+                            opp.ticker, research.quality_score,
+                            research.estimated_probability, signal.confidence,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[research] Enrichment failed for %s: %s",
+                        opp.ticker, exc,
+                    )
+
+            # Final threshold check after LLM + research adjustments
+            if signal.confidence >= threshold:
+                signals.append(signal)
 
         signals.sort(key=lambda s: s.confidence, reverse=True)
         logger.info(
