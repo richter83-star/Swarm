@@ -282,7 +282,7 @@ class KalshiEvidenceExtractor:
             a minimal package with quality_score=0.0 on any failure.
         """
         if not sources:
-            log.info("[research] evidence_extractor: no sources for question=%r", market_question[:60])
+            log.warning("[research] evidence_extractor: ZERO sources for question=%r — web search returned nothing", market_question[:60])
             return EvidencePackage(
                 market_question=market_question,
                 category=category,

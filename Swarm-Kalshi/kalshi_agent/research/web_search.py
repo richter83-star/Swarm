@@ -569,7 +569,7 @@ class KalshiSearchProvider(SearchProvider):
                 if results:
                     return results
                 # Empty result -- try next provider
-                log.debug(
+                log.info(
                     "[research] %s returned 0 results for query=%r; trying next",
                     provider.name, query[:60],
                 )

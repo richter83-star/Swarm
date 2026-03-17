@@ -227,7 +227,7 @@ class AnalysisEngine:
             all_sources: List[KSR] = []
             for batch in raw_results:
                 if isinstance(batch, BaseException):
-                    logger.debug("[research] Search batch failed: %s", batch)
+                    logger.warning("[research] Search batch failed: %s", batch)
                     continue
                 for sr in batch:
                     if sr.url not in seen_urls:
@@ -239,7 +239,7 @@ class AnalysisEngine:
             top_sources = all_sources[:8]
 
             if not top_sources:
-                logger.info("[research] No sources found for %s", ticker)
+                logger.warning("[research] No sources found for %s — all %d search queries returned 0 results", ticker, len(queries))
                 return None
 
             # 4. Extract evidence
