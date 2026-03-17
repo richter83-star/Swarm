@@ -235,6 +235,25 @@ research:
   primary_domains: {}                    # e.g. {"MACRO": ["bls.gov", "federalreserve.gov"]}
   secondary_domains: []
   blocked_domains: []
+  # --- Kalshi-specific research pipeline settings ---
+  min_researchability_score: 25          # skip research below this score (0-100)
+  search_timeout_seconds: 10             # max total time for web searches (hard timeout)
+  cache_ttl_hours: 2                     # cache search results for this many hours
+  min_evidence_quality: 0.3             # minimum quality score to use evidence in scoring
+  providers:
+    tavily:
+      enabled: true                      # uses TAVILY_API_KEY env var
+    serpapi:
+      enabled: false                     # uses SERPAPI_KEY env var (set true to enable)
+    duckduckgo:
+      enabled: true                      # free fallback, no key needed
+
+# --- Position Sizing ---
+position_sizing:
+  method: fractional_kelly               # "fractional_kelly" or "fixed_pct"
+  kelly_fraction: 0.25                   # use 25% of full Kelly (conservative)
+  min_position_cents: 50                 # minimum trade size ($0.50)
+  max_position_pct: 0.03                 # cap at 3% of balance per position
 
 # --- Logging ---
 logging:

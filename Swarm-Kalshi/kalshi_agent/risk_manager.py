@@ -330,6 +330,121 @@ class RiskManager:
         count = int(spend / price_cents)
         return max(1, count)
 
+    def calculate_kelly_size(
+        self,
+        confidence: float,
+        edge: float,
+        balance_cents: int,
+        implied_market_probability: Optional[float] = None,
+        evidence_quality: Optional[float] = None,
+    ) -> int:
+        """
+        Compute position size in cents using fractional Kelly criterion.
+
+        Formula:
+          edge_fraction   = (confidence/100) - implied_market_probability
+          kelly_fraction  = edge_fraction / (1 - edge_fraction)  if edge > 0 else 0
+          fractional_kelly = kelly_fraction * 0.25  (conservative 25% Kelly)
+          spend_cents     = balance_cents * fractional_kelly * confidence_multiplier
+
+        Confidence multipliers (combines quantitative confidence + evidence quality):
+          conf >= 80 AND quality >= 0.7  → 1.00x
+          conf >= 72 AND quality >= 0.5  → 0.75x
+          conf >= 72 AND quality < 0.5   → 0.50x
+          conf >= 72 AND quality is None → 0.60x
+          otherwise                      → 0.40x (conservative floor)
+
+        Position is capped at max_position_pct of balance and floored at
+        min_position_cents (default 50¢).
+
+        Parameters
+        ----------
+        confidence : float
+            Quantitative confidence score (0–100).
+        edge : float
+            Estimated edge in cents (e.g. from TradeSignal.edge).
+        balance_cents : int
+            Current account balance in cents.
+        implied_market_probability : float, optional
+            The market's implied YES probability (0–1).  Defaults to 0.50.
+        evidence_quality : float, optional
+            Evidence quality score from research pipeline (0–1).
+            When None, uses the "no evidence" multiplier tier.
+
+        Returns
+        -------
+        int
+            Recommended spend in cents (floor: min_position_cents = 50¢).
+        """
+        if balance_cents <= 0:
+            return 0
+
+        # Sizing config
+        sizing_cfg = self.cfg.get("position_sizing", {})
+        kelly_fraction_cfg = float(sizing_cfg.get("kelly_fraction", 0.25))
+        max_pct = float(
+            sizing_cfg.get("max_position_pct")
+            or self.cfg.get("max_position_pct", 0.03)
+        )
+        min_cents = int(sizing_cfg.get("min_position_cents", 50))
+
+        # Implied probability (default 50% = perfectly efficient market)
+        impl_prob = float(implied_market_probability) if implied_market_probability is not None else 0.50
+        impl_prob = max(0.01, min(0.99, impl_prob))
+
+        # Edge as a probability fraction
+        our_prob = max(0.01, min(0.99, confidence / 100.0))
+        edge_fraction = our_prob - impl_prob
+
+        if edge_fraction <= 0:
+            return 0  # No positive edge
+
+        # Kelly fraction
+        raw_kelly = edge_fraction / (1.0 - edge_fraction)
+        fractional_kelly = raw_kelly * kelly_fraction_cfg
+
+        # Confidence multiplier based on confidence + evidence quality
+        if confidence >= 80 and evidence_quality is not None and evidence_quality >= 0.7:
+            multiplier = 1.00
+        elif confidence >= 72 and evidence_quality is not None and evidence_quality >= 0.5:
+            multiplier = 0.75
+        elif confidence >= 72 and evidence_quality is not None and evidence_quality < 0.5:
+            multiplier = 0.50
+        elif confidence >= 72 and evidence_quality is None:
+            multiplier = 0.60
+        else:
+            multiplier = 0.40
+
+        # Raw spend
+        spend_cents = balance_cents * fractional_kelly * multiplier
+
+        # Apply losing-streak reduction
+        streak_thresh = int(self.cfg.get("loss_streak_threshold", 3))
+        if self._consecutive_losses >= streak_thresh:
+            streak_mult = float(self.cfg.get("loss_streak_size_multiplier", 0.5))
+            spend_cents *= streak_mult
+            logger.info(
+                "Kelly sizing: losing streak (%d), applying %.0f%% reduction.",
+                self._consecutive_losses, (1 - streak_mult) * 100,
+            )
+
+        # Cap at max_position_pct
+        max_spend = balance_cents * max_pct
+        spend_cents = min(spend_cents, max_spend)
+
+        # Floor at min viable trade
+        if spend_cents < min_cents:
+            return 0  # Below minimum -- skip trade
+
+        result = int(spend_cents)
+        logger.debug(
+            "Kelly size: conf=%.1f edge_frac=%.4f kelly=%.4f frac_kelly=%.4f "
+            "mult=%.2f spend=%d¢ (max=%d¢)",
+            confidence, edge_fraction, raw_kelly, fractional_kelly,
+            multiplier, result, int(max_spend),
+        )
+        return result
+
     # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------

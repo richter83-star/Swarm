@@ -161,6 +161,7 @@ class BotRunner:
             learning_engine=self.learning,
             external_signals=self.external_signals,
             llm_advisor=self.llm_advisor,
+            research_config=self.cfg.get("research", {}),
         )
 
         self.behavior = HumanBehavior(

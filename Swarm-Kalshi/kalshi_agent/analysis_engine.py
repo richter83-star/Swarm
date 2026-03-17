@@ -14,13 +14,22 @@ Enhanced market opportunity scorer with:
   weighs YES vs NO depth at multiple price levels, not just totals.
 * **Momentum as a first-class scoring dimension** — price velocity and trade
   flow direction are tracked alongside edge/liquidity/volume/timing.
+* **Research pipeline** — optional web research layer that enriches signals
+  with evidence-based probability estimates from authoritative sources.
 
 Scoring dimensions (sum to 1.0 via learned weights):
   edge · liquidity · volume · timing · momentum
+
+Research integration (additive layer, never blocks trades):
+  If research available AND quality >= 0.6  → evidence-based probability as
+      primary signal; confidence ±15/±20 adjustment
+  If research available AND quality < 0.6   → weak signal only (±5)
+  If no research (low researchability)      → existing statistical analysis unchanged
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import dataclass, field
@@ -29,6 +38,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from kalshi_agent.market_scanner import MarketOpportunity
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ResearchResult:
+    """Result of the research pipeline for a single market opportunity."""
+    evidence_package: Any           # EvidencePackage (typed as Any to avoid import cycles)
+    category: str = "OTHER"
+    researchability_score: int = 0
+    # Convenience accessors (populated from evidence_package)
+    quality_score: float = 0.0
+    estimated_probability: float = 0.5
+    rationale_text: str = ""
 
 
 @dataclass
@@ -54,6 +75,11 @@ class TradeSignal:
     volume_24h: int = 0
     spread_cents: int = 0
 
+    # Research enrichment (optional -- populated when research pipeline ran)
+    research_quality: float = 0.0
+    research_probability: float = 0.0
+    research_rationale: str = ""
+
 
 class AnalysisEngine:
     """
@@ -72,6 +98,9 @@ class AnalysisEngine:
         When provided, used to tilt fair-value estimates.
     llm_advisor : LLMAdvisor, optional
         When provided, used to blend LLM confidence into final scores.
+    research_config : dict, optional
+        The ``research`` section of ``swarm_config.yaml``. When provided and
+        ``research.enabled: true``, activates the web research pipeline.
     """
 
     DEFAULT_WEIGHTS: Dict[str, float] = {
@@ -89,6 +118,7 @@ class AnalysisEngine:
         learning_engine=None,
         external_signals=None,
         llm_advisor=None,
+        research_config: Optional[Dict[str, Any]] = None,
     ):
         self.cfg = config
         self.learning = learning_engine
@@ -99,10 +129,238 @@ class AnalysisEngine:
             self.weights.update(weight_overrides)
         self._normalise_weights()
 
+        # Research pipeline (optional, lazy-initialised on first use)
+        self._research_cfg: Dict[str, Any] = research_config or {}
+        self._research_enabled: bool = bool(self._research_cfg.get("enabled", False))
+        self._research_min_score: int = int(
+            self._research_cfg.get("min_researchability_score", 25)
+        )
+        self._research_timeout: float = float(
+            self._research_cfg.get("search_timeout_seconds", 10)
+        )
+        self._research_min_quality: float = float(
+            self._research_cfg.get("min_evidence_quality", 0.3)
+        )
+        # Lazy imports (avoid penalising startup when research is disabled)
+        self._classifier = None
+        self._query_builder = None
+        self._search_provider = None
+        self._extractor = None
+
     def _normalise_weights(self) -> None:
         total = sum(self.weights.values())
         if total > 0:
             self.weights = {k: v / total for k, v in self.weights.items()}
+
+    # ------------------------------------------------------------------
+    # Research pipeline helpers (lazy initialisation)
+    # ------------------------------------------------------------------
+
+    def _init_research(self) -> bool:
+        """Lazy-initialise research pipeline components. Returns True if ready."""
+        if not self._research_enabled:
+            return False
+        try:
+            if self._classifier is None:
+                from kalshi_agent.research.market_classifier import classify_kalshi_market
+                self._classifier = classify_kalshi_market
+            if self._query_builder is None:
+                from kalshi_agent.research.query_builder import build_kalshi_queries
+                self._query_builder = build_kalshi_queries
+            if self._search_provider is None:
+                from kalshi_agent.research.web_search import create_kalshi_search_provider
+                self._search_provider = create_kalshi_search_provider(
+                    config=self._research_cfg,
+                    ttl_secs=float(self._research_cfg.get("cache_ttl_hours", 2)) * 3600,
+                )
+            if self._extractor is None:
+                from kalshi_agent.research.evidence_extractor import KalshiEvidenceExtractor
+                self._extractor = KalshiEvidenceExtractor(config=self._research_cfg)
+            return True
+        except Exception as exc:
+            logger.warning("[research] Failed to initialise research pipeline: %s", exc)
+            return False
+
+    async def _run_research_async(self, opp: MarketOpportunity) -> Optional[ResearchResult]:
+        """Execute the full research pipeline for one opportunity (async).
+
+        Never raises -- returns None on any failure so the trade loop continues.
+        """
+        try:
+            if not self._init_research():
+                return None
+
+            ticker = str(getattr(opp, "ticker", "") or "")
+            title = str(getattr(opp, "title", "") or "")
+            category_raw = str(getattr(opp, "category", "") or "")
+
+            # 1. Classify
+            classification = self._classifier(ticker=ticker, title=title)
+            if classification.researchability_score < self._research_min_score:
+                logger.info(
+                    "[research] Skipping research for %s: researchability=%d < min=%d",
+                    ticker, classification.researchability_score, self._research_min_score,
+                )
+                return None
+
+            # 2. Build queries
+            queries = self._query_builder(
+                ticker=ticker,
+                title=title,
+                category=classification.category,
+                researchability=classification.researchability_score,
+                max_queries=classification.query_budget,
+            )
+            if not queries:
+                return None
+
+            # 3. Run web searches concurrently
+            from kalshi_agent.research.web_search import SearchResult as KSR
+            search_tasks = [
+                self._search_provider.search(q.query_text, num_results=5)
+                for q in queries
+            ]
+            raw_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+            # Flatten, de-duplicate by URL
+            seen_urls: set = set()
+            all_sources: List[KSR] = []
+            for batch in raw_results:
+                if isinstance(batch, BaseException):
+                    logger.debug("[research] Search batch failed: %s", batch)
+                    continue
+                for sr in batch:
+                    if sr.url not in seen_urls:
+                        seen_urls.add(sr.url)
+                        all_sources.append(sr)
+
+            # Sort by authority
+            all_sources.sort(key=lambda s: -s.authority_score)
+            top_sources = all_sources[:8]
+
+            if not top_sources:
+                logger.info("[research] No sources found for %s", ticker)
+                return None
+
+            # 4. Extract evidence
+            package = await self._extractor.extract(
+                market_question=title,
+                sources=top_sources,
+                category=classification.category,
+            )
+
+            result = ResearchResult(
+                evidence_package=package,
+                category=classification.category,
+                researchability_score=classification.researchability_score,
+                quality_score=package.quality_score,
+                estimated_probability=package.estimated_probability,
+                rationale_text=package.as_rationale_text(),
+            )
+
+            logger.info(
+                "[research] Completed research for %s: category=%s quality=%.3f P(YES)=%.3f",
+                ticker, classification.category,
+                package.quality_score, package.estimated_probability,
+            )
+            return result
+
+        except Exception as exc:
+            logger.warning("[research] Research pipeline error for %s: %s", getattr(opp, "ticker", "?"), exc)
+            return None
+
+    def research_market(self, opp: MarketOpportunity) -> Optional[ResearchResult]:
+        """Synchronous wrapper for research pipeline with hard timeout.
+
+        Runs the async pipeline in a new event loop with self._research_timeout
+        timeout. Returns None on timeout, error, or disabled research.
+        This method is non-blocking from the caller's perspective -- it either
+        finishes within the timeout or returns None gracefully.
+        """
+        if not self._research_enabled:
+            return None
+        try:
+            return asyncio.run(
+                asyncio.wait_for(
+                    self._run_research_async(opp),
+                    timeout=self._research_timeout,
+                )
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[research] Research timeout (%.0fs) for %s",
+                self._research_timeout, getattr(opp, "ticker", "?"),
+            )
+            return None
+        except Exception as exc:
+            logger.warning(
+                "[research] Research failed for %s: %s",
+                getattr(opp, "ticker", "?"), exc,
+            )
+            return None
+
+    def _apply_research_adjustment(
+        self,
+        confidence: float,
+        side: str,
+        research: ResearchResult,
+        rationale: str,
+    ) -> Tuple[float, str]:
+        """Adjust confidence based on research evidence.
+
+        Rules:
+        - quality >= 0.6  (STRONG): evidence probability drives ±15/±20 adjustment
+        - quality 0.3-0.6 (WEAK):   ±5 adjustment only
+        - quality < 0.3   (POOR):   no adjustment
+        - 'side' controls direction (yes/no inversion of estimated_probability)
+        """
+        quality = research.quality_score
+        if quality < self._research_min_quality:
+            return confidence, rationale
+
+        # Evidence probability for the traded side
+        ev_prob = research.estimated_probability  # P(YES) from evidence
+        if side == "no":
+            ev_prob = 1.0 - ev_prob
+
+        # Our current confidence expressed as a probability (0-1)
+        quant_prob = confidence / 100.0
+
+        # Agreement/disagreement between quant signal and evidence
+        agreement = ev_prob - quant_prob  # positive = evidence MORE bullish than quant
+
+        research_note = (
+            f"[research] cat={research.category} "
+            f"quality={quality:.2f} P(YES)={research.estimated_probability:.2f}"
+        )
+
+        if quality >= 0.6:
+            # Strong evidence -- allow up to ±15 boost or ±20 reduction
+            if agreement > 0.15:
+                # Evidence is significantly more bullish -- boost confidence
+                boost = min(15.0, agreement * 50.0)
+                confidence = min(100.0, confidence + boost)
+                research_note += f" | evidence boosts +{boost:.1f}"
+            elif agreement < -0.15:
+                # Evidence is significantly more bearish -- reduce confidence
+                reduction = min(20.0, abs(agreement) * 50.0)
+                confidence = max(0.0, confidence - reduction)
+                research_note += f" | evidence reduces -{reduction:.1f}"
+            else:
+                # Broadly agrees -- small boost for confirmation
+                confidence = min(100.0, confidence + 3.0)
+                research_note += " | evidence confirms"
+        else:
+            # Weak evidence (0.3-0.6) -- weak signal only ±5
+            if agreement > 0.10:
+                confidence = min(100.0, confidence + 5.0)
+                research_note += " | weak evidence supports +5"
+            elif agreement < -0.10:
+                confidence = max(0.0, confidence - 5.0)
+                research_note += " | weak evidence opposes -5"
+
+        new_rationale = f"{rationale} | {research_note}"
+        return confidence, new_rationale
 
     # ------------------------------------------------------------------
     # Public interface
@@ -113,6 +371,7 @@ class AnalysisEngine:
         Score every opportunity and return signals sorted by confidence.
         Uses calibrated threshold when a learning engine is attached.
         LLM advisor blends into confidence for high-scoring signals.
+        Research pipeline enriches high-scoring signals with evidence.
         """
         base_threshold = self.cfg.get("min_confidence_threshold", 65)
         if self.learning is not None:
@@ -159,7 +418,31 @@ class AnalysisEngine:
                         if llm_rationale:
                             signal.rationale += f" | LLM: {llm_rationale}"
 
-                # Re-check threshold after LLM adjustment
+                # Research pipeline enrichment (additive layer)
+                # Run AFTER LLM adjustment but BEFORE final threshold re-check
+                if self._research_enabled:
+                    try:
+                        research = self.research_market(opp)
+                        if research is not None and research.quality_score >= self._research_min_quality:
+                            adj_conf, adj_rationale = self._apply_research_adjustment(
+                                confidence=signal.confidence,
+                                side=signal.side,
+                                research=research,
+                                rationale=signal.rationale,
+                            )
+                            signal.confidence = adj_conf
+                            signal.rationale = adj_rationale
+                            # Store research metadata on the signal
+                            signal.research_quality = research.quality_score
+                            signal.research_probability = research.estimated_probability
+                            signal.research_rationale = research.rationale_text
+                    except Exception as exc:
+                        logger.debug(
+                            "Research enrichment failed for %s: %s",
+                            opp.ticker, exc,
+                        )
+
+                # Re-check threshold after LLM + research adjustments
                 if signal.confidence >= threshold:
                     signals.append(signal)
 
