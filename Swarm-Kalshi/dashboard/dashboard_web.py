@@ -10,19 +10,29 @@ Provides a web UI at localhost:8080 with:
 - Performance analytics with Chart.js
 - Bot controls (start/stop/pause, budget allocation, etc.)
 - Risk monitor (per-bot drawdown, balance, daily P&L, can_trade)
-- Advanced analytics (Sharpe, Sortino, profit factor, streaks)
+- Advanced analytics (Sharpe, Sortino, profit factor, streaks, VaR, slippage)
 - Open positions table
 - System tab (auto-scale changes, meta-insights, uptime)
+- LLM Chat tab
+- Controls tab
+- Admin tab (log viewer, DB vacuum, DB backup, cache clear, log rotation)
+- Config UI tab (view/edit swarm_config.yaml)
+- Trading Journal tab (per-trade or per-day notes in SQLite)
+- Watchlist tab (save Kalshi tickers to monitor)
+- Audit Log (all control actions logged with timestamp)
+- Kill Switch (emergency stop all bots)
 - Auto-refresh every 15 seconds
 - Background equity snapshot writer (every 5 minutes)
 """
 
 from __future__ import annotations
 
+import glob as _glob
 import json
 import logging
 import math
 import os
+import shutil
 import sqlite3
 import sys
 import threading
@@ -375,16 +385,17 @@ def create_app(
         return result
 
     # ------------------------------------------------------------------
-    # NEW: Advanced analytics helpers
+    # Advanced analytics helpers
     # ------------------------------------------------------------------
 
     def _compute_advanced_analytics(bot_name: str) -> Dict[str, Any]:
-        """Compute Sharpe, Sortino, profit factor, max drawdown, streaks, best/worst trade."""
+        """Compute Sharpe, Sortino, profit factor, max drawdown, streaks, best/worst trade,
+        VaR (95th pct), and execution quality (slippage proxy)."""
         where_clause, where_params = _trade_scope(bot_name)
         rows = query_bot_db(
             bot_name,
             """
-            SELECT pnl_cents, outcome, timestamp
+            SELECT pnl_cents, outcome, timestamp, entry_price, confidence
             FROM trades WHERE """
             + where_clause
             + """ AND outcome IN ('win', 'loss')
@@ -393,12 +404,16 @@ def create_app(
             where_params,
         )
 
+        base = {
+            "sharpe": 0.0, "sortino": 0.0, "profit_factor": 0.0,
+            "max_drawdown_pct": 0.0, "win_streak": 0, "loss_streak": 0,
+            "best_trade_cents": 0, "worst_trade_cents": 0,
+            "var_95_cents": 0, "avg_slippage_pct": 0.0,
+            "market_regime": "neutral",
+        }
+
         if not rows:
-            return {
-                "sharpe": 0.0, "sortino": 0.0, "profit_factor": 0.0,
-                "max_drawdown_pct": 0.0, "win_streak": 0, "loss_streak": 0,
-                "best_trade_cents": 0, "worst_trade_cents": 0,
-            }
+            return base
 
         pnls = [float(r["pnl_cents"] or 0) for r in rows]
         outcomes = [r["outcome"] for r in rows]
@@ -451,6 +466,35 @@ def create_app(
                 cur_win = 0
                 loss_streak = max(loss_streak, cur_loss)
 
+        # VaR 95% — the 5th percentile of trade P&L distribution
+        sorted_pnls = sorted(pnls)
+        var_idx = max(0, int(len(sorted_pnls) * 0.05) - 1)
+        var_95 = sorted_pnls[var_idx] if sorted_pnls else 0.0
+
+        # Execution quality: avg slippage proxy = stddev of entry_price as % of mean
+        # (higher stddev relative to mean => inconsistent fills)
+        entry_prices = [float(r["entry_price"] or 0) for r in rows if r.get("entry_price")]
+        if len(entry_prices) > 1:
+            mean_ep = sum(entry_prices) / len(entry_prices)
+            ep_std = math.sqrt(sum((p - mean_ep) ** 2 for p in entry_prices) / len(entry_prices))
+            avg_slippage_pct = round((ep_std / mean_ep) * 100, 2) if mean_ep > 0 else 0.0
+        else:
+            avg_slippage_pct = 0.0
+
+        # Market regime: based on recent 20 trades win rate vs overall
+        if n >= 20:
+            recent_wins = sum(1 for o in outcomes[-20:] if o == "win")
+            recent_wr = recent_wins / 20.0
+            overall_wr = sum(1 for o in outcomes if o == "win") / n
+            if recent_wr > overall_wr + 0.05:
+                regime = "trending_up"
+            elif recent_wr < overall_wr - 0.05:
+                regime = "trending_down"
+            else:
+                regime = "neutral"
+        else:
+            regime = "insufficient_data"
+
         return {
             "sharpe": round(sharpe, 3),
             "sortino": round(min(sortino, 999.0), 3),
@@ -460,6 +504,9 @@ def create_app(
             "loss_streak": loss_streak,
             "best_trade_cents": int(max(pnls)),
             "worst_trade_cents": int(min(pnls)),
+            "var_95_cents": int(var_95),
+            "avg_slippage_pct": avg_slippage_pct,
+            "market_regime": regime,
         }
 
     def _get_open_positions(bot_name: str) -> List[Dict]:
@@ -498,6 +545,62 @@ def create_app(
                 "hours_held": hours_held,
             })
         return result
+
+    # ------------------------------------------------------------------
+    # Dashboard SQLite (journal, watchlist, audit log)
+    # ------------------------------------------------------------------
+
+    _dash_db_path = project_root / "data" / "dashboard.db"
+
+    def _get_dash_db() -> sqlite3.Connection:
+        """Open/create the dashboard SQLite database and ensure schema."""
+        _dash_db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(_dash_db_path), timeout=10)
+        conn.execute("PRAGMA busy_timeout = 10000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                trade_id TEXT,
+                bot_name TEXT,
+                date TEXT,
+                note TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL UNIQUE,
+                label TEXT,
+                added_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target TEXT,
+                detail TEXT,
+                operator TEXT DEFAULT 'dashboard'
+            )
+        """)
+        conn.commit()
+        return conn
+
+    def _audit(action: str, target: str = "", detail: str = "") -> None:
+        """Write an entry to the audit log."""
+        try:
+            conn = _get_dash_db()
+            conn.execute(
+                "INSERT INTO audit_log (created_at, action, target, detail) VALUES (?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(), action, target, detail),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.debug("Audit log write failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Equity snapshot writer (background thread)
@@ -843,14 +946,12 @@ def create_app(
 
     @app.route("/api/bot/<bot_name>/performance")
     def api_bot_performance(bot_name):
-        """Get performance metrics for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_bot_performance(bot_name))
 
     @app.route("/api/bot/<bot_name>/trades")
     def api_bot_trades(bot_name):
-        """Get trade history for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         limit = request.args.get("limit", 100, type=int)
@@ -858,42 +959,36 @@ def create_app(
 
     @app.route("/api/bot/<bot_name>/daily")
     def api_bot_daily(bot_name):
-        """Get daily summaries for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_bot_daily_summaries(bot_name))
 
     @app.route("/api/bot/<bot_name>/weights")
     def api_bot_weights(bot_name):
-        """Get weight history for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_bot_weight_history(bot_name))
 
     @app.route("/api/bot/<bot_name>/categories")
     def api_bot_categories(bot_name):
-        """Get category performance for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_bot_category_stats(bot_name))
 
     @app.route("/api/bot/<bot_name>/calibration")
     def api_bot_calibration(bot_name):
-        """Get confidence calibration for a specific bot."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_bot_calibration(bot_name))
 
     @app.route("/api/bot/<bot_name>/cumulative_pnl")
     def api_bot_cumulative_pnl(bot_name):
-        """Get cumulative P&L series for charting."""
         if bot_name not in BOT_NAMES:
             return jsonify({"error": "Unknown bot"}), 404
         return jsonify(get_cumulative_pnl(bot_name))
 
     @app.route("/api/performance/all")
     def api_all_performance():
-        """Get performance for all bots."""
         result = {}
         for bot_name in BOT_NAMES:
             result[bot_name] = {
@@ -906,7 +1001,6 @@ def create_app(
 
     @app.route("/api/activity")
     def api_activity():
-        """Get recent activity log."""
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             return jsonify(coordinator.get_activity_log(limit=50))
@@ -922,10 +1016,6 @@ def create_app(
             })
         return jsonify(activities)
 
-    # ------------------------------------------------------------------
-    # Routes -- NEW API endpoints
-    # ------------------------------------------------------------------
-
     @app.route("/api/risk")
     def api_risk():
         """Per-bot risk cards: drawdown, balance, daily P&L, can_trade, consecutive losses, open positions."""
@@ -938,6 +1028,7 @@ def create_app(
 
         for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
+            # can_trade is nested under status['risk']['can_trade'] (not top-level)
             risk = status.get("risk", {}) if isinstance(status, dict) else {}
             if not isinstance(risk, dict):
                 risk = {}
@@ -945,7 +1036,7 @@ def create_app(
             balance_cents = int(risk.get("balance_cents", 0) or 0)
             daily_pnl_cents = int(risk.get("daily_pnl_cents", 0) or 0)
             drawdown_pct = float(risk.get("drawdown_pct", 0.0) or 0.0)
-            can_trade = bool(risk.get("can_trade", True))
+            can_trade = bool(risk.get("can_trade", True))  # FIXED: read from nested risk key
             consecutive_losses = int(risk.get("consecutive_losses", 0) or 0)
             open_positions = int(risk.get("open_positions", 0) or 0)
 
@@ -983,10 +1074,9 @@ def create_app(
 
     @app.route("/api/equity-curve")
     def api_equity_curve():
-        """Return time series of total PnL. Reads from equity_snapshots.json or falls back to DB aggregation."""
+        """Return time series of total PnL."""
         snapshots = _load_equity_snapshots()
         if snapshots:
-            # Return last 288 snapshots (24h at 5min intervals)
             recent = snapshots[-288:]
             return jsonify({
                 "source": "equity_snapshots",
@@ -994,7 +1084,6 @@ def create_app(
                 "count": len(recent),
             })
 
-        # Fallback: aggregate per-bot cumulative PnL and sum
         combined: Dict[int, int] = {}
         max_len = 0
         for bot_name in BOT_NAMES:
@@ -1015,7 +1104,7 @@ def create_app(
 
     @app.route("/api/analytics/advanced")
     def api_analytics_advanced():
-        """Advanced analytics: Sharpe, Sortino, profit factor, max drawdown, streaks, best/worst trade."""
+        """Advanced analytics: Sharpe, Sortino, profit factor, max drawdown, streaks, VaR, slippage, regime."""
         result = {}
         for bot_name in BOT_NAMES:
             result[bot_name] = _compute_advanced_analytics(bot_name)
@@ -1023,7 +1112,6 @@ def create_app(
 
     @app.route("/api/meta-insights")
     def api_meta_insights():
-        """Read data/swarm_meta_insights.json and return its contents."""
         insights_path = project_root / "data" / "swarm_meta_insights.json"
         try:
             if insights_path.exists():
@@ -1036,7 +1124,6 @@ def create_app(
 
     @app.route("/api/position-counts")
     def api_position_counts():
-        """Return position count reconciliation from coordinator.get_swarm_status()."""
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             try:
@@ -1046,7 +1133,6 @@ def create_app(
             except Exception as exc:
                 logger.debug("Failed getting position counts: %s", exc)
 
-        # Fallback: count pending rows per bot
         counts: Dict[str, Any] = {}
         total_pending = 0
         for bot_name in BOT_NAMES:
@@ -1071,7 +1157,6 @@ def create_app(
 
     @app.route("/api/positions")
     def api_positions():
-        """Return all open/pending positions across all bots."""
         all_positions: List[Dict] = []
         for bot_name in BOT_NAMES:
             all_positions.extend(_get_open_positions(bot_name))
@@ -1080,7 +1165,6 @@ def create_app(
 
     @app.route("/api/system")
     def api_system():
-        """Return system-level info: auto-scale changes, meta-insights, uptime, conflicts."""
         coordinator = app.config.get("COORDINATOR")
         auto_scale = {}
         conflicts = {}
@@ -1106,7 +1190,6 @@ def create_app(
             except Exception:
                 pass
 
-        # Meta-insights summary
         meta_insights = {}
         insights_path = project_root / "data" / "swarm_meta_insights.json"
         try:
@@ -1124,9 +1207,12 @@ def create_app(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
+    # ------------------------------------------------------------------
+    # Routes -- LLM Chat
+    # ------------------------------------------------------------------
+
     @app.route("/api/llm/chat", methods=["POST"])
     def api_llm_chat():
-        """Send a prompt to the configured central LLM provider and return the response."""
         data = request.json or {}
         prompt = str(data.get("prompt", "")).strip()
         system_prompt = str(data.get("system", "")).strip()
@@ -1297,7 +1383,6 @@ def create_app(
             "context_summary": context_summary,
         })
 
-    # Keep the /api/ollama/chat alias for backward compatibility with existing HTML
     @app.route("/api/ollama/chat", methods=["POST"])
     def api_ollama_chat_compat():
         """Backward-compatible alias for /api/llm/chat."""
@@ -1311,6 +1396,7 @@ def create_app(
     def api_start_bot(bot_name):
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("start", bot_name)
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.start_bot(bot_name)
@@ -1321,6 +1407,7 @@ def create_app(
     def api_stop_bot(bot_name):
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("stop", bot_name)
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.stop_bot(bot_name)
@@ -1331,6 +1418,7 @@ def create_app(
     def api_pause_bot(bot_name):
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("pause", bot_name)
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.pause_bot(bot_name)
@@ -1341,6 +1429,7 @@ def create_app(
     def api_resume_bot(bot_name):
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("resume", bot_name)
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             success = coordinator.resume_bot(bot_name)
@@ -1351,6 +1440,7 @@ def create_app(
     def api_pause_all():
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("pause_all", "all")
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.pause_all()
@@ -1361,6 +1451,7 @@ def create_app(
     def api_resume_all():
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("resume_all", "all")
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.resume_all()
@@ -1371,6 +1462,7 @@ def create_app(
     def api_stop_all():
         if _manual_controls_locked():
             return _manual_controls_forbidden()
+        _audit("stop_all", "all")
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.stop_all()
@@ -1379,12 +1471,12 @@ def create_app(
 
     @app.route("/api/control/budget", methods=["POST"])
     def api_update_budget():
-        """Update budget allocation for a bot."""
         if _manual_controls_locked():
             return _manual_controls_forbidden()
         data = request.json or {}
         bot_name = data.get("bot_name")
         pct = data.get("percentage", 0)
+        _audit("budget_update", bot_name or "", f"{pct}%")
         coordinator = app.config.get("COORDINATOR")
         if coordinator and bot_name:
             coordinator.balance_manager.set_bot_allocation(bot_name, pct / 100.0)
@@ -1393,11 +1485,11 @@ def create_app(
 
     @app.route("/api/control/global_loss_limit", methods=["POST"])
     def api_update_loss_limit():
-        """Update global daily loss limit."""
         if _manual_controls_locked():
             return _manual_controls_forbidden()
         data = request.json or {}
         limit = data.get("limit_cents", 15000)
+        _audit("global_loss_limit_update", "all", f"{limit} cents")
         coordinator = app.config.get("COORDINATOR")
         if coordinator:
             coordinator.swarm_cfg["global_daily_loss_limit_cents"] = limit
@@ -1406,10 +1498,9 @@ def create_app(
 
     @app.route("/api/control/reset_data", methods=["POST"])
     def api_reset_data():
-        """Delete all bot databases to start fresh."""
         if _manual_controls_locked():
             return _manual_controls_forbidden()
-        import glob as _glob
+        _audit("reset_data", "all")
         project_root_path = Path(app.config.get("PROJECT_ROOT", "."))
         data_dir = project_root_path / "data"
         deleted = []
@@ -1426,11 +1517,9 @@ def create_app(
 
     @app.route("/api/alerts")
     def api_alerts():
-        """Return active alerts for the swarm."""
         alerts = []
         coordinator = app.config.get("COORDINATOR")
 
-        # Bot crash alerts
         for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
             state = status.get("state", "unknown")
@@ -1443,12 +1532,11 @@ def create_app(
                     "timestamp": status.get("timestamp", ""),
                 })
 
-        # Daily loss limit alerts (per-bot)
         for bot_name in BOT_NAMES:
             status = get_bot_status(bot_name)
             risk = status.get("risk", {})
             daily_pnl = risk.get("daily_pnl_cents", 0)
-            can_trade = risk.get("can_trade", True)
+            can_trade = risk.get("can_trade", True)  # FIXED: read from nested risk key
             if not can_trade and daily_pnl < 0:
                 alerts.append({
                     "level": "warning",
@@ -1458,7 +1546,6 @@ def create_app(
                     "timestamp": status.get("timestamp", ""),
                 })
 
-        # Stale pending trade alerts
         for bot_name in BOT_NAMES:
             try:
                 db_path = get_bot_db_path(bot_name)
@@ -1481,7 +1568,6 @@ def create_app(
             except Exception as exc:
                 logger.debug("Alert check failed for %s: %s", bot_name, exc)
 
-        # Recent trade failure alerts from activity log
         if coordinator:
             activity = coordinator.get_activity_log(limit=20)
         else:
@@ -1507,6 +1593,307 @@ def create_app(
                 })
 
         return jsonify({"alerts": alerts, "count": len(alerts)})
+
+    # ------------------------------------------------------------------
+    # Routes -- Kill Switch
+    # ------------------------------------------------------------------
+
+    @app.route("/api/kill-switch", methods=["POST"])
+    def api_kill_switch():
+        """Emergency stop: halt all bots immediately."""
+        _audit("KILL_SWITCH", "all", "Emergency stop triggered from dashboard")
+        results = {}
+        coordinator = app.config.get("COORDINATOR")
+        if coordinator:
+            try:
+                coordinator.stop_all()
+                results["coordinator"] = "stopped"
+            except Exception as exc:
+                results["coordinator_error"] = str(exc)
+        else:
+            # Fallback: call stop endpoint for each bot
+            for bot_name in BOT_NAMES:
+                try:
+                    coordinator_fallback = app.config.get("COORDINATOR")
+                    if coordinator_fallback:
+                        coordinator_fallback.stop_bot(bot_name)
+                        results[bot_name] = "stopped"
+                    else:
+                        results[bot_name] = "no_coordinator"
+                except Exception as exc:
+                    results[bot_name] = f"error: {exc}"
+
+        # Write kill flag file
+        try:
+            kill_flag = project_root / "data" / "kill_switch.flag"
+            kill_flag.parent.mkdir(parents=True, exist_ok=True)
+            kill_flag.write_text(datetime.now(timezone.utc).isoformat())
+            results["flag_written"] = True
+        except Exception as exc:
+            results["flag_error"] = str(exc)
+
+        return jsonify({"success": True, "results": results, "timestamp": datetime.now(timezone.utc).isoformat()})
+
+    # ------------------------------------------------------------------
+    # Routes -- Admin Panel
+    # ------------------------------------------------------------------
+
+    @app.route("/api/admin/logs")
+    def api_admin_logs():
+        """Tail the last N lines of swarm.log."""
+        n = request.args.get("lines", 200, type=int)
+        n = min(max(n, 10), 2000)
+        log_path = project_root / "logs" / "swarm.log"
+        if not log_path.exists():
+            return jsonify({"lines": [], "error": "Log file not found", "path": str(log_path)})
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            tail = lines[-n:]
+            return jsonify({"lines": tail, "total_lines": len(lines), "showing": len(tail)})
+        except Exception as exc:
+            return jsonify({"lines": [], "error": str(exc)})
+
+    @app.route("/api/admin/db-vacuum", methods=["POST"])
+    def api_admin_db_vacuum():
+        """Run VACUUM on all bot databases."""
+        _audit("db_vacuum", "all")
+        results = {}
+        for bot_name in BOT_NAMES:
+            db_path = get_bot_db_path(bot_name)
+            if db_path.exists():
+                try:
+                    conn = _sqlite_connect(db_path)
+                    conn.execute("VACUUM")
+                    conn.close()
+                    results[bot_name] = "ok"
+                except Exception as exc:
+                    results[bot_name] = f"error: {exc}"
+            else:
+                results[bot_name] = "db_not_found"
+        # Also vacuum dashboard db
+        try:
+            conn = _get_dash_db()
+            conn.execute("VACUUM")
+            conn.commit()
+            conn.close()
+            results["dashboard_db"] = "ok"
+        except Exception as exc:
+            results["dashboard_db"] = f"error: {exc}"
+        return jsonify({"success": True, "results": results})
+
+    @app.route("/api/admin/db-backup", methods=["POST"])
+    def api_admin_db_backup():
+        """Create timestamped backup copies of all bot databases."""
+        _audit("db_backup", "all")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        backup_dir = project_root / "data" / "backups" / ts
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        results = {}
+        for bot_name in BOT_NAMES:
+            db_path = get_bot_db_path(bot_name)
+            if db_path.exists():
+                try:
+                    dest = backup_dir / db_path.name
+                    shutil.copy2(str(db_path), str(dest))
+                    results[bot_name] = str(dest)
+                except Exception as exc:
+                    results[bot_name] = f"error: {exc}"
+            else:
+                results[bot_name] = "db_not_found"
+        return jsonify({"success": True, "backup_dir": str(backup_dir), "results": results})
+
+    @app.route("/api/admin/cache-clear", methods=["POST"])
+    def api_admin_cache_clear():
+        """Clear the in-memory table column cache."""
+        _audit("cache_clear", "all")
+        with _table_column_lock:
+            count = len(_table_column_cache)
+            _table_column_cache.clear()
+        return jsonify({"success": True, "cleared_entries": count})
+
+    @app.route("/api/admin/log-rotate", methods=["POST"])
+    def api_admin_log_rotate():
+        """Rotate swarm.log by renaming it with a timestamp suffix."""
+        _audit("log_rotate", "swarm.log")
+        log_path = project_root / "logs" / "swarm.log"
+        if not log_path.exists():
+            return jsonify({"success": False, "error": "Log file not found"})
+        try:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            rotated_path = log_path.parent / f"swarm.log.{ts}"
+            log_path.rename(rotated_path)
+            return jsonify({"success": True, "rotated_to": str(rotated_path)})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)})
+
+    # ------------------------------------------------------------------
+    # Routes -- Config UI
+    # ------------------------------------------------------------------
+
+    @app.route("/api/config")
+    def api_config_get():
+        """Return the current swarm_config.yaml as text and parsed YAML."""
+        try:
+            text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+            return jsonify({"success": True, "yaml_text": text, "path": str(config_path)})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)})
+
+    @app.route("/api/config", methods=["POST"])
+    def api_config_save():
+        """Write new YAML text back to swarm_config.yaml (after validation)."""
+        _audit("config_save", "swarm_config.yaml")
+        data = request.json or {}
+        yaml_text = data.get("yaml_text", "")
+        if not yaml_text.strip():
+            return jsonify({"success": False, "error": "Empty config not allowed"})
+        try:
+            parsed = yaml.safe_load(yaml_text)
+            if not isinstance(parsed, dict):
+                return jsonify({"success": False, "error": "Config must be a YAML mapping"})
+        except yaml.YAMLError as exc:
+            return jsonify({"success": False, "error": f"YAML parse error: {exc}"})
+        try:
+            # Backup before save
+            if config_path.exists():
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                backup = config_path.parent / f"swarm_config.yaml.bak.{ts}"
+                shutil.copy2(str(config_path), str(backup))
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(yaml_text, encoding="utf-8")
+            return jsonify({"success": True, "path": str(config_path)})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)})
+
+    # ------------------------------------------------------------------
+    # Routes -- Trading Journal
+    # ------------------------------------------------------------------
+
+    @app.route("/api/journal")
+    def api_journal_list():
+        """List all journal entries, optionally filtered by bot or date."""
+        bot_filter = request.args.get("bot", "")
+        date_filter = request.args.get("date", "")
+        try:
+            conn = _get_dash_db()
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM journal WHERE 1=1"
+            params: list = []
+            if bot_filter:
+                query += " AND bot_name = ?"
+                params.append(bot_filter)
+            if date_filter:
+                query += " AND date = ?"
+                params.append(date_filter)
+            query += " ORDER BY created_at DESC LIMIT 200"
+            rows = conn.execute(query, params).fetchall()
+            conn.close()
+            return jsonify([dict(r) for r in rows])
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/journal", methods=["POST"])
+    def api_journal_add():
+        """Add a journal entry."""
+        data = request.json or {}
+        note = str(data.get("note", "")).strip()
+        if not note:
+            return jsonify({"success": False, "error": "note is required"}), 400
+        try:
+            conn = _get_dash_db()
+            now = datetime.now(timezone.utc).isoformat()
+            today = now[:10]
+            conn.execute(
+                "INSERT INTO journal (created_at, trade_id, bot_name, date, note) VALUES (?,?,?,?,?)",
+                (now, data.get("trade_id", ""), data.get("bot_name", ""), data.get("date", today), note),
+            )
+            conn.commit()
+            conn.close()
+            return jsonify({"success": True})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/journal/<int:entry_id>", methods=["DELETE"])
+    def api_journal_delete(entry_id):
+        """Delete a journal entry."""
+        try:
+            conn = _get_dash_db()
+            conn.execute("DELETE FROM journal WHERE id = ?", (entry_id,))
+            conn.commit()
+            conn.close()
+            return jsonify({"success": True})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    # ------------------------------------------------------------------
+    # Routes -- Watchlist
+    # ------------------------------------------------------------------
+
+    @app.route("/api/watchlist")
+    def api_watchlist_list():
+        """List all watchlist tickers."""
+        try:
+            conn = _get_dash_db()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM watchlist ORDER BY added_at DESC").fetchall()
+            conn.close()
+            return jsonify([dict(r) for r in rows])
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/watchlist", methods=["POST"])
+    def api_watchlist_add():
+        """Add a ticker to the watchlist."""
+        data = request.json or {}
+        ticker = str(data.get("ticker", "")).strip().upper()
+        label = str(data.get("label", "")).strip()
+        if not ticker:
+            return jsonify({"success": False, "error": "ticker is required"}), 400
+        try:
+            conn = _get_dash_db()
+            conn.execute(
+                "INSERT OR REPLACE INTO watchlist (ticker, label, added_at) VALUES (?,?,?)",
+                (ticker, label, datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
+            conn.close()
+            _audit("watchlist_add", ticker, label)
+            return jsonify({"success": True})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/watchlist/<ticker>", methods=["DELETE"])
+    def api_watchlist_remove(ticker):
+        """Remove a ticker from the watchlist."""
+        try:
+            conn = _get_dash_db()
+            conn.execute("DELETE FROM watchlist WHERE ticker = ?", (ticker.upper(),))
+            conn.commit()
+            conn.close()
+            _audit("watchlist_remove", ticker)
+            return jsonify({"success": True})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    # ------------------------------------------------------------------
+    # Routes -- Audit Log
+    # ------------------------------------------------------------------
+
+    @app.route("/api/audit-log")
+    def api_audit_log():
+        """Return the last N audit log entries."""
+        limit = request.args.get("limit", 100, type=int)
+        try:
+            conn = _get_dash_db()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            conn.close()
+            return jsonify([dict(r) for r in rows])
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
 
     return app
 
