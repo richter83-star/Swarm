@@ -48,7 +48,7 @@ auto_scale:
 # --- Trading defaults (inherited by all bots unless overridden) ---
 trading:
   default_order_type: limit               # "limit" or "market"
-  min_confidence_threshold: 65           # 0-100; signals below this are skipped
+  min_confidence_threshold: 72           # 0-100; signals below this are skipped
   min_liquidity_cents: 1000
   min_volume_24h: 50
   min_hours_to_expiry: 2
