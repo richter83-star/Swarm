@@ -40,10 +40,14 @@ log = logging.getLogger(__name__)
 
 
 def _load_env_file() -> None:
-    """Load .env file (export KEY="value" format) into os.environ if keys not already set.
-    Needed because the systemd service does not source the shell .env file."""
+    """Load .env file (export KEY="value" format) into os.environ.
+
+    Always overwrites existing env vars from .env so that updating the .env
+    file on disk takes effect on the next service restart without needing to
+    modify the systemd unit file. This is necessary because systemd does not
+    source shell .env files automatically.
+    """
     env_path = Path(__file__).resolve().parents[2] / ".env"
-    log.debug("[research] _load_env_file: looking for .env at %s (exists=%s)", env_path, env_path.exists())
     if not env_path.exists():
         log.warning("[research] _load_env_file: .env not found at %s — API keys won't load", env_path)
         return
@@ -60,10 +64,10 @@ def _load_env_file() -> None:
             key, _, val = line.partition("=")
             key = key.strip()
             val = val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = val
+            if key and val:
+                os.environ[key] = val   # always overwrite — .env is source of truth
                 loaded.append(key)
-        log.info("[research] _load_env_file: loaded keys from .env: %s", loaded if loaded else "(none new)")
+        log.info("[research] _load_env_file: loaded keys from .env: %s", loaded if loaded else "(none)")
     except Exception as exc:
         log.warning("[research] _load_env_file: failed to parse .env: %s", exc)
 
