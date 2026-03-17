@@ -228,7 +228,41 @@ def _maybe_run_sunday_meta_evolver(sw_line: str) -> None:
 # Main daemon loop
 # ---------------------------------------------------------------------------
 
+PID_FILE = PROJECT_ROOT / "data" / "swarm_daemon.pid"
+
+
+def _acquire_pid_lock() -> bool:
+    """Return True if we are the sole daemon instance, False if another is running."""
+    if PID_FILE.exists():
+        try:
+            existing_pid = int(PID_FILE.read_text().strip())
+            # Check if that PID is actually alive
+            os.kill(existing_pid, 0)
+            logger.error(
+                "Another daemon is already running (PID %d). Exiting to prevent duplicate.",
+                existing_pid,
+            )
+            return False
+        except (ValueError, ProcessLookupError, PermissionError):
+            # Stale PID file — previous daemon died without cleanup
+            logger.warning("Stale PID file found (PID %s) — removing.", PID_FILE.read_text().strip())
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+    return True
+
+
+def _release_pid_lock() -> None:
+    try:
+        if PID_FILE.exists():
+            PID_FILE.unlink()
+    except Exception:
+        pass
+
+
 def main() -> int:
+    if not _acquire_pid_lock():
+        return 1
+
     logger.info("=" * 60)
     logger.info("Kalshi Swarm Daemon — 24/7 mode")
     logger.info("Script : %s", SWARM_SCRIPT)
@@ -278,6 +312,7 @@ def main() -> int:
             time.sleep(1)
 
     logger.info("Daemon finished. Total restarts: %d.", restart_count)
+    _release_pid_lock()
     return 0
 
 
