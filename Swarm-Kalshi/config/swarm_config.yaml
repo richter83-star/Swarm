@@ -237,7 +237,7 @@ research:
   blocked_domains: []
   # --- Kalshi-specific research pipeline settings ---
   min_researchability_score: 25          # skip research below this score (0-100)
-  search_timeout_seconds: 10             # max total time for web searches (hard timeout)
+  search_timeout_seconds: 25             # max total time for web searches (hard timeout)
   cache_ttl_hours: 2                     # cache search results for this many hours
   min_evidence_quality: 0.3             # minimum quality score to use evidence in scoring
   providers:

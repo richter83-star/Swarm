@@ -42,9 +42,12 @@ log = logging.getLogger(__name__)
 def _load_env_file() -> None:
     """Load .env file (export KEY="value" format) into os.environ if keys not already set.
     Needed because the systemd service does not source the shell .env file."""
-    env_path = Path(__file__).resolve().parents[3] / ".env"
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    log.debug("[research] _load_env_file: looking for .env at %s (exists=%s)", env_path, env_path.exists())
     if not env_path.exists():
+        log.warning("[research] _load_env_file: .env not found at %s — API keys won't load", env_path)
         return
+    loaded: list[str] = []
     try:
         for line in env_path.read_text().splitlines():
             line = line.strip()
@@ -59,8 +62,10 @@ def _load_env_file() -> None:
             val = val.strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = val
-    except Exception:
-        pass
+                loaded.append(key)
+        log.info("[research] _load_env_file: loaded keys from .env: %s", loaded if loaded else "(none new)")
+    except Exception as exc:
+        log.warning("[research] _load_env_file: failed to parse .env: %s", exc)
 
 
 _load_env_file()
