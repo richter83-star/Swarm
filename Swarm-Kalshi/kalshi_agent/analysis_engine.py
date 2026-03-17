@@ -437,8 +437,8 @@ class AnalysisEngine:
                             signal.research_probability = research.estimated_probability
                             signal.research_rationale = research.rationale_text
                     except Exception as exc:
-                        logger.debug(
-                            "Research enrichment failed for %s: %s",
+                        logger.warning(
+                            "[research] Enrichment failed for %s: %s",
                             opp.ticker, exc,
                         )
 
