@@ -53,7 +53,7 @@ trading:
   min_volume_24h: 50
   min_hours_to_expiry: 2
   max_hours_to_expiry: 720               # 30 days
-  max_position_pct: 0.03                 # max % of balance per position
+  max_position_pct: 0.07                 # max % of balance per position
   max_open_positions: 6
   open_positions_scope: per_bot          # per_bot (recommended) or account
   max_trades_per_day: 5
@@ -165,7 +165,7 @@ central_llm:
   adaptive_cold_win_rate_pct: 42
   adaptive_cold_avg_pnl_cents: -5
   adaptive_reject_quant_floor: 60
-  adaptive_max_size_when_cold: 0.70
+  adaptive_max_size_when_cold: 0.90
   adaptive_hot_win_rate_pct: 58
   adaptive_hot_avg_pnl_cents: 3
   adaptive_size_boost: 1.10
@@ -252,9 +252,9 @@ research:
 # --- Position Sizing ---
 position_sizing:
   method: fractional_kelly               # "fractional_kelly" or "fixed_pct"
-  kelly_fraction: 0.25                   # use 25% of full Kelly (conservative)
-  min_position_cents: 50                 # minimum trade size ($0.50)
-  max_position_pct: 0.03                 # cap at 3% of balance per position
+  kelly_fraction: 0.35                   # use 35% of full Kelly (moderate)
+  min_position_cents: 100                # minimum trade size ($1.00)
+  max_position_pct: 0.07                 # cap at 7% of balance per position
 
 # --- Logging ---
 logging:
