@@ -48,13 +48,13 @@ auto_scale:
 # --- Trading defaults (inherited by all bots unless overridden) ---
 trading:
   default_order_type: limit               # "limit" or "market"
-  min_confidence_threshold: 72           # 0-100; signals below this are skipped
+  min_confidence_threshold: 65           # 0-100; signals below this are skipped
   min_liquidity_cents: 1000
   min_volume_24h: 50
   min_hours_to_expiry: 2
   max_hours_to_expiry: 720               # 30 days
   max_position_pct: 0.03                 # max % of balance per position
-  max_open_positions: 3
+  max_open_positions: 6
   open_positions_scope: per_bot          # per_bot (recommended) or account
   max_trades_per_day: 5
   daily_loss_limit_cents: 3000           # per-bot ($30)
@@ -99,7 +99,7 @@ learning:
   min_trades_for_review: 10
   learning_rate: 0.05
   decay_factor: 0.95
-  min_confidence_threshold: 72
+  min_confidence_threshold: 65
 
 # --- Human-like behavior ---
 human_behavior:
@@ -155,7 +155,7 @@ central_llm:
   model: qwen2.5:14b                     # kept for Ollama fallback compatibility
   timeout_seconds: 20
   min_approved_confidence: 55
-  max_red_flags: 2
+  max_red_flags: 5
   default_size_multiplier: 1.0
   fail_open: false
   allow_quant_fallback_on_error: true    # approve trades ≥55 quant conf if LLM unavailable
@@ -164,7 +164,7 @@ central_llm:
   adaptive_min_samples: 8
   adaptive_cold_win_rate_pct: 42
   adaptive_cold_avg_pnl_cents: -5
-  adaptive_reject_quant_floor: 72
+  adaptive_reject_quant_floor: 60
   adaptive_max_size_when_cold: 0.70
   adaptive_hot_win_rate_pct: 58
   adaptive_hot_avg_pnl_cents: 3
