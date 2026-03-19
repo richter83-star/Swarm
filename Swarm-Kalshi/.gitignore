@@ -39,3 +39,14 @@ Thumbs.db
 venv/
 .venv/
 env/
+# Runtime / generated files
+data/*.pid
+data/*.bak*
+data/*.db.bak*
+data/health_reports/
+logs/*.log.*
+config/*.bak*
+config/*.save
+config/*.activity*
+reports/
+openclaw-office/
