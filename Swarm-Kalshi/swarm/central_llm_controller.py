@@ -840,6 +840,18 @@ class CentralLLMController:
             }
 
         samples = len(rows)
+        min_bootstrap = int(self.cfg.get("adaptive_bootstrap_min_samples", 15))
+        if samples < min_bootstrap:
+            return {
+                "status": "bootstrapping",
+                "note": (
+                    f"Insufficient data ({samples}/{min_bootstrap} settled trades). "
+                    "Do not penalize based on performance history."
+                ),
+                "win_rate_pct": None,
+                "avg_pnl_cents": None,
+                "samples": samples,
+            }
         wins = sum(1 for r in rows if r["outcome"] == "win")
         breakeven = sum(1 for r in rows if r["outcome"] == "breakeven")
         total_pnl = sum(int(r["pnl_cents"] or 0) for r in rows)

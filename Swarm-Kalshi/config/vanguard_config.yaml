@@ -5,3 +5,6 @@ bot:
 learning:
   db_path: data/vanguard.db
 excluded_categories: [politics, elections, economics, weather, sports]
+trading:
+  min_confidence_threshold: 70
+  max_position_pct: 0.04

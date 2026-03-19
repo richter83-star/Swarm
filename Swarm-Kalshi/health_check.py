@@ -842,6 +842,97 @@ def _write_audit_log(report: dict) -> None:
 # Overall status aggregation
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Check 11: Dashboard process alive
+# ---------------------------------------------------------------------------
+def check_dashboard_alive() -> dict:
+    """Verify the dashboard web server is responding on port 8080."""
+    import socket
+    import subprocess
+
+    port = 8080
+    host = "127.0.0.1"
+
+    def _port_open() -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=5):
+                return True
+        except OSError:
+            return False
+
+    if _port_open():
+        return {"status": "OK", "details": f"Dashboard responding on {host}:{port}"}
+
+    # Not responding — try to restart via launch.sh
+    try:
+        subprocess.Popen(
+            ["bash", str(PROJECT_ROOT / "launch.sh")],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(PROJECT_ROOT),
+        )
+        auto_fixed = True
+        detail = f"Dashboard NOT responding on :{port} — launch.sh triggered to restart"
+    except Exception as exc:
+        auto_fixed = False
+        detail = f"Dashboard NOT responding on :{port} — auto-restart failed: {exc}"
+
+    return {
+        "status": "CRITICAL",
+        "details": detail,
+        "auto_fixed": auto_fixed,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Check 12: Bot DB freshness (written to recently)
+# ---------------------------------------------------------------------------
+def check_bot_db_freshness() -> dict:
+    """Ensure each bot is actively cycling by checking risk_state.json freshness.
+
+    Bots only write to their SQLite DB on trade events, but they write
+    risk_state.json on every scan cycle (~60s). Stale risk_state = dead/stuck bot.
+    Also verifies the bot DB file itself exists and is readable.
+    """
+    import time
+
+    stale_threshold_secs = 3 * 3600  # 3 hours — bot should cycle at least once
+    now_ts = time.time()
+    stale = []
+    ok_parts = []
+
+    for bot in BOT_NAMES:
+        # 1. Check risk_state.json (updated every cycle)
+        rs_path = PROJECT_ROOT / "data" / f"{bot}_risk_state.json"
+        if not rs_path.exists():
+            stale.append(f"{bot}: risk_state.json missing")
+            continue
+        age_secs = now_ts - rs_path.stat().st_mtime
+        age_min  = int(age_secs / 60)
+        if age_secs > stale_threshold_secs:
+            stale.append(f"{bot}: risk_state last updated {age_min}m ago — bot may be stuck")
+            continue
+
+        # 2. Confirm DB file exists and is readable
+        db_path = _get_bot_db_path(bot)
+        if not db_path.exists():
+            stale.append(f"{bot}: DB file missing at {db_path}")
+            continue
+
+        ok_parts.append(f"{bot}: active (risk_state {age_min}m ago, DB {db_path.stat().st_size//1024}KB)")
+
+    if stale:
+        return {
+            "status": "WARNING",
+            "details": "Stale/missing bots: " + "; ".join(stale),
+            "stale_bots": stale,
+        }
+    return {
+        "status": "OK",
+        "details": "; ".join(ok_parts),
+    }
+
+
 def _aggregate_status(checks: dict) -> str:
     order = {"CRITICAL": 3, "WARNING": 2, "FIXED": 1, "INFO": 1, "OK": 0, "SKIP": 0}
     worst = "OK"
@@ -891,7 +982,7 @@ def run_health_check() -> dict:
     checks: Dict[str, dict] = {}
 
     # --- Check 1: Stale trades ---
-    print("[health_check] Check 1/10: Stale trades...")
+    print("[health_check] Check 1/12: Stale trades...")
     try:
         checks["stale_trades"] = check_stale_trades(actions)
     except Exception as exc:
@@ -903,7 +994,7 @@ def run_health_check() -> dict:
         traceback.print_exc()
 
     # --- Check 2: Duplicate processes ---
-    print("[health_check] Check 2/10: Duplicate processes...")
+    print("[health_check] Check 2/12: Duplicate processes...")
     try:
         checks["duplicate_processes"] = check_duplicate_processes()
     except Exception as exc:
@@ -913,7 +1004,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 3: P&L anomalies ---
-    print("[health_check] Check 3/10: P&L anomalies...")
+    print("[health_check] Check 3/12: P&L anomalies...")
     try:
         checks["pnl_anomalies"] = check_pnl_anomalies()
     except Exception as exc:
@@ -923,7 +1014,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 4: Balance & drawdown ---
-    print("[health_check] Check 4/10: Balance & drawdown...")
+    print("[health_check] Check 4/12: Balance & drawdown...")
     try:
         checks["balance_drawdown"] = check_balance_drawdown(actions)
     except Exception as exc:
@@ -933,7 +1024,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 5: Config consistency ---
-    print("[health_check] Check 5/10: Config consistency...")
+    print("[health_check] Check 5/12: Config consistency...")
     try:
         checks["config_consistency"] = check_config_consistency(cfg)
     except Exception as exc:
@@ -943,7 +1034,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 6: DB integrity ---
-    print("[health_check] Check 6/10: Database integrity...")
+    print("[health_check] Check 6/12: Database integrity...")
     try:
         checks["db_integrity"] = check_db_integrity()
     except Exception as exc:
@@ -953,7 +1044,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 7: Log size ---
-    print("[health_check] Check 7/10: Log sizes...")
+    print("[health_check] Check 7/12: Log sizes...")
     try:
         checks["log_size"] = check_log_size(actions)
     except Exception as exc:
@@ -963,7 +1054,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 8: Dead bots ---
-    print("[health_check] Check 8/10: Dead bot detection...")
+    print("[health_check] Check 8/12: Dead bot detection...")
     try:
         checks["dead_bots"] = check_dead_bots()
     except Exception as exc:
@@ -973,7 +1064,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 9: Win rates (also builds bot_summary) ---
-    print("[health_check] Check 9/10: Win rates...")
+    print("[health_check] Check 9/12: Win rates...")
     bot_summary: Dict[str, dict] = {}
     try:
         win_check, bot_summary = check_win_rates(recommendations)
@@ -986,11 +1077,31 @@ def run_health_check() -> dict:
         traceback.print_exc()
 
     # --- Check 10: Memory usage ---
-    print("[health_check] Check 10/10: Memory usage...")
+    print("[health_check] Check 10/12: Memory usage...")
     try:
         checks["memory"] = check_memory_usage()
     except Exception as exc:
         checks["memory"] = {
+            "status": "WARNING",
+            "details": f"Check failed: {exc}",
+        }
+
+    # --- Check 11: Dashboard alive ---
+    print("[health_check] Check 11/12: Dashboard alive...")
+    try:
+        checks["dashboard_alive"] = check_dashboard_alive()
+    except Exception as exc:
+        checks["dashboard_alive"] = {
+            "status": "WARNING",
+            "details": f"Check failed: {exc}",
+        }
+
+    # --- Check 12: Bot DB freshness ---
+    print("[health_check] Check 12/12: Bot DB freshness...")
+    try:
+        checks["bot_db_freshness"] = check_bot_db_freshness()
+    except Exception as exc:
+        checks["bot_db_freshness"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }

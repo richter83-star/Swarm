@@ -786,7 +786,41 @@ class BotRunner:
 
         while self._running:
             try:
+                self._check_coordinator_signals()
+
                 if self._paused:
+                    # Auto-resume check
+                    try:
+                        if self._risk_state_file.exists():
+                            with open(self._risk_state_file, "r", encoding="utf-8") as fh:
+                                risk_state = json.load(fh)
+                            if risk_state.get("auto_paused"):
+                                resume_at_str = risk_state.get("auto_resume_at")
+                                if resume_at_str:
+                                    resume_at = datetime.fromisoformat(resume_at_str)
+                                    if datetime.now(timezone.utc) >= resume_at:
+                                        self._paused = False
+                                        risk_state.pop("auto_paused", None)
+                                        risk_state.pop("auto_pause_reason", None)
+                                        risk_state.pop("auto_pause_at", None)
+                                        risk_state.pop("auto_resume_at", None)
+                                        temp_file = self._risk_state_file.with_suffix(".tmp")
+                                        with open(temp_file, "w", encoding="utf-8") as fh:
+                                            json.dump(risk_state, fh, indent=2)
+                                        temp_file.replace(self._risk_state_file)
+                                        logger.info(
+                                            "Bot '%s' auto-resumed after cooldown.", self.bot_name
+                                        )
+                                        try:
+                                            self.notifier.notify_crash(
+                                                bot_name=self.bot_name,
+                                                error=f"Auto-resumed after 24h cooldown (consecutive loss pause lifted).",
+                                            )
+                                        except Exception:
+                                            pass
+                    except Exception as exc:
+                        logger.warning("Auto-resume check failed: %s", exc)
+
                     self._set_status("paused")
                     time.sleep(5)
                     continue
@@ -1757,6 +1791,54 @@ class BotRunner:
             pnl_cents=pnl_cents,
             bot_name=self.bot_name,
         )
+
+        # Auto-pause on consecutive losses
+        try:
+            auto_pause_threshold = int(
+                self.cfg.get("trading", {}).get("auto_pause_on_consecutive_losses", 8)
+            )
+            resume_hours = float(
+                self.cfg.get("trading", {}).get("auto_pause_resume_hours", 24)
+            )
+            consecutive = int(getattr(self.risk, "_consecutive_losses", 0) or 0)
+            if consecutive >= auto_pause_threshold and not self._paused:
+                self._paused = True
+                now_utc = datetime.now(timezone.utc)
+                from datetime import timedelta
+                resume_at = now_utc + timedelta(hours=resume_hours)
+                pause_reason = (
+                    f"Auto-paused after {consecutive} consecutive losses "
+                    f"(threshold={auto_pause_threshold})"
+                )
+                logger.warning(
+                    "Bot '%s' %s. Auto-resume at %s.",
+                    self.bot_name, pause_reason, resume_at.isoformat(),
+                )
+                # Persist auto-pause info to risk state file
+                try:
+                    risk_state: Dict[str, Any] = {}
+                    if self._risk_state_file.exists():
+                        with open(self._risk_state_file, "r", encoding="utf-8") as fh:
+                            risk_state = json.load(fh)
+                    risk_state["auto_paused"] = True
+                    risk_state["auto_pause_reason"] = pause_reason
+                    risk_state["auto_pause_at"] = now_utc.isoformat()
+                    risk_state["auto_resume_at"] = resume_at.isoformat()
+                    temp_file = self._risk_state_file.with_suffix(".tmp")
+                    with open(temp_file, "w", encoding="utf-8") as fh:
+                        json.dump(risk_state, fh, indent=2)
+                    temp_file.replace(self._risk_state_file)
+                except Exception as exc:
+                    logger.warning("Could not persist auto-pause state: %s", exc)
+                try:
+                    self.notifier.notify_crash(
+                        bot_name=self.bot_name,
+                        error=pause_reason,
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("Auto-pause check failed: %s", exc)
         try:
             self.central_llm.record_trade_outcome(
                 bot_name=self.bot_name,
@@ -1988,6 +2070,40 @@ class BotRunner:
     # ------------------------------------------------------------------
     # External control
     # ------------------------------------------------------------------
+
+    def _check_coordinator_signals(self) -> None:
+        """Check for coordinator signal files and act on them."""
+        try:
+            signal_file = self.project_root / "data" / f"{self.bot_name}_signal.json"
+            if not signal_file.exists():
+                return
+            with open(signal_file, "r", encoding="utf-8") as fh:
+                cmd = json.load(fh)
+            signal_file.unlink(missing_ok=True)
+            command = str(cmd.get("command", "")).lower().strip()
+            if command == "pause":
+                self._paused = True
+                logger.info("Bot '%s' paused by coordinator signal.", self.bot_name)
+            elif command == "resume":
+                self._paused = False
+                # Clear auto_pause state from risk state file
+                try:
+                    if self._risk_state_file.exists():
+                        with open(self._risk_state_file, "r", encoding="utf-8") as fh:
+                            state = json.load(fh)
+                        state.pop("auto_paused", None)
+                        state.pop("auto_pause_reason", None)
+                        state.pop("auto_pause_at", None)
+                        state.pop("auto_resume_at", None)
+                        temp_file = self._risk_state_file.with_suffix(".tmp")
+                        with open(temp_file, "w", encoding="utf-8") as fh:
+                            json.dump(state, fh, indent=2)
+                        temp_file.replace(self._risk_state_file)
+                except Exception as exc:
+                    logger.warning("Could not clear auto_pause state: %s", exc)
+                logger.info("Bot '%s' resumed by coordinator signal.", self.bot_name)
+        except Exception as exc:
+            logger.warning("Error checking coordinator signals: %s", exc)
 
     def pause(self) -> None:
         """Pause the bot (stop trading but keep running)."""

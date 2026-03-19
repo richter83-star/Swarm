@@ -1,0 +1,114 @@
+{
+  "generated_at": "2026-03-17T13:00:23.285201+00:00",
+  "system": "Kalshi Swarm v2",
+  "overall_status": "WARNING",
+  "summary": "6 warning(s), Win rate issues: 4 bot(s)",
+  "checks": {
+    "stale_trades": {
+      "status": "OK",
+      "details": "No stale trades found",
+      "auto_fixed": false,
+      "count": 0
+    },
+    "duplicate_processes": {
+      "status": "OK",
+      "details": "All process counts normal (swarm_daemon.py:1, run_swarm.py:1)",
+      "counts": {
+        "swarm_daemon.py": 1,
+        "run_swarm.py": 1
+      }
+    },
+    "pnl_anomalies": {
+      "status": "OK",
+      "details": "No P&L anomalies found (checked last 7 days)",
+      "anomalies_7d": 0,
+      "anomalies_total": 0
+    },
+    "balance_drawdown": {
+      "status": "OK",
+      "details": "sentinel: drawdown 0.0%; oracle: drawdown 0.0%; pulse: drawdown 0.0%; vanguard: drawdown 0.0%",
+      "issues": []
+    },
+    "config_consistency": {
+      "status": "OK",
+      "details": "All config values consistent (min_confidence_threshold=72 (consistent), max_position_pct=0.03 OK, max_open_positions=3 OK)",
+      "issues": []
+    },
+    "db_integrity": {
+      "status": "OK",
+      "details": "All databases healthy (sentinel.db OK, oracle.db OK, pulse.db OK, vanguard.db OK)",
+      "issues": []
+    },
+    "log_size": {
+      "status": "OK",
+      "details": "swarm.log: 4.8MB; daemon.log: 0.1MB",
+      "auto_fixed": false
+    },
+    "dead_bots": {
+      "status": "OK",
+      "details": "sentinel PID 566081 alive; oracle PID 566087 alive; pulse PID 566091 alive; vanguard PID 566095 alive",
+      "issues": []
+    },
+    "win_rates": {
+      "status": "WARNING",
+      "details": "Sentinel win rate 20.0% \u2014 critically low; Oracle win rate 0.0% \u2014 critically low; Pulse win rate 18.0% \u2014 critically low; Vanguard win rate 0.0% \u2014 critically low",
+      "warnings": [
+        "Sentinel win rate 20.0% \u2014 critically low",
+        "Oracle win rate 0.0% \u2014 critically low",
+        "Pulse win rate 18.0% \u2014 critically low",
+        "Vanguard win rate 0.0% \u2014 critically low"
+      ]
+    },
+    "memory": {
+      "status": "OK",
+      "details": "Max usage: bot_runner[566087] 246MB",
+      "usage_mb": {
+        "swarm_daemon.py[566071]": 20.3,
+        "run_swarm.py[566074]": 51.1,
+        "bot_runner[566081]": 68.1,
+        "bot_runner[566087]": 246.4,
+        "bot_runner[566091]": 58.3,
+        "bot_runner[566095]": 45.8
+      }
+    }
+  },
+  "bot_summary": {
+    "sentinel": {
+      "trades": 211,
+      "win_rate": 20.0,
+      "pending": 0,
+      "pnl_cents": 632,
+      "status": "running"
+    },
+    "oracle": {
+      "trades": 254,
+      "win_rate": 0.0,
+      "pending": 1,
+      "pnl_cents": 539,
+      "status": "running"
+    },
+    "pulse": {
+      "trades": 217,
+      "win_rate": 18.0,
+      "pending": 2,
+      "pnl_cents": 721,
+      "status": "running"
+    },
+    "vanguard": {
+      "trades": 252,
+      "win_rate": 0.0,
+      "pending": 4,
+      "pnl_cents": 250,
+      "status": "running"
+    }
+  },
+  "actions_taken": [],
+  "recommendations": [
+    "Sentinel win rate critically low (20.0%) \u2014 consider pausing and reviewing strategy",
+    "Oracle win rate critically low (0.0%) \u2014 consider pausing and reviewing strategy",
+    "Pulse win rate critically low (18.0%) \u2014 consider pausing and reviewing strategy",
+    "Vanguard win rate critically low (0.0%) \u2014 consider pausing and reviewing strategy",
+    "Oracle 0% win rate on 254 trades \u2014 monitor closely",
+    "Vanguard 0% win rate on 252 trades \u2014 monitor closely"
+  ]
+}
