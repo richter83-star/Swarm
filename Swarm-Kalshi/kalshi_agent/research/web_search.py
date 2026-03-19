@@ -195,6 +195,71 @@ def _cache_key(provider_name: str, query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Daily credit budget guard (persisted to disk across restarts)
+# ---------------------------------------------------------------------------
+
+class _TavilyBudgetGuard:
+    """Enforces a daily credit budget for Tavily to prevent blowing through
+    1000 credits in a single day.
+
+    State is persisted to data/tavily_budget.json so restarts don't reset
+    the counter mid-day.
+    """
+
+    def __init__(self, daily_limit: int, state_path: Optional[str] = None) -> None:
+        self._daily_limit = daily_limit
+        self._state_file = Path(state_path) if state_path else (
+            Path(__file__).resolve().parents[2] / "data" / "tavily_budget.json"
+        )
+        self._state = self._load()
+
+    def _today(self) -> str:
+        from datetime import date
+        return date.today().isoformat()
+
+    def _load(self) -> dict:
+        try:
+            if self._state_file.exists():
+                import json as _json
+                data = _json.loads(self._state_file.read_text())
+                if data.get("date") == self._today():
+                    return data
+        except Exception:
+            pass
+        return {"date": self._today(), "used": 0}
+
+    def _save(self) -> None:
+        try:
+            import json as _json
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            self._state_file.write_text(_json.dumps(self._state))
+        except Exception as exc:
+            log.warning("[research] TavilyBudgetGuard: failed to save state: %s", exc)
+
+    def _reset_if_new_day(self) -> None:
+        if self._state.get("date") != self._today():
+            self._state = {"date": self._today(), "used": 0}
+            self._save()
+
+    def can_spend(self, credits: int = 1) -> bool:
+        if self._daily_limit <= 0:
+            return True  # 0 = unlimited
+        self._reset_if_new_day()
+        return (self._state["used"] + credits) <= self._daily_limit
+
+    def record_spend(self, credits: int = 1) -> None:
+        if self._daily_limit <= 0:
+            return
+        self._reset_if_new_day()
+        self._state["used"] = self._state.get("used", 0) + credits
+        self._save()
+        log.info(
+            "[research] Tavily budget: %d/%d credits used today",
+            self._state["used"], self._daily_limit,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Abstract base provider
 # ---------------------------------------------------------------------------
 
@@ -223,7 +288,13 @@ class TavilyProvider(SearchProvider):
 
     name = "tavily"
 
-    def __init__(self, api_key: Optional[str] = None, ttl_secs: float = _CACHE_TTL_SECS):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        ttl_secs: float = _CACHE_TTL_SECS,
+        daily_credit_budget: int = 30,
+        search_depth: str = "basic",
+    ):
         raw = api_key or os.environ.get("TAVILY_API_KEY", "")
         self._keys = [k.strip() for k in raw.split(",") if k.strip()]
         if not self._keys:
@@ -231,6 +302,10 @@ class TavilyProvider(SearchProvider):
             self._keys = [""]
         self._key_idx = 0
         self._ttl = ttl_secs
+        self._search_depth = search_depth
+        # credits per call: basic=1, advanced=2
+        self._credits_per_call = 2 if search_depth == "advanced" else 1
+        self._budget = _TavilyBudgetGuard(daily_limit=daily_credit_budget)
         self._client = None
 
     @property
@@ -262,6 +337,12 @@ class TavilyProvider(SearchProvider):
             log.debug("[research] tavily cache hit: %r", query[:60])
             return cached
 
+        if not self._budget.can_spend(self._credits_per_call):
+            log.info(
+                "[research] Tavily daily budget exhausted — falling back to next provider"
+            )
+            return []
+
         client = await self._get_client()
         try:
             resp = await client.post(
@@ -270,7 +351,7 @@ class TavilyProvider(SearchProvider):
                     "api_key": self._key,
                     "query": query,
                     "max_results": num_results,
-                    "search_depth": "advanced",
+                    "search_depth": self._search_depth,
                     "include_answer": False,
                 },
             )
@@ -282,7 +363,7 @@ class TavilyProvider(SearchProvider):
                         "api_key": self._key,
                         "query": query,
                         "max_results": num_results,
-                        "search_depth": "advanced",
+                        "search_depth": self._search_depth,
                         "include_answer": False,
                     },
                 )
@@ -306,6 +387,7 @@ class TavilyProvider(SearchProvider):
                 raw=item,
             ))
 
+        self._budget.record_spend(self._credits_per_call)
         log.info("[research] tavily: query=%r results=%d", query[:60], len(results))
         _search_cache.put(cache_key, results, self._ttl)
         return results
@@ -532,8 +614,19 @@ class KalshiSearchProvider(SearchProvider):
         if tavily_cfg.get("enabled", True):
             tavily_key = os.environ.get("TAVILY_API_KEY", "")
             if tavily_key:
-                self._chain.append(TavilyProvider(api_key=tavily_key, ttl_secs=ttl_secs))
-                log.info("[research] KalshiSearchProvider: Tavily enabled")
+                daily_budget = int(tavily_cfg.get("daily_credit_budget", 30))
+                depth = str(tavily_cfg.get("search_depth", "basic"))
+                self._chain.append(TavilyProvider(
+                    api_key=tavily_key,
+                    ttl_secs=ttl_secs,
+                    daily_credit_budget=daily_budget,
+                    search_depth=depth,
+                ))
+                log.info(
+                    "[research] KalshiSearchProvider: Tavily enabled "
+                    "(budget=%d credits/day, depth=%s)",
+                    daily_budget, depth,
+                )
             else:
                 log.info("[research] KalshiSearchProvider: Tavily skipped (no key)")
 

@@ -71,13 +71,15 @@ trading:
   recent_trade_seed_top_tickers: 80     # only evaluate top-N most-active tickers
   market_cache_ttl_seconds: 180         # cache market snapshots to reduce API load
   focus_min_liquidity_cents: 1500       # prefer deeper books
-  focus_min_volume_24h: 150             # prefer actively traded markets
+  focus_min_volume_24h: 300             # prefer actively traded markets
   focus_min_open_interest: 25
   focus_min_recent_trades: 1
   recent_activity_max_age_hours: 24
   focus_max_hours_to_expiry: 240        # prefer nearer-term markets (~10 days)
   stale_trade_hours: 48                 # v4: force-resolve trades older than this
   exit_loss_threshold_cents: -20        # v4: exit position if unrealized loss >= this
+  auto_pause_on_consecutive_losses: 8
+  auto_pause_resume_hours: 24
 
 # --- Risk overrides (merged with trading section) ---
 risk:
@@ -179,6 +181,9 @@ central_llm:
   adaptive_prompt_cold_size_cap: 0.70
   adaptive_prompt_hot_size_boost: 1.10
   adaptive_prompt_reject_quant_floor: 70
+  adaptive_bootstrap_min_samples: 15
+  approval_confidence_floor: 72.0
+  low_volume_confidence_floor: 88
   db_path: data/central_llm_controller.db
 
 # --- Autonomous Mode (single switch for full LLM-led operation) ---
@@ -222,7 +227,7 @@ prior_knowledge:
 research:
   enabled: true                          # Tavily key set in .env
   search_provider: tavily                # serpapi | bing | tavily | fallback
-  max_queries: 6                         # max search queries per market
+  max_queries: 3                         # max search queries per market (reduced to save credits)
   max_sources: 8                         # max sources to rank and return
   fetch_full_content: true               # fetch full page HTML (requires bs4/lxml)
   content_fetch_top_n: 3                 # how many top sources get full content fetched
@@ -239,11 +244,13 @@ research:
   # --- Kalshi-specific research pipeline settings ---
   min_researchability_score: 25          # skip research below this score (0-100)
   search_timeout_seconds: 25             # max total time for web searches (hard timeout)
-  cache_ttl_hours: 2                     # cache search results for this many hours
+  cache_ttl_hours: 24                    # cache search results for 24h (markets don't change hourly)
   min_evidence_quality: 0.3             # minimum quality score to use evidence in scoring
   providers:
     tavily:
       enabled: true                      # uses TAVILY_API_KEY env var
+      daily_credit_budget: 30            # credits/day (30/day = ~1000/month); 0 = unlimited
+      search_depth: basic                # basic (1 credit) vs advanced (2 credits)
     serpapi:
       enabled: false                     # uses SERPAPI_KEY env var (set true to enable)
     duckduckgo:
@@ -277,16 +284,16 @@ dashboard:
 # Create a bot at https://t.me/BotFather, then get your chat_id by
 # messaging the bot and calling getUpdates, or use @userinfobot.
 telegram:
-  enabled: false
+  enabled: true
   bot_token: ""                           # use TELEGRAM_BOT_TOKEN env var
   chat_id: ""                             # use TELEGRAM_CHAT_ID env var
   timeout_seconds: 8
-  notify_signals: true
+  notify_signals: false
   notify_trades: true
   notify_outcomes: true
   notify_crashes: true
   notify_daily_summary: true
-  signal_confidence_threshold: 70
+  signal_confidence_threshold: 72
   commands_enabled: true
   allowed_user_ids: []                    # e.g. [123456789]
   poll_interval_seconds: 2

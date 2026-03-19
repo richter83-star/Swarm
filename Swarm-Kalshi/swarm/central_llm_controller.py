@@ -448,10 +448,32 @@ class CentralLLMController:
             "outcome": "TEXT",
             "pnl_cents": "INTEGER",
             "resolved_at": "TEXT",
+            "excluded_from_feedback": "INTEGER NOT NULL DEFAULT 0",
         }
         for col, ddl in additions.items():
             if col not in cols:
                 conn.execute(f"ALTER TABLE llm_decisions ADD COLUMN {col} {ddl}")
+
+        # Retroactively mark quant-fallback approvals as excluded from feedback.
+        # These were made when the LLM was unavailable (e.g. HTTP 401 period) and
+        # their outcomes are unreliable signals — treating them as real feedback
+        # poisons the adaptive learning loop.
+        cur = conn.execute(
+            """
+            UPDATE llm_decisions
+            SET excluded_from_feedback = 1
+            WHERE excluded_from_feedback = 0
+              AND (
+                red_flags LIKE '%llm_unavailable_quant_fallback%'
+                OR rationale LIKE 'LLM failed; quant fallback%'
+              )
+            """
+        )
+        if (cur.rowcount or 0) > 0:
+            logger.info(
+                "Central LLM migration: excluded %d quant-fallback decision(s) from feedback loop.",
+                cur.rowcount,
+            )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_llm_decisions_trade_db_id ON llm_decisions(trade_db_id)"
         )
@@ -478,14 +500,16 @@ class CentralLLMController:
         trade_request: Dict[str, Any],
         decision: ApprovalDecision,
     ) -> int:
+        is_quant_fallback = "llm_unavailable_quant_fallback" in (decision.red_flags or [])
         conn = sqlite3.connect(str(self._db_path))
         try:
             cur = conn.execute(
                 """
                 INSERT INTO llm_decisions
                 (timestamp, bot_name, ticker, side, quant_confidence, llm_confidence,
-                 decision, size_multiplier, rationale, red_flags, request_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 decision, size_multiplier, rationale, red_flags, request_json,
+                 excluded_from_feedback)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
@@ -499,6 +523,7 @@ class CentralLLMController:
                     decision.rationale,
                     json.dumps(decision.red_flags),
                     json.dumps(trade_request),
+                    1 if is_quant_fallback else 0,
                 ),
             )
             conn.commit()
@@ -637,6 +662,7 @@ class CentralLLMController:
                 WHERE bot_name = ?
                   AND decision = 'approve'
                   AND outcome IN ('win', 'loss', 'breakeven', 'expired')
+                  AND (excluded_from_feedback IS NULL OR excluded_from_feedback = 0)
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -822,6 +848,7 @@ class CentralLLMController:
                 WHERE bot_name = ?
                   AND decision = 'approve'
                   AND outcome IN ('win', 'loss', 'breakeven', 'expired')
+                  AND (excluded_from_feedback IS NULL OR excluded_from_feedback = 0)
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -840,6 +867,18 @@ class CentralLLMController:
             }
 
         samples = len(rows)
+        min_bootstrap = int(self.cfg.get("adaptive_bootstrap_min_samples", 15))
+        if samples < min_bootstrap:
+            return {
+                "status": "bootstrapping",
+                "note": (
+                    f"Insufficient data ({samples}/{min_bootstrap} settled trades). "
+                    "Do not penalize based on performance history."
+                ),
+                "win_rate_pct": None,
+                "avg_pnl_cents": None,
+                "samples": samples,
+            }
         wins = sum(1 for r in rows if r["outcome"] == "win")
         breakeven = sum(1 for r in rows if r["outcome"] == "breakeven")
         total_pnl = sum(int(r["pnl_cents"] or 0) for r in rows)
