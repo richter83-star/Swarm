@@ -1,0 +1,10 @@
+window_days=7 phase=day7
+guard_valid=True guard_reason=ok guard_balance_cents=1199
+settled_trades=823
+win_rate_pct=25.52
+expectancy_cents=2.60
+profit_factor=1.18
+pnl_cents=2142
+pending_exposure_cents=6
+pnl_invalid_count=0
+decision=HOLD reason=week1_mixed

@@ -1,0 +1,41 @@
+13308:2026-03-09 21:49:34 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXNETFLIXRANKSHOW-26MAR09-BRI | reason=insufficient bot budget
+20196:2026-03-10 01:43:29 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR092000MEXUSA-USA | reason=insufficient bot budget
+20219:2026-03-10 01:43:53 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXSOL15M-26MAR092045-45 | reason=insufficient bot budget
+20334:2026-03-10 01:45:50 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy yes on KXWBCGAME-26MAR092000MEXUSA-MEX | reason=insufficient bot budget
+20337:2026-03-10 01:45:55 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR091900VENNIC-VEN | reason=insufficient bot budget
+20452:2026-03-10 01:48:27 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR091900CUBPUR-PUR | reason=insufficient bot budget
+24091:2026-03-10 03:50:40 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXMENTION-NICK26MAR09-SOMA | reason=insufficient bot budget
+24107:2026-03-10 03:50:47 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR092000MEXUSA-USA | reason=insufficient bot budget
+24137:2026-03-10 03:50:57 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy yes on KXWBCSPREAD-26MAR092000MEXUSA-USA3 | reason=insufficient bot budget
+24336:2026-03-10 03:52:49 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR091900CUBPUR-PUR | reason=insufficient bot budget
+24361:2026-03-10 03:53:04 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR092000MEXUSA-USA | reason=insufficient bot budget
+24372:2026-03-10 03:53:10 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy yes on KXWBCGAME-26MAR092000MEXUSA-MEX | reason=insufficient bot budget
+24568:2026-03-10 03:55:05 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCGAME-26MAR092000MEXUSA-USA | reason=global daily loss limit reached
+24579:2026-03-10 03:55:10 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXWBCMENTION-26MAR092000MEXUSA-TRAD | reason=global daily loss limit reached
+24615:2026-03-10 03:55:21 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy yes on KXWBCGAME-26MAR092000MEXUSA-MEX | reason=global daily loss limit reached
+30626:2026-03-10 17:50:33 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=guard snapshot stale (78s old)
+30659:2026-03-10 17:50:55 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+30686:2026-03-10 17:51:21 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-BIDE | reason=global daily loss limit reached
+30789:2026-03-10 17:52:18 | ERROR    | vanguard | kalshi_agent | P&L invariant failed for KXWBCGAME-26MAR092000MEXUSA-MEX trade_id=212: loss exceeds theoretical bound (-114 < -27) trace={'count': 1, 'entry_price_cents': 22, 'pnl_cents': -114, 'max_theoretical_loss_cents': -22, 'max_theoretical_gain_cents': 78, 'tolerance_cents': 5, 'min_allowed_cents': -27, 'max_allowed_cents': 83}
+30792:2026-03-10 17:52:18 | ERROR    | vanguard | kalshi_agent | P&L invariant failed for KXWBCGAME-26MAR092000MEXUSA-MEX trade_id=216: loss exceeds theoretical bound (-114 < -31) trace={'count': 1, 'entry_price_cents': 26, 'pnl_cents': -114, 'max_theoretical_loss_cents': -26, 'max_theoretical_gain_cents': 74, 'tolerance_cents': 5, 'min_allowed_cents': -31, 'max_allowed_cents': 79}
+30795:2026-03-10 17:52:18 | ERROR    | vanguard | kalshi_agent | P&L invariant failed for KXWBCGAME-26MAR092000MEXUSA-MEX trade_id=218: loss exceeds theoretical bound (-113 < -31) trace={'count': 1, 'entry_price_cents': 26, 'pnl_cents': -113, 'max_theoretical_loss_cents': -26, 'max_theoretical_gain_cents': 74, 'tolerance_cents': 5, 'min_allowed_cents': -31, 'max_allowed_cents': 79}
+30910:2026-03-10 17:53:34 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+30936:2026-03-10 17:54:00 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+30979:2026-03-10 17:54:40 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+31001:2026-03-10 17:54:57 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-BIDE | reason=global daily loss limit reached
+31174:2026-03-10 17:58:07 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+31206:2026-03-10 17:58:33 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+31234:2026-03-10 17:58:59 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-BIDE | reason=global daily loss limit reached
+31416:2026-03-10 18:02:01 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+31444:2026-03-10 18:02:21 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-KRIS | reason=global daily loss limit reached
+31622:2026-03-10 19:34:46 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXHIGHTATL-26MAR10-B77.5 | reason=global daily loss limit reached
+31740:2026-03-10 19:36:43 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-NQE | reason=global daily loss limit reached
+32225:2026-03-10 19:45:23 | WARNING  | sentinel | kalshi_agent | Trade rejected by global guard: buy yes on KXMENTION-WITN26MAR10-FRAU | reason=global daily loss limit reached
+32440:2026-03-10 19:49:00 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXRAINNYC-26MAR10-T0 | reason=global daily loss limit reached
+32810:2026-03-10 19:55:09 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXHIGHTATL-26MAR10-B77.5 | reason=global daily loss limit reached
+32962:2026-03-10 19:57:32 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXHIGHTATL-26MAR10-B77.5 | reason=global daily loss limit reached
+33024:2026-03-10 19:58:37 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXLOWTMIA-26MAR10-B69.5 | reason=global daily loss limit reached
+33107:2026-03-10 20:00:39 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy yes on KXHIGHTHOU-26MAR10-B86.5 | reason=global daily loss limit reached
+36277:2026-03-10 22:18:35 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy no on KXHIGHTHOU-26MAR10-B84.5 | reason=global daily loss limit reached
+36546:2026-03-10 22:27:10 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy no on KXHIGHTATL-26MAR10-B81.5 | reason=global daily loss limit reached
+37599:2026-03-10 23:00:48 | WARNING  | pulse | kalshi_agent | Trade rejected by global guard: buy no on KXLOWTNYC-26MAR10-T50 | reason=global daily loss limit reached

@@ -1,0 +1,207 @@
+api:
+  key_id: 6a31ef42-f0dd-4232-91b7-710eb7db549d
+  private_key_path: keys/kalshi-private.key
+  base_url: https://api.elections.kalshi.com/trade-api/v2
+  demo_mode: false
+swarm:
+  unassigned_market_bot: vanguard
+  global_daily_loss_limit_cents: 5000
+  global_exposure_limit_cents: 15000
+  health_check_interval: 30
+  max_restart_attempts: 3
+  restart_cooldown_seconds: 60
+  portfolio_counts_ttl_seconds: 30
+  market_status_cache_ttl_seconds: 120
+  conflict_db_path: data/conflict_claims.db
+  stale_claim_hours: 24
+  enforce_global_trade_guard: true
+  trade_guard_max_age_seconds: 45
+auto_scale:
+  enabled: true
+  evaluation_interval_seconds: 300
+  min_trades_for_scoring: 20
+  promote_step_pct: 2.5
+  demote_step_pct: 5.0
+  min_change_to_apply_pct: 0.5
+  min_allocation_pct: 10.0
+  max_allocation_pct: 40.0
+  promote_min_win_rate_pct: 56.0
+  promote_min_roi_pct: 0.8
+  promote_min_sharpe: 0.08
+  promote_min_total_pnl_cents: 100
+  promote_max_drawdown_pct: 6.0
+  require_can_trade_for_promotion: true
+  demote_win_rate_below_pct: 48.0
+  demote_roi_below_pct: -0.5
+  demote_sharpe_below: -0.05
+  demote_total_pnl_below_cents: -100
+  demote_drawdown_above_pct: 10.0
+trading:
+  default_order_type: limit
+  min_confidence_threshold: 55
+  min_liquidity_cents: 1000
+  min_volume_24h: 50
+  min_hours_to_expiry: 2
+  max_hours_to_expiry: 720
+  max_position_pct: 0.005
+  max_open_positions: 1
+  open_positions_scope: per_bot
+  max_trades_per_day: 2
+  daily_loss_limit_cents: 50
+  min_balance_cents: 50
+  max_drawdown_pct: 0.1
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+  limit_spread_buffer_cents: 1
+  max_signals_per_cycle: 2
+  market_scan_max_pages: 50
+  scan_mode: recent_focus
+  recent_trade_seed_pages: 3
+  recent_trade_seed_page_size: 200
+  recent_trade_seed_top_tickers: 80
+  market_cache_ttl_seconds: 180
+  focus_min_liquidity_cents: 1500
+  focus_min_volume_24h: 150
+  focus_min_open_interest: 25
+  focus_min_recent_trades: 1
+  recent_activity_max_age_hours: 24
+  focus_max_hours_to_expiry: 240
+  stale_trade_hours: 48
+  exit_loss_threshold_cents: -20
+risk:
+  daily_loss_limit_cents: 3000
+  max_drawdown_pct: 0.1
+  drawdown_pause_cooldown_minutes: 120
+  drawdown_auto_reset_peak_after_cooldown: true
+  drawdown_auto_reset_requires_flat_positions: false
+  drawdown_cooldown_extend_minutes: 15
+  drawdown_reentry_buffer_pct: 0.02
+  risk_block_log_throttle_seconds: 30
+  loss_streak_threshold: 3
+  loss_streak_size_multiplier: 0.5
+learning:
+  db_path: data/swarm_learning.db
+  rolling_window: 50
+  min_trades_for_review: 10
+  learning_rate: 0.05
+  decay_factor: 0.95
+  min_confidence_threshold: 65
+  trend_multiplier_min: 1.0
+  trend_multiplier_max: 1.0
+human_behavior:
+  action_delay_mean: 8.0
+  action_delay_std: 3.0
+  action_delay_min: 2.0
+  action_delay_max: 20.0
+  session_duration_min: 15
+  session_duration_max: 90
+  idle_period_min: 30
+  idle_period_max: 180
+  browse_without_trade_prob: 0.3
+  trade_size_min_multiplier: 0.98
+  trade_size_max_multiplier: 1.02
+external_signals:
+  enabled: true
+  cache_ttl_seconds: 300
+  news_api_enabled: false
+  news_api_url: ''
+  news_api_key: ''
+  consensus_enabled: true
+  resolution_patterns_enabled: true
+  cross_reference_enabled: true
+  sentiment_weight: 0.15
+  consensus_weight: 0.25
+  resolution_pattern_weight: 0.2
+  cross_reference_weight: 0.15
+llm_advisor:
+  enabled: true
+  api_key: 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
+  model: claude-haiku-4-5-20251001
+  max_tokens: 300
+  temperature: 0.1
+  pre_screen_threshold: 60
+  llm_weight: 0.2
+  cache_ttl_seconds: 300
+  timeout_seconds: 10
+  max_calls_per_cycle: 5
+central_llm:
+  enabled: true
+  provider: anthropic
+  ollama_base_url: http://127.0.0.1:11434
+  anthropic_api_url: https://api.anthropic.com/v1/messages
+  anthropic_api_key: ''
+  anthropic_model: claude-haiku-4-5-20251001
+  model: qwen2.5:14b
+  timeout_seconds: 20
+  min_approved_confidence: 55
+  max_red_flags: 2
+  default_size_multiplier: 1.0
+  fail_open: false
+  learning_enabled: true
+  adaptive_window: 40
+  adaptive_min_samples: 8
+  adaptive_cold_win_rate_pct: 42
+  adaptive_cold_avg_pnl_cents: -5
+  adaptive_reject_quant_floor: 72
+  adaptive_max_size_when_cold: 0.7
+  adaptive_hot_win_rate_pct: 58
+  adaptive_hot_avg_pnl_cents: 3
+  adaptive_size_boost: 1.1
+  db_path: data/central_llm_controller.db
+  approval_confidence_floor: 85
+  low_volume_confidence_floor: 90
+  wide_spread_confidence_floor: 90
+backtester:
+  max_settled_markets: 200
+  min_volume_24h: 20
+  auto_run_on_empty_db: true
+  recalibrate_after: true
+  backtest_batch_delay: 0.2
+prior_knowledge:
+  prior_strength: 10
+  blend_with_observed: true
+logging:
+  level: INFO
+  file: logs/swarm.log
+  max_bytes: 10485760
+  backup_count: 5
+dashboard:
+  host: 0.0.0.0
+  port: 8080
+  auth:
+    enabled: false
+    username: admin
+    password: ''
+  refresh_interval_seconds: 15
+telegram:
+  enabled: false
+  bot_token: ''
+  chat_id: ''
+  timeout_seconds: 8
+  notify_signals: true
+  notify_trades: true
+  notify_outcomes: true
+  notify_crashes: true
+  notify_daily_summary: true
+  signal_confidence_threshold: 70
+  commands_enabled: true
+  allowed_user_ids: []
+  poll_interval_seconds: 2
+meta_learning:
+  enabled: true
+  min_confidence_to_apply: 0.7
+  domains:
+  - sports
+  - politics
+  - crypto
+  - economics
+  - weather
+  - entertainment
+meta_evolver:
+  enabled: true
+  mutation_rate: 0.3
+  immutable_agents:
+  - GovernorAgent
+  - MetaEvolverAgent
+  allow_file_writes: false
+  allow_self_rewrite: false
