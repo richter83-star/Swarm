@@ -657,7 +657,7 @@ class AnalysisEngine:
             return 40.0
         elif v >= 50:
             return 25.0
-        return 10.0
+        return 0.0
 
     def _timing_score(self, opp: MarketOpportunity) -> float:
         """Score based on hours until expiration (sweet spot: 6–48h)."""
