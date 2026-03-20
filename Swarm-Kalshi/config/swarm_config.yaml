@@ -5,7 +5,7 @@
 
 # --- API credentials (required) ---
 api:
-  key_id: 6a31ef42-f0dd-4232-91b7-710eb7db549d           # From Kalshi dashboard
+  key_id: 7fd77201-97cc-411c-a09c-b6f88cfb78bd           # From Kalshi dashboard
   private_key_path: keys/kalshi-private.key
   base_url: https://api.elections.kalshi.com/trade-api/v2
   demo_mode: false                        # Set true to use demo environment
@@ -190,7 +190,7 @@ central_llm:
 autonomous_mode:
   enabled: true
   anthropic_only: true
-  require_llm_for_trade: true
+  require_llm_for_trade: false  # Allows quant fallback when Anthropic API unavailable
   disable_local_llm_advisor: true
   llm_learning_enabled: true
   lock_manual_controls: true
