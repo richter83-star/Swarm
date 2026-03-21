@@ -215,16 +215,24 @@ class TelegramNotifier:
         )
 
     def notify_swarm_started(self, bot_names: list) -> None:
+        if not self.cfg.get("notify_swarm_started", True):
+            return
         bots = ", ".join(f"`{b}`" for b in bot_names)
         self.send(f"{_START_EMOJI} *Swarm Started*\nBots: {bots}")
 
     def notify_swarm_stopped(self) -> None:
+        if not self.cfg.get("notify_swarm_stopped", True):
+            return
         self.send(f"{_STOP_EMOJI} *Swarm Stopped*")
 
     def notify_bot_paused(self, bot_name: str) -> None:
+        if not self.cfg.get("notify_bot_paused", True):
+            return
         self.send(f"{_PAUSE_EMOJI} Bot `{bot_name}` paused.")
 
     def notify_bot_resumed(self, bot_name: str) -> None:
+        if not self.cfg.get("notify_bot_resumed", True):
+            return
         self.send(f"{_RESUME_EMOJI} Bot `{bot_name}` resumed.")
 
     # ------------------------------------------------------------------
