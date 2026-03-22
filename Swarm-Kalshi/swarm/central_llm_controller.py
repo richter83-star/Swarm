@@ -108,6 +108,82 @@ class CentralLLMController:
         self._category_hint_cache: Dict[str, Dict[str, Any]] = {}
         self._init_db()
 
+    def validate_api_key(self) -> bool:
+        """
+        Validate the Anthropic API key with a minimal test call on startup.
+        Logs a loud ERROR immediately if the key is missing, a placeholder,
+        or returns a non-200 response — rather than silently falling back to
+        quant scoring on every trade.
+        Returns True if the key is valid, False otherwise.
+        """
+        if not self._enabled or self._provider != "anthropic":
+            return True
+        api_key = str(self.cfg.get("anthropic_api_key") or "").strip() or str(
+            os.environ.get("ANTHROPIC_API_KEY", "")
+        ).strip()
+        if not api_key or api_key in ("YOUR_REAL_KEY_HERE", ""):
+            logger.error(
+                "CRITICAL: Anthropic API key is missing or is a placeholder string. "
+                "The Central LLM will fall back to quant scoring for ALL trades. "
+                "Set ANTHROPIC_API_KEY in .env or central_llm.anthropic_api_key in config."
+            )
+            return False
+        endpoint = str(self.cfg.get("anthropic_api_url", "https://api.anthropic.com/v1/messages"))
+        model = str(self.cfg.get("anthropic_model") or "claude-3-5-haiku-latest")
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": 5,
+            "messages": [{"role": "user", "content": "ping"}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint, data=payload, method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    logger.info("Central LLM: Anthropic API key validated OK (model=%s).", model)
+                    return True
+        except urllib.error.HTTPError as exc:
+            logger.error(
+                "CRITICAL: Anthropic API key validation failed (HTTP %s %s). "
+                "All trades will fall back to quant scoring until this is fixed. "
+                "Check ANTHROPIC_API_KEY in .env — your account may be valid but the key "
+                "stored in the environment is wrong.",
+                exc.code, exc.reason,
+            )
+        except Exception as exc:
+            logger.warning("Central LLM: API key validation request failed: %s", exc)
+        return False
+
+    def pre_screen(self, trade_request: Dict[str, Any]) -> bool:
+        """
+        Cheap local pre-screen before calling the Anthropic API (and before
+        running web research that burns Tavily credits).
+
+        Replicates the archetype-aware confidence floor checks that would cause
+        an auto-reject AFTER the API call — running them first avoids wasting
+        both Tavily and Anthropic credits on candidates with no approval path.
+
+        Returns True  → proceed to research + LLM review.
+        Returns False → reject immediately, skip all external API calls.
+        """
+        if not self._enabled:
+            return True
+        quant_conf = float(trade_request.get("quant_confidence", 0.0))
+        floor = self._approval_confidence_floor(trade_request)
+        if quant_conf < floor:
+            logger.debug(
+                "pre_screen: %s rejected before research+LLM (conf=%.1f < floor=%.1f)",
+                trade_request.get("ticker", "?"), quant_conf, floor,
+            )
+            return False
+        return True
+
     @property
     def enabled(self) -> bool:
         return self._enabled

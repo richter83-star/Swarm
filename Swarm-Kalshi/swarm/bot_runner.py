@@ -188,6 +188,9 @@ class BotRunner:
             config=self.cfg.get("central_llm", {}),
             project_root=str(self.project_root),
         )
+        # Validate API key on startup — fail loudly rather than silently falling
+        # back to quant scoring on every single trade without anyone noticing.
+        self.central_llm.validate_api_key()
 
         # Research/evidence pipeline (degrades to {} on any failure).
         self.research = ResearchOrchestrator(config=self.cfg.get("research", {}))
@@ -1055,6 +1058,25 @@ class BotRunner:
         pre_human_count = trend_count
         count = self.behavior.vary_trade_size(pre_human_count)
         human_mult = float(count / max(1, pre_human_count))
+        # Pre-screen locally before burning Tavily (research) + Anthropic (LLM) credits.
+        # Rejects candidates whose quant confidence falls below the archetype-aware floor
+        # (low volume, wide spread, longshot price) — these would be auto-rejected after
+        # the API call anyway, so skip both external calls entirely.
+        if not self.central_llm.pre_screen({
+            "ticker": signal.ticker,
+            "quant_confidence": signal.confidence,
+            "volume_24h": int(getattr(signal, "volume_24h", 0) or 0),
+            "spread_cents": int(getattr(signal, "spread_cents", 0) or 0),
+            "suggested_price": signal.suggested_price,
+        }):
+            logger.info(
+                "Pre-screen rejected %s %s on %s (conf=%.1f below archetype floor)"
+                " — skipped research + LLM to save API credits.",
+                signal.action, signal.side, signal.ticker, signal.confidence,
+            )
+            self.behavior.record_action(traded=False)
+            return
+
         # Enrich with web research evidence (returns {} gracefully on any failure).
         research_data = self.research.enrich_trade_request(signal)
 
