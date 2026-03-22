@@ -777,6 +777,26 @@ def _send_telegram(cfg: dict, report: dict, bot_summary: Dict[str, dict]) -> Non
     pnl_str     = f"{pnl_sign}${total_pnl / 100:.2f}"
     lines.append(f"Balance: {balance_str} | P&L today: {pnl_str}")
     lines.append("")
+
+    # LLM health & guardrail progress
+    llm = report.get("checks", {}).get("llm_health", {})
+    if llm and llm.get("status") != "SKIP":
+        win_rate   = llm.get("win_rate_pct", 0)
+        resolved   = llm.get("resolved_trades", 0)
+        approval   = llm.get("approval_rate_pct", 0)
+        qfb        = llm.get("quant_fallback_decisions", 0)
+        real_llm   = llm.get("real_llm_decisions", 0)
+        guardrail  = llm.get("guardrail_progress", "")
+        today_eval = llm.get("today_evaluated", 0)
+        today_appr = llm.get("today_approved", 0)
+
+        llm_icon = "✅" if llm.get("status") == "OK" else "⚠️"
+        lines.append(f"{llm_icon} LLM: {approval:.1f}% approval | Win rate: {win_rate:.1f}% ({resolved} settled)")
+        lines.append(f"   Today: {today_eval} evaluated → {today_appr} approved | Fallbacks: {qfb} total")
+        if guardrail:
+            lines.append(f"   Guardrails: {guardrail}")
+        lines.append("")
+
     lines.append("Full report: data/health_report_latest.json")
 
     message = "\n".join(lines)
@@ -931,6 +951,148 @@ def check_bot_db_freshness() -> dict:
         "status": "OK",
         "details": "; ".join(ok_parts),
     }
+
+
+# ---------------------------------------------------------------------------
+# Check 13 — Central LLM health & guardrail threshold progress
+# ---------------------------------------------------------------------------
+
+def check_llm_health(recommendations: List[str]) -> dict:
+    """
+    Report on the Central LLM controller's decision quality and flag issues.
+
+    Key metrics:
+    - Approval rate (are we approving enough to trade?)
+    - Real LLM vs quant fallback ratio (is the Anthropic key actually working?)
+    - Win rate on approved/settled trades (vs 55% guardrail threshold)
+    - Guardrail loosening progress (tracks milestones toward scaling up)
+    """
+    CLEAN_START = "2026-03-20"   # date broken-period data was cleared
+    WIN_RATE_TARGET = 55.0       # threshold for loosening guardrails
+    MIN_RESOLVED    = 50         # minimum settled trades before win rate is meaningful
+
+    llm_db = DATA_DIR / "central_llm_controller.db"
+    if not llm_db.exists():
+        return {"status": "SKIP", "details": "central_llm_controller.db not found"}
+
+    conn = _open_db(llm_db)
+    if not conn:
+        return {"status": "WARNING", "details": "Could not open LLM DB"}
+
+    try:
+        today = _now_utc().strftime("%Y-%m-%d")
+
+        # --- Clean period totals ---
+        total = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ?", (CLEAN_START,)
+        ).fetchone()[0]
+        approved = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ? AND decision='approve'",
+            (CLEAN_START,)
+        ).fetchone()[0]
+        quant_fb = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ? "
+            "AND (rationale LIKE '%quant fallback%' OR rationale LIKE '%LLM failed%')",
+            (CLEAN_START,)
+        ).fetchone()[0]
+        real_llm = total - quant_fb
+
+        # --- Win rate on settled approved trades (clean period) ---
+        settled = conn.execute(
+            "SELECT outcome FROM llm_decisions "
+            "WHERE timestamp >= ? AND decision='approve' AND outcome IS NOT NULL",
+            (CLEAN_START,)
+        ).fetchall()
+        resolved = len(settled)
+        wins     = sum(1 for (o,) in settled if o == "win")
+        win_rate = (wins / resolved * 100) if resolved else 0.0
+
+        # --- Today's usage ---
+        today_total    = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ?", (today,)
+        ).fetchone()[0]
+        today_approved = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ? AND decision='approve'",
+            (today,)
+        ).fetchone()[0]
+        today_qfb      = conn.execute(
+            "SELECT COUNT(*) FROM llm_decisions WHERE timestamp >= ? "
+            "AND (rationale LIKE '%quant fallback%' OR rationale LIKE '%LLM failed%')",
+            (today,)
+        ).fetchone()[0]
+
+        approval_rate = (approved / total * 100) if total else 0.0
+        llm_real_pct  = (real_llm / total * 100)  if total else 0.0
+        qfb_pct_today = (today_qfb / today_total * 100) if today_total else 0.0
+
+        status  = "OK"
+        details_parts = [
+            f"Clean period: {total} evaluated | {approved} approved ({approval_rate:.1f}%)",
+            f"Real LLM: {real_llm} ({llm_real_pct:.1f}%) | Quant fallback: {quant_fb}",
+            f"Win rate: {win_rate:.1f}% on {resolved} resolved trades",
+            f"Today: {today_total} evaluated | {today_approved} approved | {today_qfb} fallbacks ({qfb_pct_today:.0f}%)",
+        ]
+
+        # --- Guardrail threshold progress ---
+        guardrail_parts = []
+        if resolved < MIN_RESOLVED:
+            guardrail_parts.append(
+                f"Resolved trades: {resolved}/{MIN_RESOLVED} needed before guardrails considered"
+            )
+        else:
+            if win_rate >= WIN_RATE_TARGET:
+                guardrail_parts.append(
+                    f"✅ Win rate {win_rate:.1f}% ≥ {WIN_RATE_TARGET}% target "
+                    f"({resolved} trades) — consider loosening confidence threshold"
+                )
+                recommendations.append(
+                    f"Win rate {win_rate:.1f}% on {resolved} clean trades "
+                    f"— eligble to lower confidence threshold 70%→65%"
+                )
+            else:
+                guardrail_parts.append(
+                    f"Win rate {win_rate:.1f}% (target {WIN_RATE_TARGET}%) "
+                    f"on {resolved} trades — hold guardrails"
+                )
+        details_parts += guardrail_parts
+
+        # --- Alerts ---
+        if today_total > 10 and qfb_pct_today > 50:
+            status = "WARNING"
+            details_parts.append(
+                f"⚠️ {qfb_pct_today:.0f}% quant fallback today — Anthropic API key may be broken"
+            )
+            recommendations.append(
+                "LLM quant fallback rate >50% — run validate_api_key() check on ANTHROPIC_API_KEY"
+            )
+
+        if resolved >= 20 and win_rate < 40:
+            status = "WARNING"
+            details_parts.append(
+                f"⚠️ Win rate {win_rate:.1f}% on {resolved} trades — below safe threshold"
+            )
+            recommendations.append(
+                f"LLM-approved win rate critically low ({win_rate:.1f}%) — review approval criteria"
+            )
+
+        return {
+            "status": status,
+            "details": " | ".join(details_parts),
+            "approval_rate_pct": round(approval_rate, 1),
+            "win_rate_pct": round(win_rate, 1),
+            "resolved_trades": resolved,
+            "real_llm_decisions": real_llm,
+            "quant_fallback_decisions": quant_fb,
+            "today_evaluated": today_total,
+            "today_approved": today_approved,
+            "today_quant_fallbacks": today_qfb,
+            "guardrail_progress": guardrail_parts[0] if guardrail_parts else "",
+        }
+
+    except Exception as exc:
+        return {"status": "WARNING", "details": f"LLM health check error: {exc}"}
+    finally:
+        conn.close()
 
 
 def _aggregate_status(checks: dict) -> str:
@@ -1097,11 +1259,21 @@ def run_health_check() -> dict:
         }
 
     # --- Check 12: Bot DB freshness ---
-    print("[health_check] Check 12/12: Bot DB freshness...")
+    print("[health_check] Check 12/13: Bot DB freshness...")
     try:
         checks["bot_db_freshness"] = check_bot_db_freshness()
     except Exception as exc:
         checks["bot_db_freshness"] = {
+            "status": "WARNING",
+            "details": f"Check failed: {exc}",
+        }
+
+    # --- Check 13: Central LLM health & guardrail progress ---
+    print("[health_check] Check 13/13: Central LLM health...")
+    try:
+        checks["llm_health"] = check_llm_health(recommendations)
+    except Exception as exc:
+        checks["llm_health"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }
