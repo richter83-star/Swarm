@@ -866,42 +866,24 @@ def _write_audit_log(report: dict) -> None:
 # Check 11: Dashboard process alive
 # ---------------------------------------------------------------------------
 def check_dashboard_alive() -> dict:
-    """Verify the dashboard web server is responding on port 8080."""
+    """Verify the dashboard web server is responding on port 8080.
+
+    Reports status only — auto-restart removed as it was triggering
+    duplicate swarm processes when the dashboard is simply not deployed.
+    """
     import socket
-    import subprocess
 
     port = 8080
     host = "127.0.0.1"
 
-    def _port_open() -> bool:
-        try:
-            with socket.create_connection((host, port), timeout=5):
-                return True
-        except OSError:
-            return False
-
-    if _port_open():
-        return {"status": "OK", "details": f"Dashboard responding on {host}:{port}"}
-
-    # Not responding — try to restart via launch.sh
     try:
-        subprocess.Popen(
-            ["bash", str(PROJECT_ROOT / "launch.sh")],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=str(PROJECT_ROOT),
-        )
-        auto_fixed = True
-        detail = f"Dashboard NOT responding on :{port} — launch.sh triggered to restart"
-    except Exception as exc:
-        auto_fixed = False
-        detail = f"Dashboard NOT responding on :{port} — auto-restart failed: {exc}"
-
-    return {
-        "status": "CRITICAL",
-        "details": detail,
-        "auto_fixed": auto_fixed,
-    }
+        with socket.create_connection((host, port), timeout=5):
+            return {"status": "OK", "details": f"Dashboard responding on {host}:{port}"}
+    except OSError:
+        return {
+            "status": "WARNING",
+            "details": f"Dashboard not responding on :{port} — not deployed or stopped",
+        }
 
 
 # ---------------------------------------------------------------------------
