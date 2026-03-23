@@ -174,6 +174,22 @@ class CentralLLMController:
         """
         if not self._enabled:
             return True
+
+        # --- Entry price gate: require minimum upside per contract ---
+        # e.g. max_entry_price_cents=85 means we only trade where potential
+        # gain >= 15¢. Filters out near-certainty contracts with tiny payouts.
+        trading_cfg = self._cfg.get("trading", {})
+        max_entry = int(trading_cfg.get("max_entry_price_cents", 100))
+        entry_price = int(trade_request.get("suggested_price", 0) or 0)
+        if max_entry < 100 and entry_price > max_entry:
+            logger.info(
+                "pre_screen: %s rejected — entry price %d¢ > max %d¢ "
+                "(min upside %.0f¢ required). Skipping research+LLM.",
+                trade_request.get("ticker", "?"), entry_price, max_entry,
+                100 - max_entry,
+            )
+            return False
+
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
         floor = self._approval_confidence_floor(trade_request)
         if quant_conf < floor:

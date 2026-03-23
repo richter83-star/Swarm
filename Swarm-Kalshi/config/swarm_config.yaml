@@ -52,6 +52,7 @@ trading:
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
   max_signals_per_cycle: 3
+  max_entry_price_cents: 85        # Never buy a contract above 85¢ — ensures ≥15¢ upside per win
   market_scan_max_pages: 50
   scan_mode: recent_focus
   recent_trade_seed_pages: 3
