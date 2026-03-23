@@ -140,6 +140,117 @@ _SITE_RESTRICTED: dict[str, list[str]] = {
     "OTHER": [],
 }
 
+# ---------------------------------------------------------------------------
+# Weather city lookup — maps Kalshi ticker city codes to searchable metadata
+# ---------------------------------------------------------------------------
+
+_WEATHER_CITIES: dict[str, tuple[str, str, str]] = {
+    # code      city name           state  NWS station
+    "DAL":   ("Dallas",            "TX",  "KDFW"),
+    "ATL":   ("Atlanta",           "GA",  "KATL"),
+    "DC":    ("Washington DC",     "DC",  "KDCA"),
+    "LAX":   ("Los Angeles",       "CA",  "KLAX"),
+    "OKC":   ("Oklahoma City",     "OK",  "KOKC"),
+    "PHIL":  ("Philadelphia",      "PA",  "KPHL"),
+    "BOS":   ("Boston",            "MA",  "KBOS"),
+    "CHI":   ("Chicago",           "IL",  "KORD"),
+    "NYC":   ("New York City",     "NY",  "KJFK"),
+    "MIA":   ("Miami",             "FL",  "KMIA"),
+    "DEN":   ("Denver",            "CO",  "KDEN"),
+    "SEA":   ("Seattle",           "WA",  "KSEA"),
+    "PHX":   ("Phoenix",           "AZ",  "KPHX"),
+    "HOU":   ("Houston",           "TX",  "KIAH"),
+    "SFO":   ("San Francisco",     "CA",  "KSFO"),
+    "MIN":   ("Minneapolis",       "MN",  "KMSP"),
+    "DET":   ("Detroit",           "MI",  "KDTW"),
+    "CLV":   ("Cleveland",         "OH",  "KCLE"),
+    "POR":   ("Portland",          "OR",  "KPDX"),
+    "LAS":   ("Las Vegas",         "NV",  "KLAS"),
+    "SAN":   ("San Antonio",       "TX",  "KSAT"),
+    "AUS":   ("Austin",            "TX",  "KAUS"),
+    "MEM":   ("Memphis",           "TN",  "KMEM"),
+    "NAS":   ("Nashville",         "TN",  "KBNA"),
+    "JAX":   ("Jacksonville",      "FL",  "KJAX"),
+    "IND":   ("Indianapolis",      "IN",  "KIND"),
+    "COL":   ("Columbus",          "OH",  "KCMH"),
+    "SAC":   ("Sacramento",        "CA",  "KSMF"),
+    "SLC":   ("Salt Lake City",    "UT",  "KSLC"),
+}
+
+
+def _parse_weather_ticker(ticker: str) -> Optional[tuple[str, str, str, str]]:
+    """Extract (city_name, state, nws_station, date_str) from a weather ticker.
+
+    Supports formats like:
+      KXHIGHTDAL-26MAR23-T73   → Dallas, TX, KDFW, March 23
+      KXHIGHTDC-26MAR23-B71.5  → Washington DC, DC, KDCA, March 23
+    Returns None if city code is not recognised.
+    """
+    upper = ticker.upper()
+    # Strip the KXHIGHT prefix to get CITY_CODE-DATE-THRESHOLD
+    # Ticker format: KXHIGHT{CITY}-{HOUR}{MON}{DAY}-{THRESHOLD}
+    # e.g. KXHIGHTDAL-26MAR23-T73 → city=DAL, hour=26, month=MAR, day=23
+    m = re.match(r"KXHIGHT([A-Z]+)-(\d{2})([A-Z]{3})(\d{2})", upper)
+    if not m:
+        return None
+    city_code, _hour, mon_abbr, day = m.group(1), m.group(2), m.group(3), m.group(4)
+    info = _WEATHER_CITIES.get(city_code)
+    if not info:
+        return None
+    city_name, state, station = info
+    _MONTHS = {"JAN":"January","FEB":"February","MAR":"March","APR":"April",
+               "MAY":"May","JUN":"June","JUL":"July","AUG":"August",
+               "SEP":"September","OCT":"October","NOV":"November","DEC":"December"}
+    from datetime import datetime
+    year = datetime.utcnow().year
+    month_name = _MONTHS.get(mon_abbr, mon_abbr)
+    date_str = f"{month_name} {int(day)} {year}"
+    return city_name, state, station, date_str
+
+
+def _build_weather_queries(ticker: str, max_queries: int) -> Optional[List[SearchQuery]]:
+    """Build forecast-focused queries for Kalshi weather temperature markets.
+
+    The generic title-based approach fails for weather because queries like
+    "the maximum temperature be 71-72° on Mar 23" search for recorded outcomes
+    that don't exist yet. Instead we search for current NWS forecasts and
+    hourly observations so the evidence extractor can compare against threshold.
+    Returns None if ticker is not a recognised weather market.
+    """
+    parsed = _parse_weather_ticker(ticker)
+    if not parsed:
+        return None
+    city, state, station, date_str = parsed
+
+    queries = [
+        SearchQuery(
+            query_text=f"{city} {state} high temperature forecast {date_str}",
+            site_restriction="",
+            query_type="primary",
+            priority=1,
+        ),
+        SearchQuery(
+            query_text=f"site:forecast.weather.gov {city} {state} high temperature today",
+            site_restriction="site:forecast.weather.gov",
+            query_type="primary",
+            priority=1,
+        ),
+        SearchQuery(
+            query_text=f"{city} weather today high temperature NWS {date_str}",
+            site_restriction="",
+            query_type="statistics",
+            priority=2,
+        ),
+        SearchQuery(
+            query_text=f"{station} {city} airport weather observation high temperature {date_str}",
+            site_restriction="",
+            query_type="statistics",
+            priority=2,
+        ),
+    ]
+    return queries[:max_queries]
+
+
 # Secondary confirmation sources (used in general news queries)
 _NEWS_SOURCES: dict[str, list[str]] = {
     "ECONOMICS": ["Reuters", "Bloomberg", "Wall Street Journal"],
@@ -258,6 +369,17 @@ def build_kalshi_queries(
                 [q.query_type for q in crypto_queries],
             )
             return crypto_queries
+
+    if cat == "WEATHER" and ticker:
+        weather_queries = _build_weather_queries(ticker, max_queries)
+        if weather_queries:
+            log.info(
+                "[research] query_builder: ticker=%s category=%s researchability=%s "
+                "num_queries=%d query_types=%s",
+                ticker, cat, researchability, len(weather_queries),
+                [q.query_type for q in weather_queries],
+            )
+            return weather_queries
 
     queries: List[SearchQuery] = []
 
