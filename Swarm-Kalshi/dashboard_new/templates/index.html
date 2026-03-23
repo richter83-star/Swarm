@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kalshi Swarm Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ── Top Navigation Bar ────────────────────────────────── -->
+<nav class="topbar">
+  <div class="topbar-logo">KALSHI <span>SWARM</span></div>
+  <div class="tab-strip">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="llm">LLM Intelligence</button>
+    <button class="tab-btn" data-tab="trades">Trades</button>
+    <button class="tab-btn" data-tab="risk">Risk</button>
+    <button class="tab-btn" data-tab="system">System</button>
+    <button class="tab-btn" data-tab="controls">Controls</button>
+    <button class="tab-btn" data-tab="config">Config</button>
+    <button class="tab-btn" data-tab="admin">Admin</button>
+  </div>
+  <div class="topbar-right">
+    <span class="refresh-badge" id="refresh-time">Loading…</span>
+    <span class="status-dot" title="Live — auto-refresh every 15s"></span>
+  </div>
+</nav>
+
+<!-- ── Tab Panels ─────────────────────────────────────────── -->
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 1: OVERVIEW
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel active" id="tab-overview">
+  <div class="content">
+
+    <!-- Portfolio hero -->
+    <div class="portfolio-hero">
+      <div>
+        <div class="portfolio-label">Total Portfolio Value</div>
+        <div class="portfolio-total" id="ov-portfolio-total">—</div>
+      </div>
+      <div id="ov-portfolio-change" class="portfolio-change positive">+0.00% today</div>
+    </div>
+
+    <!-- Bot status cards -->
+    <div class="grid-4 section-gap" id="ov-bot-cards">
+      <!-- Rendered by JS -->
+    </div>
+
+    <!-- Equity curve chart -->
+    <div class="card section-gap">
+      <div class="card-title">Portfolio Equity Curve</div>
+      <div class="chart-container">
+        <canvas id="equity-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stat-row section-gap" id="ov-stats-row">
+      <!-- Rendered by JS -->
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 2: LLM INTELLIGENCE
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-llm">
+  <div class="content">
+
+    <!-- Header stats -->
+    <div class="stat-row" id="llm-header-stats">
+      <!-- Rendered by JS -->
+    </div>
+
+    <!-- Progress bars -->
+    <div id="llm-progress-bars" class="section-gap">
+      <!-- Rendered by JS -->
+    </div>
+
+    <!-- Recent decisions table -->
+    <div class="section-gap">
+      <div class="section-header">Recent LLM Decisions</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Bot</th>
+              <th>Ticker</th>
+              <th>Decision</th>
+              <th>Confidence</th>
+              <th>Outcome</th>
+              <th>Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="llm-decisions-tbody">
+            <tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 3: TRADES
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-trades">
+  <div class="content">
+
+    <!-- Filter buttons -->
+    <div class="filter-row">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="sentinel">Sentinel</button>
+      <button class="filter-btn" data-filter="oracle">Oracle</button>
+      <button class="filter-btn" data-filter="pulse">Pulse</button>
+      <button class="filter-btn" data-filter="vanguard">Vanguard</button>
+    </div>
+
+    <!-- Trades table -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Bot</th>
+            <th>Ticker</th>
+            <th>Side</th>
+            <th>Confidence</th>
+            <th>Outcome</th>
+            <th>PnL</th>
+          </tr>
+        </thead>
+        <tbody id="trades-tbody">
+          <tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 4: RISK
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-risk">
+  <div class="content">
+
+    <div class="section-header">Per-Bot Drawdown</div>
+    <div class="grid-4" id="risk-drawdown">
+      <!-- Rendered by JS -->
+    </div>
+
+    <div class="card section-gap">
+      <div class="card-title">Guardrail Unlock Progress</div>
+      <div id="risk-guardrail">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 5: SYSTEM
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-system">
+  <div class="content">
+
+    <div class="grid-2">
+      <!-- Tavily credits -->
+      <div class="card">
+        <div class="card-title">Tavily API Usage</div>
+        <div id="sys-tavily">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Anthropic + Uptime -->
+      <div class="card">
+        <div class="card-title">API Status &amp; Uptime</div>
+        <div id="sys-anthropic" style="margin-bottom:0.75rem">Anthropic API: loading…</div>
+        <div class="text-muted" style="font-size:0.75rem;margin-bottom:0.2rem">Uptime</div>
+        <div class="fw-bold text-green" id="sys-uptime">—</div>
+      </div>
+    </div>
+
+    <!-- Log tail -->
+    <div class="section-gap">
+      <div class="section-header">Live Log Tail (last 20 lines)</div>
+      <div class="log-box" id="sys-log-tail">(loading…)</div>
+    </div>
+
+    <!-- Health report -->
+    <div class="section-gap">
+      <div class="section-header">Health Report</div>
+      <div class="card" id="sys-health">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 6: CONTROLS
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-controls">
+  <div class="content">
+
+    <div class="section-header">Bot Controls</div>
+    <div style="display:flex;flex-direction:column;gap:0.75rem;" id="controls-bot-list">
+      <!-- Rendered by JS -->
+    </div>
+
+    <!-- Kill switch -->
+    <div class="section-gap">
+      <div class="section-header" style="color:var(--red)">Kill Switch</div>
+      <div class="card kill-section">
+        <p class="text-muted mb-1" style="font-size:0.82rem">
+          This will write a kill signal to <code>data/kill_signal.json</code>.
+          The swarm daemon will stop all bot runners.
+        </p>
+        <p class="text-muted" style="font-size:0.8rem;margin-bottom:0.75rem">
+          Type <strong style="color:var(--red)">KILL</strong> in the box and click the button to confirm.
+        </p>
+        <div class="kill-input-wrap">
+          <input
+            type="text"
+            id="kill-confirm-input"
+            class="kill-input"
+            placeholder="type KILL"
+            maxlength="4"
+            autocomplete="off"
+          />
+        </div>
+        <button class="btn-kill" id="kill-btn" style="max-width:100%;margin-top:1rem">
+          EMERGENCY STOP — KILL ALL BOTS
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 7: CONFIG
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-config">
+  <div class="content">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
+      <div class="section-header" style="margin-bottom:0">swarm_config.yaml</div>
+      <div style="display:flex;gap:0.5rem;">
+        <button class="btn btn-blue" id="config-edit-btn">Edit</button>
+        <button class="btn btn-green" id="config-save-btn" style="display:none">Save</button>
+        <button class="btn btn-ghost" id="config-cancel-btn" style="display:none">Cancel</button>
+      </div>
+    </div>
+
+    <pre class="code-block" id="config-viewer">(loading config…)</pre>
+    <textarea
+      class="code-edit"
+      id="config-editor"
+      style="display:none;min-height:400px"
+      spellcheck="false"
+    ></textarea>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 8: ADMIN
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-admin">
+  <div class="content">
+
+    <!-- Log viewer -->
+    <div class="card mb-2">
+      <div class="card-title">Log Viewer</div>
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <label style="font-size:0.82rem;color:var(--text-muted)">Lines:</label>
+        <input type="number" id="admin-log-count" value="50" min="1" max="1000" style="width:80px" />
+        <button class="btn btn-blue" id="admin-fetch-logs-btn">Fetch Logs</button>
+      </div>
+      <div class="log-box" id="admin-log-display" style="max-height:400px">Click "Fetch Logs" to load.</div>
+    </div>
+
+    <!-- Vacuum -->
+    <div class="card">
+      <div class="card-title">Database Maintenance</div>
+      <p class="text-muted mb-1" style="font-size:0.82rem">
+        Run VACUUM on all SQLite databases in the data/ directory to reclaim disk space.
+      </p>
+      <button class="btn btn-ghost" id="admin-vacuum-btn">Vacuum All Databases</button>
+      <pre class="code-block mt-2" id="admin-vacuum-result" style="max-height:200px"></pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Toast ───────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ── Scripts ────────────────────────────────────────────── -->
+<script src="/static/app.js"></script>
+
+</body>
+</html>
