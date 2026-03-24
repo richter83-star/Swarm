@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -98,6 +99,10 @@ class TelegramNotifier:
                 "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars. Disabling."
             )
             self._enabled = False
+
+        # Crash notification cooldown: {bot_name: last_sent_timestamp}
+        # Prevents a crash loop from flooding the chat.
+        self._crash_last_sent: Dict[str, float] = {}
 
         if self._enabled:
             logger.info("TelegramNotifier active (chat_id=%s).", self._chat_id)
@@ -205,9 +210,21 @@ class TelegramNotifier:
         self.send("\n".join(lines))
 
     def notify_crash(self, bot_name: str, exit_code: int) -> None:
-        """Alert: a bot process crashed."""
+        """Alert: a bot process crashed.
+
+        Rate-limited per bot to ``crash_cooldown_minutes`` (default 30) so a
+        crash loop cannot flood the Telegram chat.
+        """
         if not self.cfg.get("notify_crashes", True):
             return
+        cooldown_secs = int(self.cfg.get("crash_cooldown_minutes", 30)) * 60
+        last = self._crash_last_sent.get(bot_name, 0)
+        if time.time() - last < cooldown_secs:
+            logger.debug(
+                "notify_crash: %s crash suppressed (cooldown %d min)", bot_name, cooldown_secs // 60
+            )
+            return
+        self._crash_last_sent[bot_name] = time.time()
         self.send(
             f"{_CRASH_EMOJI} *Bot Crashed*\n"
             f"Bot: `{bot_name}` exited with code `{exit_code}`.\n"

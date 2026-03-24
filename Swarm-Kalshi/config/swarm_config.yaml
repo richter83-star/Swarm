@@ -251,6 +251,7 @@ telegram:
   notify_trades: false
   notify_outcomes: false
   notify_crashes: true
+  crash_cooldown_minutes: 30  # max one crash alert per bot per N minutes (prevents spam)
   notify_daily_summary: true
   signal_confidence_threshold: 72
   commands_enabled: true
