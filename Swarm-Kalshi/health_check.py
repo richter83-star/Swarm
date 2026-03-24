@@ -859,6 +859,88 @@ def _write_audit_log(report: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check 14: Error storm detection (repeated identical errors = crash loop)
+# ---------------------------------------------------------------------------
+
+def check_error_storm(lookback_minutes: int = 30, threshold: int = 5) -> dict:
+    """
+    Scan the last N minutes of swarm.log for repeated ERROR lines.
+
+    A single error appearing `threshold` or more times indicates a crash loop
+    (e.g. a code bug firing on every cycle). Returns CRITICAL + the top error
+    so it shows up in the health report and Telegram notification.
+    """
+    log_path = LOG_DIR / "swarm.log"
+    if not log_path.exists():
+        return {"status": "OK", "details": "No log file found"}
+
+    cutoff = _now_utc() - timedelta(minutes=lookback_minutes)
+    error_counts: Dict[str, int] = {}
+    error_examples: Dict[str, str] = {}
+
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            # Read last 2000 lines to avoid loading huge files
+            lines = fh.readlines()[-2000:]
+    except Exception as exc:
+        return {"status": "WARNING", "details": f"Could not read log: {exc}"}
+
+    for line in lines:
+        if " | ERROR " not in line and " | CRITICAL " not in line:
+            continue
+        # Parse timestamp (format: 2026-03-24 03:01:42 | ERROR | ...)
+        try:
+            ts_str = line[:19]
+            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            if ts < cutoff:
+                continue
+        except ValueError:
+            continue
+
+        # Extract the error message (strip timestamp + level prefix, keep module+msg)
+        parts = line.split(" | ", 4)
+        if len(parts) >= 5:
+            key = parts[3].strip() + ": " + parts[4].strip()[:120]
+        elif len(parts) >= 4:
+            key = parts[3].strip()[:120]
+        else:
+            key = line.strip()[:120]
+
+        error_counts[key] = error_counts.get(key, 0) + 1
+        if key not in error_examples:
+            error_examples[key] = line.strip()
+
+    if not error_counts:
+        return {
+            "status": "OK",
+            "details": f"No ERROR lines in last {lookback_minutes} min",
+        }
+
+    storms = {k: v for k, v in error_counts.items() if v >= threshold}
+
+    if storms:
+        worst_key = max(storms, key=lambda k: storms[k])
+        worst_count = storms[worst_key]
+        return {
+            "status": "CRITICAL",
+            "details": (
+                f"{len(storms)} error storm(s) in last {lookback_minutes} min. "
+                f"Worst: '{worst_key[:80]}' × {worst_count}"
+            ),
+            "storms": {k: v for k, v in sorted(storms.items(), key=lambda x: -x[1])},
+        }
+
+    top_key = max(error_counts, key=lambda k: error_counts[k])
+    return {
+        "status": "OK",
+        "details": (
+            f"{len(error_counts)} distinct error(s) in last {lookback_minutes} min, "
+            f"none repeated ≥{threshold}×. Top: '{top_key[:60]}' × {error_counts[top_key]}"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Overall status aggregation
 # ---------------------------------------------------------------------------
 
@@ -1251,11 +1333,25 @@ def run_health_check() -> dict:
         }
 
     # --- Check 13: Central LLM health & guardrail progress ---
-    print("[health_check] Check 13/13: Central LLM health...")
+    print("[health_check] Check 13/14: Central LLM health...")
     try:
         checks["llm_health"] = check_llm_health(recommendations)
     except Exception as exc:
         checks["llm_health"] = {
+            "status": "WARNING",
+            "details": f"Check failed: {exc}",
+        }
+
+    # --- Check 14: Error storm detection ---
+    print("[health_check] Check 14/14: Error storm detection...")
+    try:
+        checks["error_storm"] = check_error_storm()
+        if checks["error_storm"]["status"] == "CRITICAL":
+            recommendations.append(
+                "ERROR STORM: " + checks["error_storm"]["details"]
+            )
+    except Exception as exc:
+        checks["error_storm"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }

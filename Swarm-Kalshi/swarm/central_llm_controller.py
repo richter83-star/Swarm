@@ -178,7 +178,7 @@ class CentralLLMController:
         # --- Entry price gate: require minimum upside per contract ---
         # e.g. max_entry_price_cents=85 means we only trade where potential
         # gain >= 15¢. Filters out near-certainty contracts with tiny payouts.
-        trading_cfg = self._cfg.get("trading", {})
+        trading_cfg = self.cfg.get("trading", {})
         max_entry = int(trading_cfg.get("max_entry_price_cents", 100))
         entry_price = int(trade_request.get("suggested_price", 0) or 0)
         if max_entry < 100 and entry_price > max_entry:
@@ -999,8 +999,8 @@ class CentralLLMController:
         if samples < min_samples:
             return decision
 
-        win_rate = float(profile.get("win_rate_pct", 0.0))
-        avg_pnl = float(profile.get("avg_pnl_cents", 0.0))
+        win_rate = float(profile.get("win_rate_pct") or 0.0)
+        avg_pnl = float(profile.get("avg_pnl_cents") or 0.0)
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
 
         cold_wr = float(self.cfg.get("adaptive_cold_win_rate_pct", 42.0))
