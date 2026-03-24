@@ -94,8 +94,8 @@ human_behavior:
   action_delay_max: 20.0
   session_duration_min: 15
   session_duration_max: 90
-  idle_period_min: 30
-  idle_period_max: 180
+  idle_period_min: 5
+  idle_period_max: 25
   browse_without_trade_prob: 0.3
   trade_size_min_multiplier: 0.6
   trade_size_max_multiplier: 1.4
