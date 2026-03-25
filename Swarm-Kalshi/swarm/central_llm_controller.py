@@ -175,20 +175,30 @@ class CentralLLMController:
         if not self._enabled:
             return True
 
-        # --- Entry price gate: require minimum upside per contract ---
-        # e.g. max_entry_price_cents=85 means we only trade where potential
-        # gain >= 15¢. Filters out near-certainty contracts with tiny payouts.
+        # --- Entry price band gate (data-driven) ---
+        # Historical data shows 20-60¢ is the profitable range on Kalshi:
+        #   20-40¢ → +189¢ PnL, 40-60¢ → +102¢ PnL
+        #   <20¢ longshots → -72¢ (11% win rate, insufficient edge)
+        #   60¢+ near-certainties → -189¢+ (need 90%+ win rate, never achieved)
         trading_cfg = self.cfg.get("trading", {})
         max_entry = int(trading_cfg.get("max_entry_price_cents", 100))
+        min_entry = int(trading_cfg.get("min_entry_price_cents", 0))
         entry_price = int(trade_request.get("suggested_price", 0) or 0)
-        if max_entry < 100 and entry_price > max_entry:
-            logger.info(
-                "pre_screen: %s rejected — entry price %d¢ > max %d¢ "
-                "(min upside %.0f¢ required). Skipping research+LLM.",
-                trade_request.get("ticker", "?"), entry_price, max_entry,
-                100 - max_entry,
-            )
-            return False
+        if entry_price > 0:
+            if max_entry < 100 and entry_price > max_entry:
+                logger.info(
+                    "pre_screen: %s rejected — entry price %d¢ > max %d¢ "
+                    "(near-certainty, insufficient upside). Skipping research+LLM.",
+                    trade_request.get("ticker", "?"), entry_price, max_entry,
+                )
+                return False
+            if min_entry > 0 and entry_price < min_entry:
+                logger.info(
+                    "pre_screen: %s rejected — entry price %d¢ < min %d¢ "
+                    "(longshot, insufficient win rate). Skipping research+LLM.",
+                    trade_request.get("ticker", "?"), entry_price, min_entry,
+                )
+                return False
 
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
         floor = self._approval_confidence_floor(trade_request)

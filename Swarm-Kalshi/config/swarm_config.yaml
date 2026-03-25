@@ -52,7 +52,8 @@ trading:
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
   max_signals_per_cycle: 3
-  max_entry_price_cents: 85        # Never buy a contract above 85¢ — ensures ≥15¢ upside per win
+  max_entry_price_cents: 65        # Data shows 20-60c range is profitable; 65c+ loses money
+  min_entry_price_cents: 20        # Avoid longshots below 20c — 11% win rate on these loses money
   market_scan_max_pages: 50
   scan_mode: recent_focus
   recent_trade_seed_pages: 3
