@@ -1,77 +1,97 @@
 # Kalshi Swarm — Roadmap, Milestones & Deposit Schedule
 
 ## The Goal
-- **Realistic long-term:** $10,000/month passive income
-- **Dream goal:** $30,000/month
+- **Realistic long-term:** $10,000 MRR
+- **Dream goal:** $30,000 MRR
 - **Exit strategy:** Sell the program once proven at scale
 
 ---
 
-## Account Size → Monthly Income Map
+## MRR Milestones
 
-| Account Value | @ 10%/mo | @ 15%/mo | @ 20%/mo |
-|---------------|----------|----------|----------|
-| $1,500        | $150     | $225     | $300     |
-| $5,000        | $500     | $750     | $1,000   |
-| $10,000       | $1,000   | $1,500   | $2,000   |
-| $25,000       | $2,500   | $3,750   | $5,000   |
-| $50,000       | $5,000   | $7,500   | $10,000  |
-| $75,000       | $7,500   | $11,250  | $15,000  |
-| $100,000      | $10,000  | $15,000  | $20,000  |
-| $150,000      | $15,000  | $22,500  | $30,000  |
-| $200,000      | $20,000  | $30,000  | $40,000  |
+### 🟡 MILESTONE 1 — $1,000 MRR
+**Account needed:** $5,000–$10,000
+**What changes:**
+- Raise max_open_positions 6→8 per bot
+- Begin documenting system
+- Reinvest 100% of profits
 
-**Realistic $10K/month target account: $65,000–$100,000**
-**Dream $30K/month target account: $150,000–$300,000**
+**Estimated timeline from Nov 2026:** 2–4 months
 
 ---
 
-## Milestones (Account Value Based)
+### 🟢 MILESTONE 2 — $5,000 MRR
+**Account needed:** $25,000–$50,000
+**What changes:**
+- Raise max_position_pct 7%→8%
+- Watch for liquidity walls on small Kalshi markets
+- Can start withdrawing 20% monthly, reinvest 80%
 
-### 🟡 MILESTONE 1 — $1,500 (Proof of Concept)
-- **Monthly income:** ~$150–300
-- **Action:** Confirm strategy is working. Review win rate.
-- **System:** Current setup, no changes needed.
-- **Guardrail change:** None yet.
+**Estimated timeline from M1:** 6–12 months
 
-### 🟢 MILESTONE 2 — $5,000 (First Real Money)
-- **Monthly income:** ~$500–1,000
-- **Action:** Reinvest all profits. Pause deposits if compounding covers it.
-- **System:** Consider raising max_open_positions 6→8 per bot.
-- **Guardrail change:** Loosen if 50+ clean trades, 55%+ win rate, 14 days positive.
+---
 
-### 🟢 MILESTONE 3 — $10,000 (Meaningful Passive Income)
-- **Monthly income:** ~$1,000–2,000
-- **Action:** Can start withdrawing ~20% monthly. Reinvest 80%.
-- **System:** Raise max_position_pct 7%→8% (larger positions = faster growth).
-- **Note:** Start documenting system for eventual sale.
+### 🔵 MILESTONE 3 — $10,000 MRR ✅ Realistic Long-Term Goal
+**Account needed:** $50,000–$100,000
+**What changes:**
+- Cap single-trade size at $2,000 on low-liquidity markets
+- Add Polymarket as second platform (already proven there)
+- Raise max_open_positions 8→10 per bot
+- Begin preparing program for sale
 
-### 🔵 MILESTONE 4 — $25,000
-- **Monthly income:** ~$2,500–5,000
-- **Action:** Evaluate adding a second Kalshi account or porting to Polymarket.
-- **System:** Watch for liquidity walls on smaller markets. May need to diversify market selection.
-- **Guardrail change:** Raise max_open_positions to 10 per bot.
+**Sale value at this milestone: $120,000–$500,000** (12–50× MRR)
 
-### 🔵 MILESTONE 5 — $50,000
-- **Monthly income:** ~$5,000–10,000
-- **Action:** Begin preparing program for sale. Build documentation.
-- **System:** At 7% per trade = $3,500/trade. Liquidity on some Kalshi markets may limit. Start routing larger trades to higher-liquidity markets only.
-- **Note:** At this scale, Kalshi alone may not absorb all capital. Multi-platform strategy needed.
+**Estimated timeline from M2:** 8–14 months
 
-### 🚀 MILESTONE 6 — $75,000
-- **Monthly income:** ~$7,500–15,000
-- **Action:** $10K/month realistic goal is in range. Consider selling access to the system.
-- **System:** May need to cap per-trade size at $1,000 to avoid moving the market on smaller Kalshi contracts.
+---
 
-### 🚀 MILESTONE 7 — $100,000 (Realistic Long-Term Goal Achieved)
-- **Monthly income:** ~$10,000–20,000 ✅
-- **Action:** Program is proven at scale. Sell access or license it.
-- **Valuation:** A system generating $10K+/month has sale value of $120,000–$500,000+ (12–50× monthly).
+### 🔵 MILESTONE 4 — $15,000 MRR
+**Account needed:** $75,000–$150,000
+**What changes:**
+- Multi-platform required (Kalshi + Polymarket minimum)
+- Consider 3rd platform
+- Raise max_position_pct to 8–9%
 
-### 💎 MILESTONE 8 — $200,000+ (Dream Goal Range)
-- **Monthly income:** ~$20,000–40,000
-- **Action:** $30K/month achieved. Full financial freedom.
-- **Note:** At this scale, running multiple accounts across Kalshi, Polymarket, and other prediction markets simultaneously.
+**Estimated timeline from M3:** 4–8 months
+
+---
+
+### 🚀 MILESTONE 5 — $25,000 MRR
+**Account needed:** $125,000–$250,000
+**What changes:**
+- Full multi-platform deployment
+- Dedicated VPS per platform
+- Consider hiring to help scale/sell
+
+**Sale value at this milestone: $300,000–$1,250,000**
+
+**Estimated timeline from M4:** 6–10 months
+
+---
+
+### 💎 MILESTONE 6 — $30,000 MRR ✅ Dream Goal
+**Account needed:** $150,000–$300,000
+**What changes:**
+- Full financial freedom achieved
+- Program sale or licensing becomes primary monetization event
+- $30K MRR × 12 = $360,000/year passive
+
+**Sale value at this milestone: $360,000–$1,500,000+**
+
+---
+
+## Account Size → MRR Map
+
+| Account | 10%/mo MRR | 15%/mo MRR | 20%/mo MRR |
+|---------|-----------|-----------|-----------|
+| $5,000  | $500      | $750      | $1,000    |
+| $10,000 | $1,000    | $1,500    | $2,000    |
+| $25,000 | $2,500    | $3,750    | $5,000    |
+| $50,000 | $5,000    | $7,500    | $10,000   |
+| $75,000 | $7,500    | $11,250   | $15,000   |
+| $100,000| $10,000   | $15,000   | $20,000   |
+| $150,000| $15,000   | $22,500   | $30,000   |
+| $200,000| $20,000   | $30,000   | $40,000   |
 
 ---
 
@@ -82,7 +102,7 @@
 | Date | Action | Condition |
 |------|--------|-----------|
 | **Apr 8, 2026** | +$500 | Win rate ≥55% over 50+ resolved trades in 20-65¢ band |
-| **Apr 22** | +$300 | System running clean (net positive 2-week window) |
+| **Apr 22** | +$300 | Net positive 2-week window |
 | **May 6** | +$300 | Same |
 | **May 20** | +$300 | Same |
 | **Jun 3** | +$300 | Same |
@@ -98,40 +118,22 @@
 | **Oct 21** | +$300 | Same |
 
 **Total Phase 1 deposits: $4,750** (over 7 months)
-**Projected account Nov 1:** $7,200–$11,200 depending on return rate
+**Projected account Nov 1, 2026:** $7,200–$11,200
 
 ---
 
-## Phase 2 — Scaling (Nov 2026 onward)
-Once Phase 1 is complete and account is $7K–$11K:
-- Reinvest 100% of profits
-- Increase deposits to $500/bi-weekly if return rate is holding
-- Target Milestone 3 ($10K account) by Q1 2027
-- Target Milestone 4 ($25K account) by Q3 2027
-- Target Milestone 5 ($50K account) by Q1 2028
+## Compounding Timeline to Each Milestone
 
----
+*Starting from ~$9,000 (Nov 2026 projection), reinvesting 100%*
 
-## Compounding Projection to Dream Goal
-
-| Return Rate | Time to $100K | Time to $200K |
-|-------------|---------------|---------------|
-| 10%/month   | ~3.5 years    | ~4.5 years    |
-| 15%/month   | ~2.5 years    | ~3 years      |
-| 20%/month   | ~2 years      | ~2.5 years    |
-
-*Starting from Phase 1 completion (~$9K in Nov 2026), reinvesting all profits.*
-
----
-
-## Sale Valuation Benchmarks
-
-When the system is proven and generating consistent returns, sale value:
-- At $5K/month proven: **$60K–$250K** (12–50× monthly revenue)
-- At $10K/month proven: **$120K–$500K**
-- At $30K/month proven: **$360K–$1.5M+**
-
-The longer the track record, the higher the multiple.
+| Milestone | MRR Target | Account Needed | Est. Date (15%/mo) |
+|-----------|-----------|----------------|-------------------|
+| M1 | $1,000 | $7,000–$10,000 | **Nov–Dec 2026** |
+| M2 | $5,000 | $25,000–$50,000 | **Mid 2027** |
+| M3 | $10,000 | $50,000–$100,000 | **Early 2028** |
+| M4 | $15,000 | $75,000–$150,000 | **Mid 2028** |
+| M5 | $25,000 | $125,000–$250,000 | **Early 2029** |
+| M6 | $30,000 | $150,000–$300,000 | **Mid 2029** |
 
 ---
 
@@ -140,11 +142,25 @@ The longer the track record, the higher the multiple.
 - `min_balance_cents: 500` — hard floor, never remove
 - `max_entry_price_cents: 65` — proven profitable ceiling
 - `min_entry_price_cents: 20` — proven profitable floor
-- `max_position_pct: 7%` — raise only at Milestone 3+
+- `max_position_pct: 7%` — raise only at Milestone 2+
 
 ---
 
-## Notes
-- Session crons expire every 3 days — recreate keep-alive on each session start
-- All data before March 25, 2026 is suspect (broken period)
-- Reminder cron set for March 28 to recreate April 8 deposit trigger
+## Sale Valuation Benchmarks
+
+| MRR | Sale Value Range |
+|-----|-----------------|
+| $1,000/mo | $12,000–$60,000 |
+| $5,000/mo | $60,000–$300,000 |
+| $10,000/mo | $120,000–$500,000 |
+| $25,000/mo | $300,000–$1,250,000 |
+| $30,000/mo | $360,000–$1,500,000+ |
+
+*Multiple rises with track record length. 6 months proven = 12–24×. 12+ months = 36–50×.*
+
+---
+
+## Session Notes
+- Clean data starts: March 25, 2026
+- Reminder set: March 28 (recreate April 8 deposit trigger)
+- April 8: Pull 2-week win rate — if ≥55% over 50+ trades, add $500
