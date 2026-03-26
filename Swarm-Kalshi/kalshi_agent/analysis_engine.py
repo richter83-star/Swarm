@@ -119,11 +119,13 @@ class AnalysisEngine:
         external_signals=None,
         llm_advisor=None,
         research_config: Optional[Dict[str, Any]] = None,
+        mirofish_client=None,
     ):
         self.cfg = config
         self.learning = learning_engine
         self.external_signals = external_signals
         self.llm_advisor = llm_advisor
+        self.mirofish_client = mirofish_client
         self.weights = dict(self.DEFAULT_WEIGHTS)
         if weight_overrides:
             self.weights.update(weight_overrides)
@@ -607,6 +609,28 @@ class AnalysisEngine:
                     base_fv = base_fv + ext_tilt
             except Exception as exc:
                 logger.debug("External signals unavailable for %s: %s", opp.ticker, exc)
+
+        # --- MiroFish swarm-intelligence tilt ---
+        if self.mirofish_client is not None:
+            try:
+                mf_tilt = self.mirofish_client.get_signal(
+                    title=opp.title,
+                    category=opp.category,
+                )
+                if mf_tilt is not None:
+                    mf_weight = self.mirofish_client.weight          # default 0.40
+                    ext_weight = 1.0 - mf_weight
+                    # Scale tilt to cents (same max-5¢ cap as external signals)
+                    mf_cents = mf_tilt * 5.0
+                    # Blend: existing tilt kept at (1-weight), MiroFish at weight
+                    blended = ext_weight * ext_tilt + mf_weight * mf_cents
+                    base_fv = base_fv - ext_tilt + blended           # swap out old tilt
+                    logger.debug(
+                        "[mirofish] fv_tilt ext=%.2f mf=%.2f blended=%.2f | %s",
+                        ext_tilt, mf_cents, blended, opp.ticker,
+                    )
+            except Exception as exc:
+                logger.debug("[mirofish] signal unavailable for %s: %s", opp.ticker, exc)
 
         return max(1.0, min(99.0, base_fv))
 

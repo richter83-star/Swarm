@@ -100,6 +100,14 @@ human_behavior:
   browse_without_trade_prob: 0.3
   trade_size_min_multiplier: 0.6
   trade_size_max_multiplier: 1.4
+mirofish:
+  enabled: true
+  api_url: https://mirofish.dracanus.app
+  api_key: mf-swarm-9x4kRpL2vQtN8jWz
+  cache_ttl_seconds: 300
+  timeout_seconds: 8
+  min_confidence: 45
+  weight: 0.40
 external_signals:
   enabled: true
   cache_ttl_seconds: 300

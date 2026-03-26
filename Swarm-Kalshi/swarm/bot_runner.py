@@ -41,6 +41,7 @@ from kalshi_agent.backtester import Backtester
 from kalshi_agent.external_signals import ExternalSignals
 from kalshi_agent.prior_knowledge import PriorKnowledge
 from kalshi_agent.llm_advisor import LLMAdvisor
+from kalshi_agent.mirofish_client import MiroFishClient
 from telegram.notifier import TelegramNotifier
 from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
@@ -155,6 +156,10 @@ class BotRunner:
             config=self.cfg.get("llm_advisor", {}),
         )
 
+        self.mirofish = MiroFishClient(
+            config=self.cfg.get("mirofish", {}),
+        )
+
         self.analysis = AnalysisEngine(
             trading_cfg,
             weight_overrides=initial_weights,
@@ -162,6 +167,7 @@ class BotRunner:
             external_signals=self.external_signals,
             llm_advisor=self.llm_advisor,
             research_config=self.cfg.get("research", {}),
+            mirofish_client=self.mirofish,
         )
 
         self.behavior = HumanBehavior(
