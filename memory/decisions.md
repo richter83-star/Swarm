@@ -60,3 +60,36 @@ Key architectural and project decisions made during sessions.
 2. Anon public key (`eyJ...` string)
 
 **Rationale:** Enable autonomous agents to update task status directly in database while providing real-time visibility to the system owner. Single source of truth for task state across all components.
+
+## 2026-03-30: Logs Excluded from Git via .gitignore
+
+**Decision:** Do not commit log files; instead add `.logs/` to `.gitignore` to prevent accidental version control of ephemeral logs.
+
+**Rationale:** Log files are environment-specific and generated at runtime (e.g., `briefing.log`, smoke tests). They pollute repo history and are not useful to track. Cleaner repository state without requiring manual cleanup.
+
+## 2026-03-30: Swarm Bot System Analysis — Status & Recovery Path
+
+**Context:** Swarm has been inactive since March 17 (~12 days). Last graceful shutdown via SIGTERM at 01:20 UTC that day.
+
+**Current State (March 15–18 logs):**
+- **Capital preserved:** $51.54–$53.09 range; peak was $53.09, currently ~$1.55 below peak
+- **No active trading:** Zero trading activity since shutdown
+- **LLM gate is overly restrictive:** Central LLM rejecting dozens of trades/hour citing:
+  - Confidence floor violations (rejecting 65–69% confidence hits at 70% threshold)
+  - Vanguard's 0% win rate / -$2.75 cumulative loss as hard block
+  - Oracle over-concentration (4 open positions on ~$51 balance)
+  - Tavily research dead (432 quota errors) — falling back to DuckDuckGo only
+
+**Bot Performance Snapshot:**
+- **sentinel**: ~$51.54 balance, 12.5% WR (8 samples), marginal profitability — blocked by LLM
+- **oracle**: ~$51.54 balance, 0% WR (100% breakeven), flat PnL, 3–4 open positions
+- **pulse**: ~$51.54 balance, scanning normally, unknown profitability
+- **vanguard**: ~$49.80 balance, **0% WR (40 samples), -$2.75 PnL** — mostly blocked by LLM
+
+**Learning Engine Trends (last recorded):**
+- **Oracle:** WR improving (+20%), PnL trending up, but bias still negative (-47)
+- **Vanguard:** WR trending down (-30%), PnL down (-33¢), all feature importances negative (edge, volume, timing, momentum all red)
+
+**Next Actions:** Either restart swarm to resume trading or reset vanguard's learning state before bringing system back online. LLM guardian is working correctly (protecting capital), but capital sits idle. Decision pending on vanguard recovery vs. full restart.
+
+**Rationale:** Capital preservation demonstrates LLM risk management is functioning. However, extended inactivity with preserved capital suggests opportunity cost of overly-tight gating. Vanguard's negative feature importances are red flag for systemic edge degradation or training data contamination.

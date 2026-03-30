@@ -26,7 +26,8 @@ Building **Swarm** — a system related to Kalshi (prediction markets). Focus on
 
 ## Current Work in Progress
 
-- **Memory Infrastructure**: Persistent memory system fully active (decisions, people, preferences, user, personality). Stop hook updates files at session end.
-- **Telegram Daily Briefings**: ✅ Complete. Morning (8am) + evening (9pm) cron jobs sending to Telegram via local scripts. Test message confirmed received.
+- **Memory Infrastructure**: ✅ Complete. Persistent memory system fully active (decisions, people, preferences, user, personality). Stop hook updates files at session end.
+- **Telegram Daily Briefings**: ✅ Complete. Morning (8am) + evening (9pm) cron jobs sending to Telegram via local scripts. Test message confirmed received. Smoke test verified scripts are solid.
 - **Real-Time Todo Dashboard**: ⏳ In progress. Next.js + Supabase frontend with Realtime enabled for instant agent task updates. Awaiting Supabase project credentials.
-- **Startup Resilience**: Monitor cron daemon restart requirements if container restarts (currently requires manual `/usr/sbin/cron` invocation).
+- **Git Hygiene**: ✅ Logs directory gitignored. No ephemeral log files committed to repo.
+- **Swarm Bot System**: ⏳ Dormant since March 17 (12 days). Capital preserved ($51–53). LLM gate too tight; vanguard severely underperforming (0% WR, -$2.75 PnL, all negative feature importances). Decision pending: restart or reset vanguard learning before restart.
