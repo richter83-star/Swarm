@@ -93,3 +93,18 @@ Key architectural and project decisions made during sessions.
 **Next Actions:** Either restart swarm to resume trading or reset vanguard's learning state before bringing system back online. LLM guardian is working correctly (protecting capital), but capital sits idle. Decision pending on vanguard recovery vs. full restart.
 
 **Rationale:** Capital preservation demonstrates LLM risk management is functioning. However, extended inactivity with preserved capital suggests opportunity cost of overly-tight gating. Vanguard's negative feature importances are red flag for systemic edge degradation or training data contamination.
+
+## 2026-03-30: Swarm Status Discovery — Access & Next Steps
+
+**Context:** Investigating swarm system status to understand why it's been offline and what recovery path to take.
+
+**Finding:** Log files in local repo are stale (March 15–18). No SSH client available in Docker container to reach VPS directly.
+
+**Options for Live Status:**
+1. SSH directly from external machine (`ps aux` + `tail -50` of swarm.log)
+2. Copy fresh logs into repo for local analysis
+3. Install SSH client in container (`apt-get install -y openssh-client`) and use VPS credentials from CLAUDE.md
+
+**Status:** ⏳ Awaiting user preference on access method before proceeding with recovery plan.
+
+**Rationale:** Cannot determine current system state from stale logs. Live status needed to decide whether to perform full restart, reset vanguard learning, or other recovery action.
