@@ -21,3 +21,20 @@ Key architectural and project decisions made during sessions.
 - Only selective updates—no duplication of existing content
 
 **Rationale:** Enable long-term project continuity by maintaining institutional knowledge across sessions without manual intervention.
+
+## 2026-03-30: Telegram Morning Briefing Bot (In Progress)
+
+**Decision:** Build an automated daily briefing bot that sends to Telegram at 8am with:
+- Summary of last work session from memory files
+- Current active task from `/todos/active.md`
+- 3 AI-generated priorities for the day
+
+**Status:** Awaiting Telegram bot token and chat ID (user selected "paste them now" option)
+
+**Architecture:** Claude Code scheduled task (8am daily) that:
+1. Reads all persistent memory files
+2. Loads `/todos/active.md` for context
+3. Generates briefing summary via Claude API
+4. Sends formatted message to Telegram
+
+**Rationale:** Replace manual daily planning with AI-powered, context-aware briefing. Keeps personal priorities aligned with actual project state across sessions.
