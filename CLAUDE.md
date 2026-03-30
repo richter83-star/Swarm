@@ -2,12 +2,13 @@
 
 ## Persistent Memory
 
-At the start of every session, read all four memory files to restore context:
+At the start of every session, read all five memory files to restore context:
 
 - `memory/decisions.md` — past architectural and project decisions
 - `memory/people.md` — collaborators, stakeholders, and contacts
 - `memory/preferences.md` — working style and conventions to follow
 - `memory/user.md` — background on the user and their goals
+- `memory/personality.md` — how to think, communicate, and make decisions with this user
 
 Do this silently without announcing it unless there is something important to surface.
 
