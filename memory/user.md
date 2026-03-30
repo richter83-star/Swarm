@@ -26,8 +26,8 @@ Building **Swarm** — a system related to Kalshi (prediction markets). Focus on
 
 ## Current Work in Progress
 
-- **Memory Infrastructure**: ✅ Complete. Persistent memory system fully active (decisions, people, preferences, user, personality). Stop hook updates files at session end.
-- **Telegram Daily Briefings**: ✅ Complete. Morning (8am) + evening (9pm) cron jobs sending to Telegram via local scripts. Test message confirmed received. Smoke test verified scripts are solid.
-- **Real-Time Todo Dashboard**: ⏳ In progress. Next.js + Supabase frontend with Realtime enabled for instant agent task updates. Awaiting Supabase project credentials.
+- **Memory Infrastructure**: ✅ Complete. Persistent memory system fully active (decisions, people, preferences, user). Stop hook updates files at session end. CLAUDE.md commits updated with memory read/update instructions.
+- **Telegram Daily Briefings**: ✅ Complete. Morning (8am) + evening (9pm) cron jobs verified working. Test messages confirmed received.
+- **Real-Time Todo Dashboard**: ⏳ In progress. Next.js + Supabase frontend with Realtime enabled. Awaiting Supabase project credentials.
 - **Git Hygiene**: ✅ Logs directory gitignored. No ephemeral log files committed to repo.
-- **Swarm Bot System**: ⏳ Dormant since March 17 (12 days). Capital preserved ($51–53). LLM gate too tight; vanguard severely underperforming (0% WR, -$2.75 PnL, all negative feature importances). Latest status analysis complete; awaiting SSH access to pull live logs before deciding recovery path (full restart vs. reset vanguard learning vs. other).
+- **Swarm Bot System**: ⏳ Dormant since March 17 (12 days). Capital preserved ($51–53). LLM gate too tight; vanguard severely underperforming (0% WR, -$2.75 PnL, all negative feature importances). **Blocker:** Docker container has no outbound SSH access to VPS. Awaiting user to provide live logs via SSH from external machine before deciding recovery path.

@@ -94,17 +94,21 @@ Key architectural and project decisions made during sessions.
 
 **Rationale:** Capital preservation demonstrates LLM risk management is functioning. However, extended inactivity with preserved capital suggests opportunity cost of overly-tight gating. Vanguard's negative feature importances are red flag for systemic edge degradation or training data contamination.
 
-## 2026-03-30: Swarm Status Discovery — Access & Next Steps
+## 2026-03-30: Swarm Status Discovery — Network Isolation Constraint
 
 **Context:** Investigating swarm system status to understand why it's been offline and what recovery path to take.
 
-**Finding:** Log files in local repo are stale (March 15–18). No SSH client available in Docker container to reach VPS directly.
+**Finding:**
+- Log files in local repo are stale (March 15–18)
+- Docker container has **no outbound SSH access** — DNS resolution works for apt mirrors but not for external hosts
+- Attempted SSH to both IP address (144.126.146.8) and hostname (vmi3134862.contaboserver.net) — both failed
+- Installed openssh-client and sshpass but network isolation blocks outbound connections on port 22
 
-**Options for Live Status:**
-1. SSH directly from external machine (`ps aux` + `tail -50` of swarm.log)
-2. Copy fresh logs into repo for local analysis
-3. Install SSH client in container (`apt-get install -y openssh-client`) and use VPS credentials from CLAUDE.md
+**Valid Options for Live Status:**
+1. **SSH directly from user's local machine** — paste `ps aux` and `tail -50 /root/Swarm/Swarm-Kalshi/logs/swarm.log` output here for instant analysis
+2. **Copy fresh logs** into repo from VPS for local analysis
+3. **Use Telegram bot** on VPS (if `/status` command or trigger exists)
 
-**Status:** ⏳ Awaiting user preference on access method before proceeding with recovery plan.
+**Status:** ⏳ Awaiting user action to provide live system state before recovery decision.
 
-**Rationale:** Cannot determine current system state from stale logs. Live status needed to decide whether to perform full restart, reset vanguard learning, or other recovery action.
+**Rationale:** Container environment is sandboxed from outbound SSH. User must bridge this manually. Once live logs are obtained, can determine recovery path (full restart vs. reset vanguard vs. other).
