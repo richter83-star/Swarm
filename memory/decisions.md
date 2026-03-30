@@ -22,19 +22,41 @@ Key architectural and project decisions made during sessions.
 
 **Rationale:** Enable long-term project continuity by maintaining institutional knowledge across sessions without manual intervention.
 
-## 2026-03-30: Telegram Morning Briefing Bot (In Progress)
+## 2026-03-30: Telegram Morning & Evening Briefing Bot (Complete)
 
-**Decision:** Build an automated daily briefing bot that sends to Telegram at 8am with:
-- Summary of last work session from memory files
-- Current active task from `/todos/active.md`
-- 3 AI-generated priorities for the day
+**Decision:** Build automated daily briefing system that sends to Telegram at 8am and 9pm with:
+- **Morning (8am):** Last session context + 3 AI-generated priorities for today
+- **Evening (9pm):** What moved that day + open tasks + first priority for tomorrow
 
-**Status:** Awaiting Telegram bot token and chat ID (user selected "paste them now" option)
+**Status:** ✅ Live and operational. Test message successfully sent to Telegram.
 
-**Architecture:** Claude Code scheduled task (8am daily) that:
-1. Reads all persistent memory files
-2. Loads `/todos/active.md` for context
-3. Generates briefing summary via Claude API
-4. Sends formatted message to Telegram
+**Architecture:** Cron-based shell scripts (not Claude scheduled task):
+- `morning_briefing.sh` @ 8:00 AM — reads memory files, generates priorities via Claude API, sends to Telegram
+- `evening_summary.sh` @ 9:00 PM — reads todos, generates summary via Claude API, sends to Telegram
+- Both scripts registered in `/etc/cron.d/swarm-briefing`
+- Cron daemon manually started (`/usr/sbin/cron`) since container lacks systemd
 
-**Rationale:** Replace manual daily planning with AI-powered, context-aware briefing. Keeps personal priorities aligned with actual project state across sessions.
+**Implementation Details:**
+- Telegram bot token and chat ID embedded directly in scripts (retrieved during session)
+- Claude API calls for briefing generation
+- Uses local environment (no external scheduling service)
+
+**Known Constraint:** Cron daemon requires manual restart if container restarts (not persistent through systemd). Can be added to container startup mechanism if needed.
+
+**Rationale:** Replace manual daily planning with AI-powered, context-aware briefing. Keeps personal priorities aligned with actual project state across sessions. Local cron solution avoids external dependencies.
+
+## 2026-03-30: Real-Time Todo Dashboard with Supabase (In Progress)
+
+**Decision:** Build a real-time to-do dashboard using Next.js and Supabase for live task tracking with instant updates across agents.
+
+**Requirements:**
+- **Frontend:** Next.js with dark, minimal, clean styling
+- **Backend:** Supabase with Realtime enabled for websocket updates
+- **Database schema:** todos table with fields: title, status, priority, assigned_agent, updated_at
+- **Real-time sync:** When an agent updates task status in Supabase, UI reflects changes instantly (no refresh needed)
+
+**Status:** ⏳ Awaiting credentials. User must create Supabase project and provide:
+1. Project URL (`https://xxxxxxxxxxxx.supabase.co`)
+2. Anon public key (`eyJ...` string)
+
+**Rationale:** Enable autonomous agents to update task status directly in database while providing real-time visibility to the system owner. Single source of truth for task state across all components.

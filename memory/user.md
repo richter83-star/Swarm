@@ -26,5 +26,7 @@ Building **Swarm** — a system related to Kalshi (prediction markets). Focus on
 
 ## Current Work in Progress
 
-- **Telegram Morning Briefing**: Scheduled daily task to send AI-powered briefings at 8am. Needs Telegram bot token + chat ID from user.
-- **Memory Infrastructure**: Persistent memory system now active (decisions, people, preferences, user). Stop hook updates files at session end.
+- **Memory Infrastructure**: Persistent memory system fully active (decisions, people, preferences, user, personality). Stop hook updates files at session end.
+- **Telegram Daily Briefings**: ✅ Complete. Morning (8am) + evening (9pm) cron jobs sending to Telegram via local scripts. Test message confirmed received.
+- **Real-Time Todo Dashboard**: ⏳ In progress. Next.js + Supabase frontend with Realtime enabled for instant agent task updates. Awaiting Supabase project credentials.
+- **Startup Resilience**: Monitor cron daemon restart requirements if container restarts (currently requires manual `/usr/sbin/cron` invocation).
