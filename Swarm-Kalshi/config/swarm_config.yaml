@@ -37,18 +37,19 @@ auto_scale:
 trading:
   default_order_type: limit
   min_confidence_threshold: 65
+  min_edge_cents: 10
   min_liquidity_cents: 1000
   min_volume_24h: 50
   min_hours_to_expiry: 2
   max_hours_to_expiry: 720
   max_position_pct: 0.07
-  max_open_positions: 6
+  max_open_positions: 3
   open_positions_scope: per_bot
-  max_trades_per_day: 50           # Real governors are max_open_positions + max_drawdown_pct
-  daily_loss_limit_cents: 3000
+  max_trades_per_day: 999           # Real governors are max_open_positions + max_drawdown_pct
+  daily_loss_limit_cents: 99999
   min_balance_cents: 500
-  max_drawdown_pct: 0.1
-  loss_streak_threshold: 3
+  max_drawdown_pct: 0.12
+  loss_streak_threshold: 5
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
   max_signals_per_cycle: 10          # Process more opportunities per scan cycle
@@ -71,15 +72,16 @@ trading:
   auto_pause_on_consecutive_losses: 8
   auto_pause_resume_hours: 24
 risk:
-  daily_loss_limit_cents: 3000
-  max_drawdown_pct: 0.1
-  drawdown_pause_cooldown_minutes: 120
+  daily_loss_limit_cents: 99999
+  max_drawdown_pct: 0.12
+  drawdown_pause_cooldown_minutes: 60
+  min_trades_before_drawdown: 5
   drawdown_auto_reset_peak_after_cooldown: true
   drawdown_auto_reset_requires_flat_positions: false
   drawdown_cooldown_extend_minutes: 15
   drawdown_reentry_buffer_pct: 0.02
   risk_block_log_throttle_seconds: 30
-  loss_streak_threshold: 3
+  loss_streak_threshold: 5
   loss_streak_size_multiplier: 0.5
 learning:
   db_path: data/swarm_learning.db
@@ -125,7 +127,7 @@ llm_advisor:
   enabled: true
   api_key: ''
   model: claude-haiku-4-5-20251001
-  max_tokens: 300
+  max_tokens: 150
   temperature: 0.1
   pre_screen_threshold: 60
   llm_weight: 0.2
@@ -141,8 +143,8 @@ central_llm:
   anthropic_model: claude-haiku-4-5-20251001
   model: qwen2.5:14b
   timeout_seconds: 20
-  min_approved_confidence: 55
-  max_red_flags: 5
+  min_approved_confidence: 70
+  max_red_flags: 2
   default_size_multiplier: 1.0
   fail_open: false
   allow_quant_fallback_on_error: true
@@ -167,7 +169,7 @@ central_llm:
   adaptive_prompt_hot_size_boost: 1.1
   adaptive_prompt_reject_quant_floor: 70
   adaptive_bootstrap_min_samples: 15
-  approval_confidence_floor: 72.0
+  approval_confidence_floor: 78.0
   low_volume_confidence_floor: 88
   db_path: data/central_llm_controller.db
 autonomous_mode:
@@ -206,16 +208,16 @@ prior_knowledge:
   blend_with_observed: true
 research:
   enabled: true
-  search_provider: tavily
+  search_provider: duckduckgo
   max_queries: 3
-  max_sources: 8
+  max_sources: 4
   fetch_full_content: true
   content_fetch_top_n: 3
   source_timeout_secs: 15
   max_content_length: 8000
   extraction_provider: anthropic
   extraction_model: claude-haiku-4-5-20251001
-  llm_max_tokens: 1500
+  llm_max_tokens: 800
   extraction_api_key: ''
   primary_domains: {}
   secondary_domains: []
@@ -226,7 +228,7 @@ research:
   min_evidence_quality: 0.3
   providers:
     tavily:
-      enabled: true
+      enabled: false
       daily_credit_budget: 30
       search_depth: basic
     serpapi:
