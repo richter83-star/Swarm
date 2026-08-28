@@ -5,3 +5,6 @@ bot:
 learning:
   db_path: data/oracle.db
 category_filters: [economics, finance, inflation, employment]
+
+trading:
+  max_open_positions: 9

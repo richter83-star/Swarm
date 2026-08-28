@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "phouse-todos",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:\\phouse-todos", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

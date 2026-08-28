@@ -66,23 +66,6 @@ def _save_state(state: dict) -> None:
         json.dump(state, fh, indent=2)
 
 
-def _send_telegram(bot_token: str, chat_id: str, message: str) -> bool:
-    import urllib.request
-    url     = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": message}).encode("utf-8")
-    req     = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=8):
-            return True
-    except Exception as exc:
-        print(f"[watchdog] Telegram send failed: {exc}", file=sys.stderr)
-        return False
-
-
 def scan_error_storms() -> dict[str, int]:
     """Return {error_key: count} for errors appearing ≥ STORM_THRESHOLD times."""
     if not LOG_PATH.exists():
@@ -123,14 +106,6 @@ def scan_error_storms() -> dict[str, int]:
 def main() -> None:
     print(f"[watchdog] {_now_utc().strftime('%Y-%m-%d %H:%M:%S')} UTC — scanning last {LOOKBACK_MINUTES} min...")
 
-    cfg   = _load_config()
-    tg    = cfg.get("telegram", {})
-    token = tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat  = tg.get("chat_id")   or os.environ.get("TELEGRAM_CHAT_ID", "")
-
-    if not token or not chat:
-        print("[watchdog] Telegram not configured — alerts disabled. Still scanning.")
-
     storms = scan_error_storms()
 
     if not storms:
@@ -149,26 +124,11 @@ def main() -> None:
         if last_alert_str:
             last_alert = datetime.fromisoformat(last_alert_str)
             if (_now_utc() - last_alert).total_seconds() < ALERT_COOLDOWN * 60:
-                print(f"[watchdog]   Skipping alert (cooldown, last sent {last_alert_str})")
+                print(f"[watchdog]   Skipping alert (cooldown, last logged {last_alert_str})")
                 continue
 
-        if token and chat:
-            msg = (
-                "🚨 SWARM WATCHDOG ALERT\n\n"
-                f"Error storm detected in last {LOOKBACK_MINUTES} min:\n\n"
-                f"⚠️  {count}× — {error_key[:120]}\n\n"
-                "Bots may be stuck in a crash loop. Check logs immediately:\n"
-                "tail -50 /root/Swarm/Swarm-Kalshi/logs/swarm.log"
-            )
-            sent = _send_telegram(token, chat, msg)
-            if sent:
-                print(f"[watchdog]   Telegram alert sent.")
-                state["last_alerts"][error_key] = now_iso
-                alerted_any = True
-        else:
-            # No Telegram, but still track state so we log it
-            state["last_alerts"][error_key] = now_iso
-            alerted_any = True
+        state["last_alerts"][error_key] = now_iso
+        alerted_any = True
 
     if alerted_any:
         _save_state(state)

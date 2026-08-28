@@ -96,10 +96,8 @@ def open_db_readonly(db_path: Path):
     Returns (conn, None) on success or (None, error_string) on failure.
     """
     try:
-        uri = db_path.as_uri() + "?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, timeout=5)
+        conn = sqlite3.connect(str(db_path), timeout=5)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
         return conn, None
     except Exception as exc:
         return None, str(exc)
@@ -430,6 +428,80 @@ def api_positions():
     return json_response({"total_open": total, "by_bot": by_bot})
 
 
+# ── /api/equity ──────────────────────────────────────────────────────────────
+
+@app.route("/api/equity")
+def api_equity():
+    """
+    Chronological portfolio equity curve computed from settled trade outcomes.
+    """
+    all_settled = []
+    total_current_balance = 0
+
+    for bot in BOTS:
+        risk = read_risk_state(bot)
+        total_current_balance += risk.get("balance_cents", 0) or 0
+        db_file = data_path(f"{bot}.db")
+        if not db_file.exists():
+            continue
+        conn, _ = open_db_readonly(db_file)
+        if conn is None:
+            continue
+        try:
+            cur = conn.execute(
+                "SELECT timestamp, pnl_cents FROM trades "
+                "WHERE outcome IN ('win', 'loss') AND pnl_cents IS NOT NULL "
+                "ORDER BY timestamp ASC"
+            )
+            for r in cur.fetchall():
+                ts = r["timestamp"]
+                pnl = r["pnl_cents"] or 0
+                if ts:
+                    all_settled.append({"timestamp": ts, "pnl_cents": pnl})
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+    all_settled.sort(key=lambda x: x["timestamp"])
+
+    # Compute baseline starting capital
+    total_realized_pnl = sum(x["pnl_cents"] for x in all_settled)
+    base_capital = max(1000, total_current_balance - total_realized_pnl)
+
+    points = []
+    if all_settled:
+        # Initial point before first trade
+        first_ts = all_settled[0]["timestamp"]
+        points.append({
+            "timestamp": first_ts,
+            "portfolio_cents": base_capital,
+        })
+        running = base_capital
+        for s in all_settled:
+            running += s["pnl_cents"]
+            points.append({
+                "timestamp": s["timestamp"],
+                "portfolio_cents": running,
+            })
+    else:
+        # Default single point with current balance
+        points.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "portfolio_cents": total_current_balance or 10000,
+        })
+
+    # Always ensure current real-time point is at the end
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not points or points[-1]["timestamp"] != now_iso:
+        points.append({
+            "timestamp": now_iso,
+            "portfolio_cents": total_current_balance if total_current_balance > 0 else (points[-1]["portfolio_cents"] if points else 10000),
+        })
+
+    return json_response(points)
+
+
 # ── /api/risk ────────────────────────────────────────────────────────────────
 
 @app.route("/api/risk")
@@ -509,6 +581,23 @@ def api_risk():
     return json_response({"bots": bots_risk, "guardrail_progress": guardrail})
 
 
+# ── /api/learning ────────────────────────────────────────────────────────────
+
+@app.route("/api/learning")
+def api_learning():
+    """
+    Demo trading learning & adaptation analytics:
+    Confidence calibration, feature weights history, category multipliers, and LLM filtering.
+    """
+    try:
+        from watch_demo_learning import aggregate_full_learning_report
+        report = aggregate_full_learning_report(data_path())
+        return json_response(report)
+    except Exception as exc:
+        traceback.print_exc()
+        return json_response({"error": str(exc)}, 500)
+
+
 # ── /api/system ──────────────────────────────────────────────────────────────
 
 @app.route("/api/system")
@@ -544,24 +633,42 @@ def api_system():
     tavily_budget = 30
     tavily_pct = round(tavily_today / tavily_budget * 100, 1) if tavily_budget else 0.0
 
-    # ── Anthropic status (401 errors in last hour of LLM decisions) ───────
-    anthropic_status = "ok"
-    conn, _ = open_db_readonly(llm_db_path())
-    if conn:
-        try:
-            cur = conn.execute(
-                "SELECT rationale FROM llm_decisions "
-                "WHERE timestamp >= datetime('now', '-1 hour') "
-                "ORDER BY id DESC LIMIT 100"
-            )
-            for r in cur.fetchall():
-                if r["rationale"] and "401" in r["rationale"]:
-                    anthropic_status = "error"
-                    break
-        except Exception:
-            pass
-        finally:
-            conn.close()
+    # ── Active LLM Brain status ───────────────────────────────────────────
+    cfg_file = config_path("swarm_config.yaml")
+    llm_provider = "gemini"
+    llm_model = "gemini-2.5-flash"
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as fh:
+            c = yaml.safe_load(fh) or {}
+            central = c.get("central_llm", {})
+            llm_provider = str(central.get("provider", "gemini")).lower()
+            if llm_provider == "gemini":
+                llm_model = central.get("gemini_model", "gemini-2.5-flash")
+            elif llm_provider in {"anthropic", "claude"}:
+                llm_model = central.get("anthropic_model", "claude-3-5-haiku-latest")
+            else:
+                llm_model = central.get("model", "qwen2.5:14b")
+    except Exception:
+        pass
+
+    llm_status = "ok"
+    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or central.get("gemini_api_key")
+    if llm_provider == "gemini" and not gemini_key:
+        llm_status = "error"
+    else:
+        conn, _ = open_db_readonly(llm_db_path())
+        if conn:
+            try:
+                cur = conn.execute(
+                    "SELECT rationale FROM llm_decisions ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row and row["rationale"] and ("401" in row["rationale"] or "LLM failed" in row["rationale"]):
+                    llm_status = "error"
+            except Exception:
+                pass
+            finally:
+                conn.close()
 
     # ── Health report ─────────────────────────────────────────────────────
     health_report = read_json(data_path("health_report_latest.json"), {})
@@ -572,7 +679,10 @@ def api_system():
             "budget":     tavily_budget,
             "pct":        tavily_pct,
         },
-        "anthropic_status": anthropic_status,
+        "llm_provider":     llm_provider,
+        "llm_model":        llm_model,
+        "llm_status":       llm_status,
+        "anthropic_status": llm_status,
         "uptime_seconds":   get_uptime(),
         "log_tail":         log_lines,
         "health_report":    health_report,
@@ -608,15 +718,7 @@ def api_health():
     return json_response(report)
 
 
-# ── /api/equity ──────────────────────────────────────────────────────────────
 
-@app.route("/api/equity")
-def api_equity():
-    """Return last 100 equity snapshots for the portfolio chart."""
-    snapshots = read_json(data_path("equity_snapshots.json"), [])
-    if not isinstance(snapshots, list):
-        snapshots = []
-    return json_response(snapshots[-100:])
 
 
 # ── /api/control/pause/<bot> ─────────────────────────────────────────────────
@@ -628,7 +730,8 @@ def api_pause(bot_name: str):
         return json_response({})
     if bot_name not in BOTS:
         return json_response({"ok": False, "error": f"Unknown bot: {bot_name}"}, 400)
-    signal = {"action": "pause", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signal = {"command": "pause", "action": "pause", "timestamp": datetime.now(timezone.utc).isoformat()}
+    write_json(data_path(f"{bot_name}_signal.json"), signal)
     write_json(data_path(f"{bot_name}_pause_signal.json"), signal)
     return json_response({"ok": True, "bot": bot_name, "action": "pause"})
 
@@ -642,7 +745,8 @@ def api_resume(bot_name: str):
         return json_response({})
     if bot_name not in BOTS:
         return json_response({"ok": False, "error": f"Unknown bot: {bot_name}"}, 400)
-    signal = {"action": "resume", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signal = {"command": "resume", "action": "resume", "timestamp": datetime.now(timezone.utc).isoformat()}
+    write_json(data_path(f"{bot_name}_signal.json"), signal)
     write_json(data_path(f"{bot_name}_pause_signal.json"), signal)
     return json_response({"ok": True, "bot": bot_name, "action": "resume"})
 

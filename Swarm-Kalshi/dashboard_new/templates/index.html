@@ -14,6 +14,7 @@
   <div class="topbar-logo">KALSHI <span>SWARM</span></div>
   <div class="tab-strip">
     <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="learning">Learning Radar</button>
     <button class="tab-btn" data-tab="llm">LLM Intelligence</button>
     <button class="tab-btn" data-tab="trades">Trades</button>
     <button class="tab-btn" data-tab="risk">Risk</button>
@@ -61,6 +62,124 @@
     <!-- Stats row -->
     <div class="stat-row section-gap" id="ov-stats-row">
       <!-- Rendered by JS -->
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     TAB: LEARNING & ADAPTATION RADAR
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-learning">
+  <div class="content">
+
+    <!-- Learning Hero Card -->
+    <div class="card section-gap" style="border-left: 4px solid var(--accent, #6366f1); background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(15,23,42,0.6) 100%);">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+        <div>
+          <div style="font-size:0.8rem; text-transform:uppercase; letter-spacing:1px; color:#818cf8; font-weight:600;">System Learning Status</div>
+          <div style="font-size:1.6rem; font-weight:700; margin-top:0.25rem; display:flex; align-items:center; gap:0.75rem;">
+            <span id="learn-verdict-badge" class="badge badge-info">CALIBRATING</span>
+            <span id="learn-stage-title" style="font-size:1.1rem; color:var(--text, #f8fafc); font-weight:500;">Confidence & Strategy Calibration</span>
+          </div>
+          <div id="learn-status-msg" style="color:var(--text-muted, #94a3b8); margin-top:0.35rem; font-size:0.9rem;">
+            Analyzing trade history to measure confidence calibration, weight recalibrations, and category edge.
+          </div>
+        </div>
+        <div style="display:flex; gap:1.5rem; text-align:right;">
+          <div>
+            <div style="font-size:0.75rem; color:#94a3b8;">ECE (Error)</div>
+            <div id="learn-ece-val" style="font-size:1.25rem; font-weight:700; color:#f43f5e;">--%</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; color:#94a3b8;">Brier Score</div>
+            <div id="learn-brier-val" style="font-size:1.25rem; font-weight:700; color:#38bdf8;">--</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; color:#94a3b8;">Recalibrations</div>
+            <div id="learn-recalib-count" style="font-size:1.25rem; font-weight:700; color:#a855f7;">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap:1.25rem;" class="section-gap">
+      <!-- Calibration Curve Chart -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+          <div class="card-title">Confidence Calibration Curve</div>
+          <span style="font-size:0.75rem; color:#94a3b8;">Observed vs Ideal (45°)</span>
+        </div>
+        <div class="chart-container" style="height:260px;">
+          <canvas id="calibration-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Rolling Win Rate Chart -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+          <div class="card-title">Rolling Win Rate Trajectory</div>
+          <span style="font-size:0.75rem; color:#94a3b8;">Window: 10 Trades</span>
+        </div>
+        <div class="chart-container" style="height:260px;">
+          <canvas id="learning-trajectory-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostic Tables Row -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap:1.25rem;" class="section-gap">
+      <!-- Confidence Bucket Table -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:0.75rem;">Confidence Buckets & Bias</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Confidence Bucket</th>
+                <th>Trades</th>
+                <th>Wins</th>
+                <th>Observed Win%</th>
+                <th>Calibration Error</th>
+              </tr>
+            </thead>
+            <tbody id="learn-buckets-tbody">
+              <tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem;">Loading calibration...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Category Edge & Multipliers Table -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:0.75rem;">Category Specialization & Multipliers</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Trades</th>
+                <th>Wins</th>
+                <th>Win Rate</th>
+                <th>Multiplier</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="learn-categories-tbody">
+              <tr><td colspan="6" class="text-muted" style="text-align:center;padding:1rem;">Loading categories...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature Weights & LLM Alpha Row -->
+    <div class="card section-gap">
+      <div class="card-title" style="margin-bottom:0.75rem;">Dynamic Feature Weights & LLM Filter Alpha</div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:1.5rem;" id="learn-weights-llm-grid">
+        <!-- Rendered by JS -->
+      </div>
     </div>
 
   </div>
@@ -302,6 +421,38 @@
       <pre class="code-block mt-2" id="admin-vacuum-result" style="max-height:200px"></pre>
     </div>
 
+  </div>
+</div>
+
+<!-- ── LLM Decision Detail Modal ──────────────────────────── -->
+<div id="llm-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-ticker">Trade Decision Detail</div>
+      <button class="modal-close" id="modal-close-btn">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-meta-grid">
+        <div class="modal-meta-item">
+          <span class="meta-label">Bot:</span>
+          <span id="modal-bot" class="meta-value">—</span>
+        </div>
+        <div class="modal-meta-item">
+          <span class="meta-label">Decision:</span>
+          <span id="modal-decision" class="meta-value">—</span>
+        </div>
+        <div class="modal-meta-item">
+          <span class="meta-label">Confidence:</span>
+          <span id="modal-confidence" class="meta-value">—</span>
+        </div>
+        <div class="modal-meta-item">
+          <span class="meta-label">Timestamp:</span>
+          <span id="modal-timestamp" class="meta-value">—</span>
+        </div>
+      </div>
+      <div class="modal-section-title">Gemini 2.5 Flash Rationale & Macro Analysis:</div>
+      <div class="modal-rationale-box" id="modal-rationale">—</div>
+    </div>
   </div>
 </div>
 

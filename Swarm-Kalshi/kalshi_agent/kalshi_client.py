@@ -451,6 +451,28 @@ class KalshiClient:
     def get_market_orderbook(self, ticker: str) -> Dict:
         """Retrieve the current orderbook for a market (unauthenticated)."""
         data = self._get(f"/markets/{ticker}/orderbook", authenticated=False)
+
+        # New Kalshi API format: orderbook_fp with dollar-string prices
+        if "orderbook_fp" in data:
+            fp = data["orderbook_fp"]
+
+            def _parse_levels(raw):
+                result = []
+                for entry in (raw or []):
+                    try:
+                        price_cents = round(float(entry[0]) * 100)
+                        qty = float(entry[1])
+                        result.append([price_cents, qty])
+                    except (ValueError, TypeError, IndexError):
+                        pass
+                return result
+
+            return {
+                "yes": _parse_levels(fp.get("yes_dollars") or []),
+                "no": _parse_levels(fp.get("no_dollars") or []),
+            }
+
+        # Legacy format fallback
         return data.get("orderbook", data)
 
     def get_trades(

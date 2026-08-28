@@ -49,12 +49,15 @@ class CentralLLMController:
 
     DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": True,
-        "provider": "anthropic",
+        "provider": "gemini",
+        "gemini_model": "gemini-2.5-flash",
+        "gemini_api_key": "",
+        "gemini_search_grounding": True,
         "ollama_base_url": "http://127.0.0.1:11434",
         "anthropic_api_url": "https://api.anthropic.com/v1/messages",
         "anthropic_api_key": "",
         "anthropic_model": "claude-3-5-haiku-latest",
-        "model": "qwen2.5:14b",
+        "model": "gemini-2.5-flash",
         "timeout_seconds": 20,
         "min_approved_confidence": 55.0,
         # Rejects are fail-safe by default (no weak-reject auto-override).
@@ -116,7 +119,26 @@ class CentralLLMController:
         quant scoring on every trade.
         Returns True if the key is valid, False otherwise.
         """
-        if not self._enabled or self._provider != "anthropic":
+        if not self._enabled:
+            return True
+        if self._provider in {"gemini", "google"}:
+            api_key = str(self.cfg.get("gemini_api_key") or "").strip() or str(
+                os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+            ).strip()
+            if not api_key or api_key in ("YOUR_REAL_KEY_HERE", ""):
+                logger.error("CRITICAL: Gemini API key is missing. Set GEMINI_API_KEY in .env.")
+                return False
+            try:
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                model = str(self.cfg.get("gemini_model") or "gemini-2.5-flash")
+                client.models.generate_content(model=model, contents="ping")
+                logger.info("Central LLM: Gemini API key validated OK (model=%s).", model)
+                return True
+            except Exception as exc:
+                logger.error("CRITICAL: Gemini API key validation failed: %s", exc)
+                return False
+        if self._provider != "anthropic":
             return True
         api_key = str(self.cfg.get("anthropic_api_key") or "").strip() or str(
             os.environ.get("ANTHROPIC_API_KEY", "")
@@ -229,6 +251,23 @@ class CentralLLMController:
                 red_flags=[],
             )
 
+        # Auto-approve high-confidence signals without burning LLM credits.
+        # The quant engine's orderbook-derived edge is sufficient at this threshold.
+        auto_threshold = float(self.cfg.get("auto_approve_confidence_threshold", 0.0))
+        quant_conf = float(trade_request.get("quant_confidence", 0.0))
+        if auto_threshold > 0 and quant_conf >= auto_threshold:
+            logger.info(
+                "Auto-approved %s (quant_conf=%.1f >= threshold=%.1f, skipping LLM).",
+                trade_request.get("ticker", "?"), quant_conf, auto_threshold,
+            )
+            return ApprovalDecision(
+                decision="approve",
+                confidence=quant_conf,
+                size_multiplier=float(self.cfg.get("default_size_multiplier", 1.0)),
+                rationale=f"Auto-approved: quant confidence {quant_conf:.1f}% >= {auto_threshold:.0f}% threshold.",
+                red_flags=[],
+            )
+
         try:
             llm_result = self._evaluate_with_llm(bot_name, trade_request)
             decision = self._normalize_result(llm_result, trade_request)
@@ -275,6 +314,8 @@ class CentralLLMController:
             return self._query_ollama(bot_name, trade_request)
         if self._provider in {"anthropic", "claude"}:
             return self._query_anthropic(bot_name, trade_request)
+        if self._provider in {"gemini", "google"}:
+            return self._query_gemini(bot_name, trade_request)
         raise RuntimeError(f"Unsupported central LLM provider: {self._provider}")
 
     def _query_ollama(self, bot_name: str, trade_request: Dict[str, Any]) -> Dict[str, Any]:
@@ -348,15 +389,32 @@ class CentralLLMController:
 
         prompt = self._build_prompt(bot_name, trade_request)
         system_prompt = (
-            "You are the central risk controller for a multi-bot trading swarm. "
-            "Return ONLY valid JSON with keys: decision, confidence, size_multiplier, rationale, red_flags. "
-            "decision must be 'approve' or 'reject'. confidence is 0-100. "
-            "size_multiplier is 0.0-1.5. red_flags is an array of short strings."
+            "You are the risk gatekeeper for a Kalshi prediction market trading swarm. "
+            "Your job is to catch genuinely bad trades — not to block every trade out of caution.\n\n"
+            "KALSHI MECHANICS:\n"
+            "- A YES contract pays 100¢ if the event happens, 0¢ if not.\n"
+            "- A NO contract pays 100¢ if the event does NOT happen, 0¢ if it does.\n"
+            "- When buying NO at price X cents: you risk X cents to gain (100-X) cents.\n"
+            "- The quant engine has already computed orderbook-derived edge and confidence scores.\n\n"
+            "APPROVAL CRITERIA — approve when ALL of these hold:\n"
+            "1. Quant confidence >= 65% (the model found real orderbook edge)\n"
+            "2. No critical red flags (no data corruption, no API errors, no impossible prices)\n"
+            "3. Entry price in reasonable range (20-85¢)\n"
+            "4. Absence of research is NOT a rejection reason — the quant signal alone is sufficient edge.\n\n"
+            "REJECT only when:\n"
+            "- Entry price is outside 10-90¢ range\n"
+            "- Spread is so wide the fill price would eliminate all edge\n"
+            "- Clear data corruption or impossibly large confidence delta\n"
+            "- Market is already resolved or near-instant expiry\n\n"
+            "When in doubt with quant_confidence >= 65%, APPROVE with reduced size_multiplier (0.5-0.8).\n\n"
+            "Return ONLY valid JSON: "
+            "{\"decision\": \"approve\"|\"reject\", \"confidence\": 0-100, "
+            "\"size_multiplier\": 0.0-1.5, \"rationale\": \"...\", \"red_flags\": [\"...\"]}"
         )
         payload = json.dumps(
             {
                 "model": model,
-                "max_tokens": 350,
+                "max_tokens": 600,
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": prompt}],
@@ -400,6 +458,71 @@ class CentralLLMController:
             return json.loads(content)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Anthropic returned non-JSON content: {content[:200]}") from exc
+
+    def _query_gemini(self, bot_name: str, trade_request: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError as err:
+            raise RuntimeError("google-genai package is required for Gemini provider. Install with 'pip install google-genai'.") from err
+
+        model = str(
+            self.cfg.get("gemini_model")
+            or self.cfg.get("model")
+            or "gemini-2.5-flash"
+        )
+        api_key = str(self.cfg.get("gemini_api_key") or "").strip() or str(
+            os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+        ).strip()
+        if not api_key:
+            raise RuntimeError("Gemini API key missing (set central_llm.gemini_api_key or GEMINI_API_KEY).")
+
+        client = genai.Client(api_key=api_key)
+        prompt = self._build_prompt(bot_name, trade_request)
+        system_prompt = (
+            "You are the risk and probability gatekeeper for a Kalshi prediction market trading swarm. "
+            "Your job is to evaluate market contracts, check real-world facts, and decide whether a trade has positive edge.\n\n"
+            "KALSHI MECHANICS:\n"
+            "- A YES contract pays 100¢ if the event happens, 0¢ if not.\n"
+            "- A NO contract pays 100¢ if the event does NOT happen, 0¢ if it does.\n"
+            "- When buying NO at price X cents: you risk X cents to gain (100-X) cents.\n\n"
+            "APPROVAL CRITERIA — approve when ALL of these hold:\n"
+            "1. Quant confidence >= 65% (the model found real orderbook edge)\n"
+            "2. No critical red flags (no data corruption, no API errors, no impossible prices)\n"
+            "3. Entry price in reasonable range (20-85¢)\n"
+            "4. Absence of research is NOT a rejection reason — the quant signal alone is sufficient edge.\n\n"
+            "REJECT only when:\n"
+            "- Entry price is outside 10-90¢ range\n"
+            "- Spread is so wide the fill price would eliminate all edge\n"
+            "- Clear data corruption or impossibly large confidence delta\n"
+            "- Market is already resolved or near-instant expiry\n\n"
+            "Return ONLY valid JSON matching this schema:\n"
+            "{\"decision\": \"approve\"|\"reject\", \"confidence\": 0-100, \"size_multiplier\": 0.0-1.5, \"rationale\": \"...\", \"red_flags\": [\"...\"]}"
+        )
+
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.1,
+                response_mime_type="application/json",
+            )
+        )
+        content = (response.text or "").strip()
+        if not content:
+            raise RuntimeError("Gemini response missing text content.")
+
+        if content.startswith("```"):
+            parts = content.split("```")
+            content = parts[1] if len(parts) > 1 else content
+            if content.lstrip().startswith("json"):
+                content = content.lstrip()[4:].strip()
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Gemini returned non-JSON content: {content[:200]}") from exc
 
     # ------------------------------------------------------------------
     # Decision normalization and logging
@@ -917,6 +1040,13 @@ class CentralLLMController:
         }
         clean_request = {k: v for k, v in trade_request.items() if k not in _RESEARCH_KEYS}
 
+        # Inject implied probability fields for NO trades so LLM doesn't have to do mental math
+        if str(trade_request.get("side", "")).lower() == "no":
+            price = int(trade_request.get("suggested_price", 0) or 0)
+            implied_yes_pct = 100 - price
+            clean_request["implied_yes_probability_pct"] = implied_yes_pct
+            clean_request["no_loss_to_gain_ratio"] = f"{price}:{100 - price}"
+
         return (
             f"Bot name: {bot_name}\n"
             f"Trade request: {json.dumps(clean_request, ensure_ascii=True)}\n"
@@ -924,14 +1054,21 @@ class CentralLLMController:
             f"Recent realized performance profile: {json.dumps(feedback, ensure_ascii=True)}\n\n"
             f"Category feedback hints: {json.dumps(category_hints, ensure_ascii=True)}\n"
             f"{research_block}\n"
-            "Policy:\n"
-            "1) Protect capital first.\n"
-            "2) Reject trades with weak confidence or obvious concentration risk.\n"
-            "3) Use size_multiplier < 1.0 when risk is elevated.\n"
-            "4) Follow cold/hot category hints unless current request has very strong evidence.\n"
-            "5) Keep rationale concise and concrete.\n"
-            "6) If evidence_quality is present and < 0.5, reduce size_multiplier by at least 0.2 "
-            "and flag 'weak_evidence' in red_flags.\n"
+            "Policy (apply in order — first violated rule determines outcome):\n"
+            "1) CAPITAL PROTECTION IS PARAMOUNT. When in doubt, reject.\n"
+            "2) For NO trades: check implied_yes_probability_pct. The market says YES has that % chance. "
+            "You need strong evidence YES is truly below that threshold. If no_loss_to_gain_ratio shows "
+            "risk >> reward (e.g. 85:15), reject unless evidence is overwhelming.\n"
+            "3) For YES trades: demand evidence that YES probability genuinely exceeds the ask price.\n"
+            "4) If research evidence is absent or evidence_quality < 0.4, treat as a negative signal — "
+            "set size_multiplier <= 0.5 or reject. No research = no edge.\n"
+            "5) If the performance profile shows the bot is cold (low win rate, negative avg_pnl), "
+            "apply extra skepticism — the quant model is not working right now.\n"
+            "6) Approve only if you can write a SPECIFIC, CONCRETE rationale explaining why this "
+            "trade wins. 'Looks reasonable' or 'no red flags' is not a rationale — it is a reject.\n"
+            "7) red_flags examples: high_no_price, near_certainty_trap, weak_evidence, "
+            "no_research, bad_loss_ratio, negative_performance_streak, low_volume, "
+            "wide_spread, longshot, cold_category.\n"
         )
 
     def _feedback_profile(self, bot_name: str) -> Dict[str, Any]:
@@ -969,7 +1106,7 @@ class CentralLLMController:
             }
 
         samples = len(rows)
-        min_bootstrap = int(self.cfg.get("adaptive_bootstrap_min_samples", 15))
+        min_bootstrap = int(self.cfg.get("adaptive_bootstrap_min_samples", self.cfg.get("adaptive_min_samples", 8)))
         if samples < min_bootstrap:
             return {
                 "status": "bootstrapping",

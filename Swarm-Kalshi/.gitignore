@@ -21,6 +21,8 @@ keys/
 !keys/.gitkeep
 .env
 .env.*
+.claude/settings.local.json
+*.local.json
 
 # IDE
 .vscode/
@@ -50,3 +52,8 @@ config/*.save
 config/*.activity*
 reports/
 openclaw-office/
+
+# License keys — never commit
+license.key
+keygen.py
+temp_test/

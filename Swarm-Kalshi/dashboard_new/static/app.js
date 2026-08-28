@@ -12,9 +12,12 @@ const State = {
   tradeFilter: 'all',
   configEditMode: false,
   equityChart: null,
+  calibrationChart: null,
+  trajectoryChart: null,
   lastRefresh: null,
   data: {
     status: null,
+    learning: null,
     llm: null,
     trades: null,
     risk: null,
@@ -36,6 +39,14 @@ function fmtPct(val, decimals = 1) {
   if (val == null) return '—';
   const n = parseFloat(val);
   return isNaN(n) ? '—' : n.toFixed(decimals) + '%';
+}
+
+function fmtConf(val, decimals = 1) {
+  if (val == null) return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  const pct = (n <= 1.0 && n > 0.0) ? n * 100 : n;
+  return pct.toFixed(decimals) + '%';
 }
 
 function fmtUptime(sec) {
@@ -109,8 +120,9 @@ async function apiFetch(url, options = {}) {
 
 // ── Data loading ───────────────────────────────────────────
 async function loadAll() {
-  const [status, llm, trades, risk, system, equity, config] = await Promise.allSettled([
+  const [status, learning, llm, trades, risk, system, equity, config] = await Promise.allSettled([
     apiFetch('/api/status'),
+    apiFetch('/api/learning'),
     apiFetch('/api/llm'),
     apiFetch('/api/trades'),
     apiFetch('/api/risk'),
@@ -119,13 +131,14 @@ async function loadAll() {
     apiFetch('/api/config'),
   ]);
 
-  State.data.status = status.status === 'fulfilled' ? status.value : null;
-  State.data.llm    = llm.status    === 'fulfilled' ? llm.value    : null;
-  State.data.trades = trades.status === 'fulfilled' ? trades.value : null;
-  State.data.risk   = risk.status   === 'fulfilled' ? risk.value   : null;
-  State.data.system = system.status === 'fulfilled' ? system.value : null;
-  State.data.equity = equity.status === 'fulfilled' ? equity.value : null;
-  State.data.config = config.status === 'fulfilled' ? config.value : null;
+  State.data.status   = status.status   === 'fulfilled' ? status.value   : null;
+  State.data.learning = learning.status === 'fulfilled' ? learning.value : null;
+  State.data.llm      = llm.status      === 'fulfilled' ? llm.value      : null;
+  State.data.trades   = trades.status   === 'fulfilled' ? trades.value   : null;
+  State.data.risk     = risk.status     === 'fulfilled' ? risk.value     : null;
+  State.data.system   = system.status   === 'fulfilled' ? system.value   : null;
+  State.data.equity   = equity.status   === 'fulfilled' ? equity.value   : null;
+  State.data.config   = config.status   === 'fulfilled' ? config.value   : null;
 
   State.lastRefresh = new Date();
   updateRefreshBadge();
@@ -143,6 +156,7 @@ function updateRefreshBadge() {
 function renderActiveTab() {
   switch (State.activeTab) {
     case 'overview': renderOverview(); break;
+    case 'learning': renderLearning(); break;
     case 'llm':      renderLLM();      break;
     case 'trades':   renderTrades();   break;
     case 'risk':     renderRisk();     break;
@@ -348,6 +362,306 @@ function renderEquityChart() {
   });
 }
 
+// ── Learning & Adaptation Radar ─────────────────────────────
+function renderLearning() {
+  const data = State.data.learning;
+  if (!data) return;
+
+  const sc = data.scorecard ?? {};
+  const cal = data.calibration ?? {};
+  const cats = data.categories ?? {};
+  const weights = data.weights ?? {};
+  const llm = data.llm_intelligence ?? {};
+  const rolling = data.rolling_win_rates ?? [];
+
+  // 1. Hero scorecard
+  const badgeEl = document.getElementById('learn-verdict-badge');
+  const stageEl = document.getElementById('learn-stage-title');
+  const msgEl = document.getElementById('learn-status-msg');
+  const eceEl = document.getElementById('learn-ece-val');
+  const brierEl = document.getElementById('learn-brier-val');
+  const recalibEl = document.getElementById('learn-recalib-count');
+
+  if (badgeEl) {
+    const isL = sc.is_learning || 'CALIBRATING';
+    badgeEl.textContent = isL;
+    badgeEl.className = 'badge ' + (isL === 'YES' ? 'badge-success' : (isL === 'CALIBRATING' ? 'badge-info' : 'badge-warning'));
+  }
+  if (stageEl) stageEl.textContent = sc.stage || 'Data Collection & Calibration';
+  if (msgEl) msgEl.textContent = sc.status_message || 'Analyzing confidence calibration and strategy evolution.';
+  if (eceEl) {
+    const ece = cal.expected_calibration_error ?? 0;
+    eceEl.textContent = fmtPct(ece);
+    eceEl.style.color = ece < 15 ? '#34d399' : (ece < 35 ? '#fbbf24' : '#f43f5e');
+  }
+  if (brierEl) {
+    const brier = cal.brier_score ?? 0;
+    brierEl.textContent = brier.toFixed(4);
+    brierEl.style.color = brier < 0.20 ? '#34d399' : (brier < 0.35 ? '#38bdf8' : '#fbbf24');
+  }
+  if (recalibEl) {
+    recalibEl.textContent = weights.total_recalibrations ?? 0;
+  }
+
+  // 2. Render Charts
+  renderCalibrationChart(cal);
+  renderTrajectoryChart(rolling);
+
+  // 3. Confidence Buckets Table
+  const bucketsTbody = document.getElementById('learn-buckets-tbody');
+  if (bucketsTbody) {
+    const buckets = cal.buckets ?? [];
+    if (buckets.length === 0) {
+      bucketsTbody.innerHTML = '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem;">No calibration data yet.</td></tr>';
+    } else {
+      bucketsTbody.innerHTML = buckets.map(b => {
+        const err = b.calibration_error ?? 0;
+        const errCls = Math.abs(err) <= 10 ? 'green' : (Math.abs(err) <= 25 ? 'orange' : 'red');
+        return `
+          <tr>
+            <td><strong>${esc(b.label)}</strong></td>
+            <td>${b.trades}</td>
+            <td>${b.wins}</td>
+            <td>${fmtPct(b.observed_win_rate)}</td>
+            <td class="${errCls}">${err > 0 ? '+' : ''}${fmtPct(err)}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+
+  // 4. Categories Specialization Table
+  const catsTbody = document.getElementById('learn-categories-tbody');
+  if (catsTbody) {
+    const categoryList = cats.categories ?? [];
+    if (categoryList.length === 0) {
+      catsTbody.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:1rem;">No category data yet.</td></tr>';
+    } else {
+      catsTbody.innerHTML = categoryList.slice(0, 10).map(c => {
+        const st = c.status;
+        const stBadge = st === 'hot'
+          ? '<span class="badge badge-success">🔥 Hot</span>'
+          : (st === 'cold' ? '<span class="badge badge-danger">❄️ Cold</span>' : '<span class="badge badge-secondary">⚖️ Neutral</span>');
+        const pnlStr = fmt$(c.pnl_cents);
+        const pnlCls = c.pnl_cents >= 0 ? 'green' : 'red';
+        return `
+          <tr>
+            <td><strong>${esc(c.category)}</strong></td>
+            <td>${c.trades}</td>
+            <td>${c.wins}</td>
+            <td>${fmtPct(c.win_rate_pct)}</td>
+            <td><strong>${c.multiplier.toFixed(2)}x</strong></td>
+            <td>${stBadge}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+
+  // 5. Dynamic Feature Weights & LLM Alpha Grid
+  const weightsGrid = document.getElementById('learn-weights-llm-grid');
+  if (weightsGrid) {
+    const latestBots = weights.latest_weights_by_bot ?? {};
+    const botCards = Object.entries(latestBots).map(([bot, wb]) => `
+      <div style="background:rgba(255,255,255,0.03); padding:0.85rem; border-radius:6px; border:1px solid rgba(255,255,255,0.06);">
+        <div style="font-weight:600; font-size:0.85rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.5rem;">${esc(bot)} Weights (${wb.recalibrations} updates)</div>
+        <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.25rem;">
+          <div style="display:flex; justify-content:space-between;"><span>Edge</span><strong>${(wb.edge*100).toFixed(1)}%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Liquidity</span><strong>${(wb.liquidity*100).toFixed(1)}%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Volume</span><strong>${(wb.volume*100).toFixed(1)}%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Timing</span><strong>${(wb.timing*100).toFixed(1)}%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Momentum</span><strong>${(wb.momentum*100).toFixed(1)}%</strong></div>
+        </div>
+      </div>
+    `).join('');
+
+    const defaultWeightsCard = Object.keys(latestBots).length === 0 ? `
+      <div style="background:rgba(255,255,255,0.03); padding:0.85rem; border-radius:6px; border:1px solid rgba(255,255,255,0.06);">
+        <div style="font-weight:600; font-size:0.85rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.5rem;">Baseline Feature Weights</div>
+        <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.25rem;">
+          <div style="display:flex; justify-content:space-between;"><span>Edge</span><strong>20.0%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Liquidity</span><strong>20.0%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Volume</span><strong>20.0%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Timing</span><strong>20.0%</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Momentum</span><strong>20.0%</strong></div>
+        </div>
+        <div style="font-size:0.75rem; color:#64748b; margin-top:0.5rem;">Recalibrates automatically every 25 settled trades.</div>
+      </div>
+    ` : '';
+
+    const topFlags = (llm.top_red_flags ?? []).slice(0, 4).map(rf => `
+      <div style="display:flex; justify-content:space-between; font-size:0.8rem; padding:0.15rem 0;">
+        <span style="color:#f43f5e;">• ${esc(rf.flag)}</span>
+        <strong style="color:#94a3b8;">${rf.count}x</strong>
+      </div>
+    `).join('') || '<div style="color:#64748b; font-size:0.8rem;">No rejections flagged yet.</div>';
+
+    weightsGrid.innerHTML = `
+      ${botCards || defaultWeightsCard}
+      <div style="background:rgba(255,255,255,0.03); padding:0.85rem; border-radius:6px; border:1px solid rgba(255,255,255,0.06);">
+        <div style="font-weight:600; font-size:0.85rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.5rem;">Central LLM Filtering Impact</div>
+        <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.75rem;">
+          <div style="display:flex; justify-content:space-between;"><span>Total Decisions</span><strong>${llm.total_decisions ?? 0}</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Approved Rate</span><strong style="color:#34d399;">${fmtPct(llm.approval_rate_pct)}</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Filtered Out</span><strong style="color:#f43f5e;">${llm.rejected ?? 0} trades</strong></div>
+        </div>
+        <div style="font-size:0.75rem; font-weight:600; color:#818cf8; margin-bottom:0.25rem;">Top Rejection Red Flags:</div>
+        ${topFlags}
+      </div>
+    `;
+  }
+}
+
+function renderCalibrationChart(cal) {
+  const canvas = document.getElementById('calibration-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const buckets = cal.buckets ?? [];
+  const labels = buckets.map(b => b.label);
+  const observed = buckets.map(b => b.observed_win_rate ?? 0);
+  const ideal = buckets.map(b => b.midpoint ?? 50);
+
+  if (State.calibrationChart) {
+    State.calibrationChart.data.labels = labels;
+    State.calibrationChart.data.datasets[0].data = observed;
+    State.calibrationChart.data.datasets[1].data = ideal;
+    State.calibrationChart.update('none');
+    return;
+  }
+
+  State.calibrationChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Observed Win Rate (%)',
+          data: observed,
+          backgroundColor: 'rgba(99, 102, 241, 0.75)',
+          borderColor: '#818cf8',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+        {
+          type: 'line',
+          label: 'Ideal Calibration (45°)',
+          data: ideal,
+          borderColor: '#94a3b8',
+          borderDash: [5, 5],
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: '#94a3b8',
+          fill: false,
+        }
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${parseFloat(ctx.raw).toFixed(1)}%`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { size: 10 } },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            color: '#8b949e',
+            font: { size: 10 },
+            callback: v => v + '%',
+          },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+      },
+    }
+  });
+}
+
+function renderTrajectoryChart(rolling) {
+  const canvas = document.getElementById('learning-trajectory-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const points = Array.isArray(rolling) ? rolling : [];
+  const labels = points.map((p, idx) => `T#${p.trade_index || (idx+1)}`);
+  const values = points.map(p => p.rolling_win_rate ?? 0);
+  const targetLine = points.map(() => 55);
+
+  if (State.trajectoryChart) {
+    State.trajectoryChart.data.labels = labels;
+    State.trajectoryChart.data.datasets[0].data = values;
+    State.trajectoryChart.data.datasets[1].data = targetLine;
+    State.trajectoryChart.update('none');
+    return;
+  }
+
+  State.trajectoryChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Rolling Win Rate (%)',
+          data: values,
+          borderColor: '#38bdf8',
+          backgroundColor: 'rgba(56, 189, 248, 0.1)',
+          borderWidth: 2,
+          pointRadius: points.length > 30 ? 0 : 3,
+          fill: true,
+          tension: 0.3,
+        },
+        {
+          label: 'Target (55%)',
+          data: targetLine,
+          borderColor: '#34d399',
+          borderDash: [4, 4],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+        }
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${parseFloat(ctx.raw).toFixed(1)}%`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { size: 10 }, maxTicksLimit: 10 },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            color: '#8b949e',
+            font: { size: 10 },
+            callback: v => v + '%',
+          },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+      },
+    }
+  });
+}
+
 // ── LLM Intelligence ───────────────────────────────────────
 function renderLLM() {
   const d = State.data.llm;
@@ -435,7 +749,7 @@ function renderLLM() {
     if (recent.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">No recent decisions</td></tr>';
     } else {
-      tbody.innerHTML = recent.map(r => {
+      tbody.innerHTML = recent.map((r, idx) => {
         const dec = (r.decision || '').toLowerCase();
         const approved = dec.includes('approv');
         const outcomeStr = r.outcome || '';
@@ -447,16 +761,34 @@ function renderLLM() {
           ? badge(esc(outcomeStr), 'grey')
           : '<span class="text-muted">—</span>';
 
-        return `<tr>
+        return `<tr data-llm-idx="${idx}" title="Click to view full Gemini 2.5 Flash rationale">
           <td class="td-mono td-muted">${fmtDateTime(r.timestamp)}</td>
-          <td class="td-cap">${esc(r.bot)}</td>
-          <td class="td-mono">${esc(r.ticker)}</td>
+          <td class="td-cap">${badge(esc(r.bot), 'blue')}</td>
+          <td class="td-mono fw-bold">${esc(r.ticker)}</td>
           <td>${approved ? badge('approved','green') : badge('rejected','red')}</td>
-          <td>${r.confidence != null ? fmtPct(parseFloat(r.confidence) * 100) : '—'}</td>
+          <td>${r.confidence != null ? fmtConf(r.confidence) : '—'}</td>
           <td>${outcomeEl}</td>
-          <td class="text-muted" style="max-width:200px;font-size:0.75rem">${esc((r.rationale||'').slice(0,100))}${(r.rationale||'').length > 100 ? '…' : ''}</td>
+          <td class="text-muted" style="max-width:260px;font-size:0.75rem">${esc((r.rationale||'').slice(0,110))}${(r.rationale||'').length > 110 ? '…' : ''}</td>
         </tr>`;
       }).join('');
+
+      tbody.querySelectorAll('tr[data-llm-idx]').forEach(row => {
+        row.addEventListener('click', () => {
+          const idx = parseInt(row.dataset.llmIdx, 10);
+          const item = recent[idx];
+          if (!item) return;
+          const modal = document.getElementById('llm-modal');
+          if (!modal) return;
+          document.getElementById('modal-ticker').textContent = item.ticker || 'Trade Decision';
+          document.getElementById('modal-bot').innerHTML = badge(item.bot || 'Unknown', 'blue');
+          const approved = (item.decision || '').toLowerCase().includes('approv');
+          document.getElementById('modal-decision').innerHTML = approved ? badge('APPROVED', 'green') : badge('REJECTED', 'red');
+          document.getElementById('modal-confidence').textContent = fmtConf(item.confidence);
+          document.getElementById('modal-timestamp').textContent = fmtDateTime(item.timestamp);
+          document.getElementById('modal-rationale').textContent = item.rationale || '(No detailed rationale provided)';
+          modal.style.display = 'flex';
+        });
+      });
     }
   }
 }
@@ -497,7 +829,7 @@ function renderTrades() {
       <td class="td-cap">${badge(esc(t.bot), 'blue')}</td>
       <td class="td-mono fw-bold">${esc(t.ticker)}</td>
       <td class="td-cap td-muted">${esc(t.side)}</td>
-      <td>${t.confidence != null ? fmtPct(parseFloat(t.confidence) * 100) : '—'}</td>
+      <td>${t.confidence != null ? fmtConf(t.confidence) : '—'}</td>
       <td>${outcomeEl}</td>
       <td>${pnlEl}</td>
     </tr>`;
@@ -610,11 +942,13 @@ function renderSystem() {
     `;
   }
 
-  // Anthropic status
+  // LLM Brain status
   const anthropicEl = document.getElementById('sys-anthropic');
   if (anthropicEl) {
-    const ok = sys.anthropic_status === 'ok';
-    anthropicEl.innerHTML = `Anthropic API: ${ok ? badge('OK','green') : badge('ERROR','red')}`;
+    const ok = (sys.llm_status === 'ok' || sys.anthropic_status === 'ok');
+    const providerName = sys.llm_provider ? (sys.llm_provider.charAt(0).toUpperCase() + sys.llm_provider.slice(1)) : 'Gemini';
+    const modelName = sys.llm_model ? ` (${sys.llm_model})` : '';
+    anthropicEl.innerHTML = `LLM Brain [${providerName}${modelName}]: ${ok ? badge('OK','green') : badge('ERROR','red')}`;
   }
 
   // Uptime
@@ -641,9 +975,26 @@ function renderSystem() {
       const checks = hr.checks ?? hr;
       if (typeof checks === 'object' && !Array.isArray(checks)) {
         const entries = Object.entries(checks);
-        healthEl.innerHTML = `<ul class="health-list">` + entries.map(([k,v]) => {
-          const ok = v === true || v === 'ok' || v === 'pass' || (typeof v === 'object' && v?.status === 'ok');
-          return `<li>${ok ? badge('OK','green') : badge('FAIL','red')} <span>${esc(k)}</span> ${typeof v === 'object' ? `<span class="text-muted">${esc(JSON.stringify(v))}</span>` : `<span class="text-muted">${esc(String(v))}</span>`}</li>`;
+        healthEl.innerHTML = `<ul class="health-list">` + entries.map(([k, v]) => {
+          let status = 'OK';
+          let details = '';
+          if (typeof v === 'object' && v !== null) {
+            status = (v.status || 'OK').toUpperCase();
+            details = v.details || (v.issues && v.issues.length ? v.issues.join('; ') : '');
+          } else {
+            status = String(v).toUpperCase();
+            details = status;
+          }
+
+          let badgeHtml = badge('OK', 'green');
+          if (status === 'WARNING' || status === 'WARN') {
+            badgeHtml = badge('WARN', 'yellow');
+          } else if (status === 'CRITICAL' || status === 'FAIL' || status === 'ERROR') {
+            badgeHtml = badge('FAIL', 'red');
+          }
+
+          const label = k.replace(/_/g, ' ').toUpperCase();
+          return `<li>${badgeHtml} <strong style="color:var(--text);font-size:0.82rem">${esc(label)}</strong> <span class="text-muted" style="font-size:0.8rem">${esc(details)}</span></li>`;
         }).join('') + `</ul>`;
       } else {
         healthEl.innerHTML = `<pre class="code-block" style="max-height:200px">${esc(JSON.stringify(hr, null, 2))}</pre>`;
@@ -862,10 +1213,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const killBtn = document.getElementById('kill-btn');
   if (killBtn) killBtn.addEventListener('click', killSwarm);
 
+  // Modal close handlers
+  const modal = document.getElementById('llm-modal');
+  const closeBtn = document.getElementById('modal-close-btn');
+  if (closeBtn && modal) {
+    closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.style.display = 'none';
+    });
+  }
+
   // Initial load
   switchTab('overview');
   loadAll();
 
-  // Auto-refresh every 15s
-  setInterval(loadAll, 15000);
+  // Fast real-time auto-refresh every 5s
+  setInterval(loadAll, 5000);
 });

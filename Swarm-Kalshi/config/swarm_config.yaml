@@ -1,8 +1,9 @@
 api:
   key_id: 7fd77201-97cc-411c-a09c-b6f88cfb78bd
   private_key_path: keys/kalshi-private.key
-  base_url: https://api.elections.kalshi.com/trade-api/v2
-  demo_mode: false
+  base_url: https://demo-api.kalshi.co/trade-api/v2
+  demo_mode: true
+
 swarm:
   unassigned_market_bot: vanguard
   global_daily_loss_limit_cents: 15000
@@ -36,25 +37,25 @@ auto_scale:
   demote_drawdown_above_pct: 10.0
 trading:
   default_order_type: limit
-  min_confidence_threshold: 65
+  min_confidence_threshold: 68
   min_edge_cents: 10
-  min_liquidity_cents: 1000
-  min_volume_24h: 50
+  min_liquidity_cents: 1500
+  min_volume_24h: 100
   min_hours_to_expiry: 2
-  max_hours_to_expiry: 720
-  max_position_pct: 0.07
+  max_hours_to_expiry: 240
+  max_position_pct: 0.04           # 4% max risk per trade for smooth curve
   max_open_positions: 3
   open_positions_scope: per_bot
-  max_trades_per_day: 999           # Real governors are max_open_positions + max_drawdown_pct
-  daily_loss_limit_cents: 99999
+  max_trades_per_day: 50
+  daily_loss_limit_cents: 2500     # $25.00 hard stop
   min_balance_cents: 500
-  max_drawdown_pct: 0.12
-  loss_streak_threshold: 5
+  max_drawdown_pct: 0.10           # 10% max drawdown
+  loss_streak_threshold: 4
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
-  max_signals_per_cycle: 10          # Process more opportunities per scan cycle
-  max_entry_price_cents: 65        # Data shows 20-60c range is profitable; 65c+ loses money
-  min_entry_price_cents: 20        # Avoid longshots below 20c — 11% win rate on these loses money
+  max_signals_per_cycle: 10
+  max_entry_price_cents: 60        # 22-60c high-win-rate sweet spot
+  min_entry_price_cents: 22        # Reject low-probability longshots
   market_scan_max_pages: 50
   scan_mode: recent_focus
   recent_trade_seed_pages: 3
@@ -69,11 +70,11 @@ trading:
   focus_max_hours_to_expiry: 240
   stale_trade_hours: 48
   exit_loss_threshold_cents: -20
-  auto_pause_on_consecutive_losses: 8
-  auto_pause_resume_hours: 24
+  auto_pause_on_consecutive_losses: 6
+  auto_pause_resume_hours: 12
 risk:
-  daily_loss_limit_cents: 99999
-  max_drawdown_pct: 0.12
+  daily_loss_limit_cents: 2500
+  max_drawdown_pct: 0.10
   drawdown_pause_cooldown_minutes: 60
   min_trades_before_drawdown: 5
   drawdown_auto_reset_peak_after_cooldown: true
@@ -81,15 +82,15 @@ risk:
   drawdown_cooldown_extend_minutes: 15
   drawdown_reentry_buffer_pct: 0.02
   risk_block_log_throttle_seconds: 30
-  loss_streak_threshold: 5
+  loss_streak_threshold: 4
   loss_streak_size_multiplier: 0.5
 learning:
   db_path: data/swarm_learning.db
   rolling_window: 50
   min_trades_for_review: 10
-  learning_rate: 0.05
-  decay_factor: 0.95
-  min_confidence_threshold: 65
+  learning_rate: 0.03
+  decay_factor: 0.96
+  min_confidence_threshold: 68
 human_behavior:
   action_delay_mean: 8.0
   action_delay_std: 3.0
@@ -103,13 +104,13 @@ human_behavior:
   trade_size_min_multiplier: 0.6
   trade_size_max_multiplier: 1.4
 mirofish:
-  enabled: true
-  api_url: https://mirofish.dracanus.app
-  api_key: mf-swarm-9x4kRpL2vQtN8jWz
+  enabled: false
+  api_url: ''
+  api_key: ''
   cache_ttl_seconds: 300
   timeout_seconds: 8
   min_confidence: 45
-  weight: 0.40
+  weight: 0.0
 external_signals:
   enabled: true
   cache_ttl_seconds: 300
@@ -124,9 +125,9 @@ external_signals:
   resolution_pattern_weight: 0.2
   cross_reference_weight: 0.15
 llm_advisor:
-  enabled: true
+  enabled: false
   api_key: ''
-  model: claude-haiku-4-5-20251001
+  model: gemini-2.5-flash
   max_tokens: 150
   temperature: 0.1
   pre_screen_threshold: 60
@@ -136,18 +137,20 @@ llm_advisor:
   max_calls_per_cycle: 5
 central_llm:
   enabled: true
-  provider: anthropic
+  provider: gemini
+  gemini_model: gemini-2.5-flash
+  gemini_api_key: ''
+  model: gemini-2.5-flash
   ollama_base_url: http://127.0.0.1:11434
   anthropic_api_url: https://api.anthropic.com/v1/messages
   anthropic_api_key: ''
-  anthropic_model: claude-haiku-4-5-20251001
-  model: qwen2.5:14b
+  anthropic_model: claude-3-5-haiku-latest
   timeout_seconds: 20
-  min_approved_confidence: 70
-  max_red_flags: 2
+  min_approved_confidence: 75
+  max_red_flags: 1
   default_size_multiplier: 1.0
   fail_open: false
-  allow_quant_fallback_on_error: true
+  allow_quant_fallback_on_error: false
   learning_enabled: true
   adaptive_window: 40
   adaptive_min_samples: 8
@@ -174,11 +177,11 @@ central_llm:
   db_path: data/central_llm_controller.db
 autonomous_mode:
   enabled: true
-  anthropic_only: true
+  anthropic_only: false
   require_llm_for_trade: false
   disable_local_llm_advisor: true
   llm_learning_enabled: true
-  lock_manual_controls: true
+  lock_manual_controls: false
 meta_learning:
   enabled: true
   min_confidence_to_apply: 0.7
@@ -208,15 +211,15 @@ prior_knowledge:
   blend_with_observed: true
 research:
   enabled: true
-  search_provider: duckduckgo
+  search_provider: gemini
   max_queries: 3
   max_sources: 4
   fetch_full_content: true
   content_fetch_top_n: 3
   source_timeout_secs: 15
   max_content_length: 8000
-  extraction_provider: anthropic
-  extraction_model: claude-haiku-4-5-20251001
+  extraction_provider: gemini
+  extraction_model: gemini-2.5-flash
   llm_max_tokens: 800
   extraction_api_key: ''
   primary_domains: {}
@@ -227,6 +230,9 @@ research:
   cache_ttl_hours: 24
   min_evidence_quality: 0.3
   providers:
+    gemini:
+      enabled: true
+      model: gemini-2.5-flash
     tavily:
       enabled: false
       daily_credit_budget: 30
@@ -237,9 +243,9 @@ research:
       enabled: true
 position_sizing:
   method: fractional_kelly
-  kelly_fraction: 0.35
+  kelly_fraction: 0.20
   min_position_cents: 100
-  max_position_pct: 0.07
+  max_position_pct: 0.04
 logging:
   level: INFO
   file: logs/swarm.log
@@ -247,28 +253,10 @@ logging:
   backup_count: 5
 dashboard:
   host: 0.0.0.0
-  port: 8080
+  port: 8888
   auth:
     enabled: false
     username: admin
     password: ''
   refresh_interval_seconds: 15
-telegram:
-  enabled: true
-  bot_token: ''
-  chat_id: ''
-  timeout_seconds: 8
-  notify_signals: false
-  notify_trades: false
-  notify_outcomes: false
-  notify_crashes: true
-  crash_cooldown_minutes: 30  # max one crash alert per bot per N minutes (prevents spam)
-  notify_daily_summary: true
-  signal_confidence_threshold: 72
-  commands_enabled: true
-  allowed_user_ids: []
-  poll_interval_seconds: 2
-  notify_swarm_started: false
-  notify_swarm_stopped: false
-  notify_bot_paused: false
-  notify_bot_resumed: false
+

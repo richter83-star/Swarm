@@ -277,7 +277,142 @@ class SearchProvider(abc.ABC):
 
 
 # ---------------------------------------------------------------------------
-# Tavily provider (primary)
+# Gemini Grounded Search provider (primary)
+# ---------------------------------------------------------------------------
+
+class GeminiSearchProvider(SearchProvider):
+    """Gemini Google Search Grounding provider.
+
+    Uses the google-genai SDK with types.Tool(google_search=types.GoogleSearch()).
+    Leverages real Google Search via Gemini 2.5 Flash to ground research queries,
+    extracting sources, URLs, domain authority scores, and factual intelligence.
+    """
+
+    name = "gemini"
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "gemini-2.5-flash",
+        ttl_secs: float = _CACHE_TTL_SECS,
+    ):
+        self._api_key = (
+            api_key
+            or os.environ.get("GEMINI_API_KEY", "")
+            or os.environ.get("GOOGLE_API_KEY", "")
+            or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+        ).strip()
+        self._model = model
+        self._ttl = ttl_secs
+        self._client = None
+        if not self._api_key:
+            log.warning("[research] GeminiSearchProvider: GEMINI_API_KEY not set")
+
+    def _get_client(self):
+        if self._client is None and self._api_key:
+            try:
+                from google import genai
+                self._client = genai.Client(api_key=self._api_key)
+            except Exception as exc:
+                log.warning("[research] GeminiSearchProvider: failed to init genai.Client: %s", exc)
+        return self._client
+
+    async def search(self, query: str, num_results: int = 5) -> List[SearchResult]:
+        cache_key = _cache_key(self.name, query)
+        cached = _search_cache.get(cache_key)
+        if cached is not None:
+            log.debug("[research] gemini search cache hit: %r", query[:60])
+            return cached
+
+        client = self._get_client()
+        if client is None:
+            return []
+
+        import asyncio
+        try:
+            from google.genai import types
+        except ImportError:
+            log.warning("[research] google-genai package not installed")
+            return []
+
+        def _do_search():
+            prompt = (
+                f"Search the web for up-to-date and accurate factual information regarding: {query}\n\n"
+                "Provide a clear, detailed factual summary with citations and source references."
+            )
+            return client.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.1,
+                ),
+            )
+
+        try:
+            response = await asyncio.to_thread(_do_search)
+        except Exception as exc:
+            log.warning("[research] gemini search call failed: %s", exc)
+            return []
+
+        results: List[SearchResult] = []
+        try:
+            grounding_meta = None
+            if response.candidates and len(response.candidates) > 0:
+                grounding_meta = getattr(response.candidates[0], "grounding_metadata", None)
+
+            full_text = (response.text or "").strip()
+            chunks = getattr(grounding_meta, "grounding_chunks", None) or []
+
+            seen_uris = set()
+            for idx, chunk in enumerate(chunks):
+                web = getattr(chunk, "web", None)
+                if not web:
+                    continue
+                uri = getattr(web, "uri", "") or ""
+                title = getattr(web, "title", "") or ""
+                if not uri or uri in seen_uris:
+                    continue
+                seen_uris.add(uri)
+
+                snippet = full_text[:400] if idx == 0 else title
+
+                results.append(SearchResult(
+                    url=uri,
+                    title=title or f"Search result for {query}",
+                    snippet=snippet,
+                    full_content=full_text if idx == 0 else "",
+                    authority_score=score_authority(uri),
+                    source=urlparse(uri).netloc if uri.startswith("http") else title,
+                    date="",
+                    position=idx + 1,
+                    raw={"grounding_chunk": str(chunk)},
+                ))
+                if len(results) >= num_results:
+                    break
+
+            if not results and full_text:
+                results.append(SearchResult(
+                    url="https://www.google.com/search?q=" + query,
+                    title=f"Gemini Grounded Intelligence: {query[:60]}",
+                    snippet=full_text[:400],
+                    full_content=full_text,
+                    authority_score=0.85,
+                    source="google-grounded-gemini",
+                    position=1,
+                ))
+
+        except Exception as exc:
+            log.warning("[research] gemini search extraction failed: %s", exc)
+            return []
+
+        log.info("[research] gemini search: query=%r results=%d", query[:60], len(results))
+        _search_cache.put(cache_key, results, self._ttl)
+        return results
+
+
+# ---------------------------------------------------------------------------
+# Tavily provider (fallback)
 # ---------------------------------------------------------------------------
 
 class TavilyProvider(SearchProvider):
@@ -609,7 +744,30 @@ class KalshiSearchProvider(SearchProvider):
 
         self._chain: List[SearchProvider] = []
 
-        # Tavily (primary)
+        # Gemini Grounded Search (primary)
+        gemini_cfg = providers_cfg.get("gemini", {})
+        if gemini_cfg.get("enabled", True):
+            gemini_key = (
+                gemini_cfg.get("api_key")
+                or os.environ.get("GEMINI_API_KEY", "")
+                or os.environ.get("GOOGLE_API_KEY", "")
+                or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+            )
+            if gemini_key:
+                model = str(gemini_cfg.get("model", "gemini-2.5-flash"))
+                self._chain.append(GeminiSearchProvider(
+                    api_key=gemini_key,
+                    model=model,
+                    ttl_secs=ttl_secs,
+                ))
+                log.info(
+                    "[research] KalshiSearchProvider: Gemini Search Grounding enabled (model=%s)",
+                    model,
+                )
+            else:
+                log.info("[research] KalshiSearchProvider: Gemini Search skipped (no key)")
+
+        # Tavily (fallback)
         tavily_cfg = providers_cfg.get("tavily", {})
         if tavily_cfg.get("enabled", True):
             tavily_key = os.environ.get("TAVILY_API_KEY", "")

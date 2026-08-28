@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-run_swarm_with_ollama_brain.py
-==============================
+run_swarm_with_brain.py
+=======================
 
 Starts the Kalshi swarm with centralized LLM trade approvals enabled.
-Provider is selected from config: central_llm.provider (anthropic or ollama).
+Provider is automatically selected from config (Gemini, Claude, or Ollama).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("kalshi_swarm_ollama")
+logger = logging.getLogger("kalshi_swarm_brain")
 
 
 def _load_central_llm_config() -> Dict[str, Any]:
@@ -125,7 +125,7 @@ def main() -> int:
     if provider in {"gemini", "google"}:
         model = str(central_cfg.get("gemini_model") or central_cfg.get("model") or "gemini-2.5-flash")
         if not _check_gemini(central_cfg):
-            print("\n[ERROR] Gemini preflight failed. Set GEMINI_API_KEY first.")
+            print("\n[ERROR] Gemini preflight failed. Set GEMINI_API_KEY in .env first.")
             return 1
         print(f"[OK] Gemini provider configured (model={model}).")
     elif provider in {"anthropic", "claude"}:

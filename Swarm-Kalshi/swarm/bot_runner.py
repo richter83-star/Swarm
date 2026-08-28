@@ -42,7 +42,6 @@ from kalshi_agent.external_signals import ExternalSignals
 from kalshi_agent.prior_knowledge import PriorKnowledge
 from kalshi_agent.llm_advisor import LLMAdvisor
 from kalshi_agent.mirofish_client import MiroFishClient
-from telegram.notifier import TelegramNotifier
 from swarm.balance_manager import BalanceManager
 from swarm.central_llm_controller import CentralLLMController
 from swarm.meta_learning import MetaLearner, SwarmMetaAggregator, CrossBotInsights
@@ -187,11 +186,9 @@ class BotRunner:
             config=self.cfg.get("backtester", {}),
         )
 
-        self.notifier = TelegramNotifier(self.cfg.get("telegram", {}))
-
-        # Centralized LLM controller (Anthropic) can approve/reject every trade.
+        # Centralized LLM controller (Anthropic / Gemini) can approve/reject every trade.
         self.central_llm = CentralLLMController(
-            config=self.cfg.get("central_llm", {}),
+            config={**self.cfg.get("central_llm", {}), "trading": self.cfg.get("trading", {})},
             project_root=str(self.project_root),
         )
         # Validate API key on startup — fail loudly rather than silently falling
@@ -820,13 +817,6 @@ class BotRunner:
                                         logger.info(
                                             "Bot '%s' auto-resumed after cooldown.", self.bot_name
                                         )
-                                        try:
-                                            self.notifier.notify_crash(
-                                                bot_name=self.bot_name,
-                                                error=f"Auto-resumed after 24h cooldown (consecutive loss pause lifted).",
-                                            )
-                                        except Exception:
-                                            pass
                     except Exception as exc:
                         logger.warning("Auto-resume check failed: %s", exc)
 
@@ -953,17 +943,7 @@ class BotRunner:
         max_signals_per_cycle = self.cfg.get("trading", {}).get("max_signals_per_cycle", 3)
         trades_executed = 0
 
-        # Notify Telegram for each qualifying signal (pre-execution)
-        for sig in signals[:max_signals_per_cycle]:
-            self.notifier.notify_signal(
-                ticker=sig.ticker,
-                title=sig.title,
-                side=sig.side,
-                confidence=sig.confidence,
-                price_cents=sig.suggested_price,
-                bot_name=self.bot_name,
-                rationale=sig.rationale,
-            )
+
 
         for signal in signals[:max_signals_per_cycle]:
             if not self.risk.can_trade():
@@ -1233,15 +1213,6 @@ class BotRunner:
             }
             self._trade_count += 1
             self.behavior.record_action(traded=True)
-            self.notifier.notify_trade(
-                ticker=signal.ticker,
-                side=signal.side,
-                count=count,
-                price_cents=signal.suggested_price,
-                confidence=signal.confidence,
-                order_id=order_id,
-                bot_name=self.bot_name,
-            )
 
         except KalshiAPIError as exc:
             logger.error("Order failed for %s: %s", signal.ticker, exc)
@@ -1830,13 +1801,7 @@ class BotRunner:
         This makes strategy adaptation happen per-resolution rather than
         waiting for a fixed batch boundary at the end of a trading cycle.
         """
-        # Telegram outcome notification
-        self.notifier.notify_outcome(
-            ticker=ticker,
-            outcome=outcome,
-            pnl_cents=pnl_cents,
-            bot_name=self.bot_name,
-        )
+
 
         # Auto-pause on consecutive losses
         try:
@@ -1876,13 +1841,6 @@ class BotRunner:
                     temp_file.replace(self._risk_state_file)
                 except Exception as exc:
                     logger.warning("Could not persist auto-pause state: %s", exc)
-                try:
-                    self.notifier.notify_crash(
-                        bot_name=self.bot_name,
-                        error=pause_reason,
-                    )
-                except Exception:
-                    pass
         except Exception as exc:
             logger.warning("Auto-pause check failed: %s", exc)
         try:
@@ -2050,14 +2008,6 @@ class BotRunner:
             wins=status["wins_today"],
             losses=status["losses_today"],
             avg_conf=perf.get("avg_confidence", 0),
-        )
-        self.notifier.notify_daily_summary(
-            bot_name=self.bot_name,
-            trades=status["trades_today"],
-            wins=status["wins_today"],
-            losses=status["losses_today"],
-            pnl_cents=status["daily_pnl_cents"],
-            win_rate=perf.get("win_rate", 0.0),
         )
 
     def _shutdown(self) -> None:

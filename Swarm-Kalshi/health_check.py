@@ -8,9 +8,8 @@ Daily health check and auto-repair system for the Kalshi trading bot swarm.
 Run manually : python health_check.py
 Run via cron  : see setup_cron.sh
 
-Performs 10 checks, auto-fixes where safe, writes two JSON reports, sends
-a Telegram notification (if configured), and writes an audit log entry to
-the dashboard DB.
+Performs 10 checks, auto-fixes where safe, writes two JSON reports,
+and writes an audit log entry to the dashboard DB.
 """
 
 from __future__ import annotations
@@ -711,112 +710,7 @@ def check_memory_usage() -> dict:
     return {"status": status, "details": details, "usage_mb": usage}
 
 
-# ---------------------------------------------------------------------------
-# Telegram notification
-# ---------------------------------------------------------------------------
 
-def _send_telegram(cfg: dict, report: dict, bot_summary: Dict[str, dict]) -> None:
-    tg = cfg.get("telegram", {})
-    if not tg.get("enabled", False):
-        return
-
-    bot_token = tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id   = tg.get("chat_id")   or os.environ.get("TELEGRAM_CHAT_ID", "")
-
-    if not bot_token or not chat_id:
-        return
-
-    overall = report.get("overall_status", "UNKNOWN")
-    date_str = _now_utc().strftime("%Y-%m-%d")
-
-    if overall == "OK":
-        overall_icon = "✅ OK"
-    elif overall == "WARNING":
-        overall_icon = "⚠️ WARNING"
-    else:
-        overall_icon = "🚨 CRITICAL"
-
-    actions = report.get("actions_taken", [])
-    recs    = report.get("recommendations", [])
-
-    lines = [f"🤖 Kalshi Swarm Health Report — {date_str}", "", f"Overall: {overall_icon}", ""]
-
-    if actions:
-        lines.append("Fixes applied:")
-        for a in actions[:5]:
-            lines.append(f"• {a}")
-        lines.append("")
-
-    if recs:
-        lines.append("Warnings:")
-        for r in recs[:5]:
-            lines.append(f"• {r}")
-        lines.append("")
-
-    # Bot status line
-    bot_icons = []
-    total_balance = 0
-    total_pnl = 0
-    for b in BOT_NAMES:
-        st = bot_summary.get(b, {}).get("status", "unknown")
-        icon = "✅" if st == "running" else "❌"
-        bot_icons.append(f"{b} {icon}")
-
-    lines.append("Bots: " + "  ".join(bot_icons))
-
-    # Balance and P&L from risk states
-    for b in BOT_NAMES:
-        rp = _risk_state_path(b)
-        if rp.exists():
-            rs = _load_json(rp)
-            total_balance += rs.get("current_balance_cents", 0)
-            total_pnl     += rs.get("daily", {}).get("gross_pnl_cents", 0)
-
-    balance_str = f"${total_balance / 100:.2f}"
-    pnl_sign    = "+" if total_pnl >= 0 else ""
-    pnl_str     = f"{pnl_sign}${total_pnl / 100:.2f}"
-    lines.append(f"Balance: {balance_str} | P&L today: {pnl_str}")
-    lines.append("")
-
-    # LLM health & guardrail progress
-    llm = report.get("checks", {}).get("llm_health", {})
-    if llm and llm.get("status") != "SKIP":
-        win_rate   = llm.get("win_rate_pct", 0)
-        resolved   = llm.get("resolved_trades", 0)
-        approval   = llm.get("approval_rate_pct", 0)
-        qfb        = llm.get("quant_fallback_decisions", 0)
-        real_llm   = llm.get("real_llm_decisions", 0)
-        guardrail  = llm.get("guardrail_progress", "")
-        today_eval = llm.get("today_evaluated", 0)
-        today_appr = llm.get("today_approved", 0)
-
-        llm_icon = "✅" if llm.get("status") == "OK" else "⚠️"
-        lines.append(f"{llm_icon} LLM: {approval:.1f}% approval | Win rate: {win_rate:.1f}% ({resolved} settled)")
-        lines.append(f"   Today: {today_eval} evaluated → {today_appr} approved | Fallbacks: {qfb} total")
-        if guardrail:
-            lines.append(f"   Guardrails: {guardrail}")
-        lines.append("")
-
-    lines.append("Full report: data/health_report_latest.json")
-
-    message = "\n".join(lines)
-
-    import urllib.request
-    import urllib.parse
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": message}).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    timeout = int(tg.get("timeout_seconds", 8))
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            pass  # success
-    except Exception as exc:
-        print(f"[health_check] Telegram send failed: {exc}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1159,6 +1053,52 @@ def check_llm_health(recommendations: List[str]) -> dict:
         conn.close()
 
 
+def check_learning_adaptation(recommendations: List[str]) -> dict:
+    """
+    Check 15: Audits whether the learning engine is actively calibrating,
+    updating feature weights, and specializing on categories.
+    """
+    try:
+        from watch_demo_learning import aggregate_full_learning_report
+        report = aggregate_full_learning_report(DATA_DIR)
+        scorecard = report.get("scorecard", {})
+        cal = report.get("calibration", {})
+        weights = report.get("weights", {})
+        cats = report.get("categories", {})
+
+        is_learning = scorecard.get("is_learning", "UNKNOWN")
+        ece = cal.get("expected_calibration_error", 0.0)
+        recalibs = weights.get("total_recalibrations", 0)
+        settled = scorecard.get("settled_trades", 0)
+
+        details = f"Status: {is_learning} | Settled: {settled} | ECE: {ece}% | Recalibrations: {recalibs} | Tilt: {len(cats.get('hot_categories', []))} hot/{len(cats.get('cold_categories', []))} cold"
+        
+        status = "OK"
+        if is_learning == "YES":
+            status = "OK"
+        elif is_learning == "CALIBRATING":
+            status = "OK"
+        elif is_learning == "INSUFFICIENT_DATA":
+            status = "INFO"
+
+        if ece > 50.0 and settled >= 20:
+            recommendations.append(f"Learning Radar: High calibration error ({ece}%) — overconfidence bias detected")
+
+        return {
+            "status": status,
+            "details": details,
+            "is_learning": is_learning,
+            "stage": scorecard.get("stage"),
+            "ece": ece,
+            "brier_score": cal.get("brier_score"),
+            "recalibrations": recalibs,
+            "settled_trades": settled,
+        }
+    except Exception as exc:
+        return {"status": "WARNING", "details": f"Learning check error: {exc}"}
+
+
+
 def _aggregate_status(checks: dict) -> str:
     order = {"CRITICAL": 3, "WARNING": 2, "FIXED": 1, "INFO": 1, "OK": 0, "SKIP": 0}
     worst = "OK"
@@ -1343,7 +1283,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 14: Error storm detection ---
-    print("[health_check] Check 14/14: Error storm detection...")
+    print("[health_check] Check 14/15: Error storm detection...")
     try:
         checks["error_storm"] = check_error_storm()
         if checks["error_storm"]["status"] == "CRITICAL":
@@ -1352,6 +1292,16 @@ def run_health_check() -> dict:
             )
     except Exception as exc:
         checks["error_storm"] = {
+            "status": "WARNING",
+            "details": f"Check failed: {exc}",
+        }
+
+    # --- Check 15: Demo trading learning & calibration ---
+    print("[health_check] Check 15/15: Demo learning & calibration radar...")
+    try:
+        checks["demo_learning"] = check_learning_adaptation(recommendations)
+    except Exception as exc:
+        checks["demo_learning"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }
@@ -1394,13 +1344,7 @@ def run_health_check() -> dict:
     except Exception as exc:
         print(f"[health_check] Audit log failed: {exc}", file=sys.stderr)
 
-    # --- Telegram ---
-    try:
-        _send_telegram(cfg, report, bot_summary)
-        if cfg.get("telegram", {}).get("enabled", False):
-            print("[health_check] Telegram notification sent")
-    except Exception as exc:
-        print(f"[health_check] Telegram failed: {exc}", file=sys.stderr)
+
 
     # --- Console summary ---
     print("\n" + "=" * 60)

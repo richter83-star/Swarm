@@ -1,0 +1,452 @@
+
+============================================================
+### CMD1
+============================================================
+2026-03-24 20:20:37 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHDEN-26MAR24-B80.5 -> category=OTHER (no rule matched)
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHDEN-26MAR24-B80.5: researchability=30 < min=45
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 4 opportunities.
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHDEN-26MAR24-B80.5 (conf=68.4 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:20:48 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:20:48 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:20:58 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:20:58 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:20:58 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 137 tickers; evaluating top 80.
+2026-03-24 20:21:04 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 21 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:21:04 | INFO     | vanguard | kalshi_agent | 13 specialist opportunities (from 21 total).
+2026-03-24 20:21:05 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:13 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:20 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:25 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:37 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:48 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:57 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:05 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:16 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:25 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:36 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHNY-26MAR24-B50.5 -> category=OTHER (no rule matched)
+2026-03-24 20:22:36 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHNY-26MAR24-B50.5: researchability=30 < min=45
+2026-03-24 20:22:36 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:22:39 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 10 opportunities.
+2026-03-24 20:22:39 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHNY-26MAR24-B50.5 (conf=64.5 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:22:40 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:22:40 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:22:49 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+
+
+============================================================
+### CMD2
+============================================================
+2026-03-24 14:41:36 | INFO     | vanguard | kalshi_agent.human_behavior | Idle period: 156 min. Sleeping …
+2026-03-24 17:47:36 | INFO     | vanguard | kalshi_agent.human_behavior | Idle period: 104 min. Sleeping …
+
+
+============================================================
+### CMD3_log5
+============================================================
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='site:apnews.com DHS funding bill become law before Apr 1, 20'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='site:apnews.com DHS funding bill become law before Apr 1, 20'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='"DHS funding bill become law before Apr 1, 2026" official da'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='"DHS funding bill become law before Apr 1, 2026" official da'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='DHS funding bill become law before Apr 1, 2026 latest news 2'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='DHS funding bill become law before Apr 1, 2026 latest news 2'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='DHS funding bill become law before Apr 1, 2026 probability f'; trying next
+2026-03-24 20:12:10 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='DHS funding bill become law before Apr 1, 2026 probability f'; trying next
+2026-03-24 20:12:10 | WARNING  | vanguard | kalshi_agent.analysis_engine | [research] No sources found for KXDHSFUND-26APR01 — all 5 search queries returned 0 results
+2026-03-24 20:12:11 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:12:14 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 9 opportunities.
+2026-03-24 20:12:14 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXDHSFUND-26APR01 (conf=67.7 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:12:15 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:12:15 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:12:17 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:12:17 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:12:17 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 199 tickers; evaluating top 80.
+2026-03-24 20:12:22 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 10 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:12:22 | INFO     | vanguard | kalshi_agent | 6 specialist opportunities (from 10 total).
+2026-03-24 20:12:22 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:26 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:33 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:44 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:48 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXDHSFUND-26APR01 text_match -> category=POLITICS sub=legislation researchability=70
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.query_builder | [research] query_builder: ticker=KXDHSFUND-26APR01 category=POLITICS researchability=70 num_queries=5 query_types=['primary', 'primary', 'statistics', 'news', 'confirmation']
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='site:reuters.com DHS funding bill become law before Apr 1, 2'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='site:reuters.com DHS funding bill become law before Apr 1, 2'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='site:apnews.com DHS funding bill become law before Apr 1, 20'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='site:apnews.com DHS funding bill become law before Apr 1, 20'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='"DHS funding bill become law before Apr 1, 2026" official da'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='"DHS funding bill become law before Apr 1, 2026" official da'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='DHS funding bill become law before Apr 1, 2026 latest news 2'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='DHS funding bill become law before Apr 1, 2026 latest news 2'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='DHS funding bill become law before Apr 1, 2026 probability f'; trying next
+2026-03-24 20:13:01 | INFO     | vanguard | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='DHS funding bill become law before Apr 1, 2026 probability f'; trying next
+2026-03-24 20:13:01 | WARNING  | vanguard | kalshi_agent.analysis_engine | [research] No sources found for KXDHSFUND-26APR01 — all 5 search queries returned 0 results
+2026-03-24 20:13:03 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 6 opportunities.
+2026-03-24 20:13:03 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXDHSFUND-26APR01 (conf=67.1 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:13:04 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:13:04 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:13:14 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:13:15 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:13:15 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 234 tickers; evaluating top 80.
+2026-03-24 20:13:15 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:13:23 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 12 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:13:23 | INFO     | vanguard | kalshi_agent | 7 specialist opportunities (from 12 total).
+2026-03-24 20:13:24 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:26 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:34 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:36 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:48 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:56 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:10 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:18 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHMIA-26MAR24-T85 -> category=OTHER (no rule matched)
+2026-03-24 20:14:18 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHMIA-26MAR24-T85: researchability=30 < min=45
+2026-03-24 20:14:18 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:14:22 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:14:28 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:14:33 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:14:37 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:14:37 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 7 opportunities.
+2026-03-24 20:14:40 | INFO     | vanguard | kalshi_agent | Trade sizing KXHIGHMIA-26MAR24-T85 | base_size_cents=96 trend_mult=0.982 human_mult=1.000 llm_mult=0.800 requested_size_cents=96 hard_cap_cents=199 final_capped_size_cents=96
+2026-03-24 20:14:40 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXHIGHMIA-26MAR24-T85 | reason=insufficient bot budget
+2026-03-24 20:14:41 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:14:41 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:14:53 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:14:53 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:14:53 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 219 tickers; evaluating top 80.
+2026-03-24 20:15:00 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 19 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:15:00 | INFO     | vanguard | kalshi_agent | 8 specialist opportunities (from 19 total).
+2026-03-24 20:15:01 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:01 | INFO     | vanguard | kalshi_agent | Browsed KXPERSONMENTION-26MAR24-IDEO without trading.
+2026-03-24 20:15:08 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:15:08 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:15:14 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:15:14 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:15:14 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 189 tickers; evaluating top 80.
+2026-03-24 20:15:18 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 14 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:15:18 | INFO     | vanguard | kalshi_agent | 6 specialist opportunities (from 14 total).
+2026-03-24 20:15:19 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:19 | INFO     | vanguard | kalshi_agent | Browsed KXMLBSTGAME-26MAR241505NYYCHC-NYY without trading.
+2026-03-24 20:15:29 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:15:29 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:15:38 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:15:38 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:15:38 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 154 tickers; evaluating top 80.
+2026-03-24 20:15:42 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 19 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:15:42 | INFO     | vanguard | kalshi_agent | 7 specialist opportunities (from 19 total).
+2026-03-24 20:15:43 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:51 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:55 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:06 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:15 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:21 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:32 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:41 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:46 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:55 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:58 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:16:59 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:17:02 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHMIA-26MAR24-B84.5 -> category=OTHER (no rule matched)
+2026-03-24 20:17:02 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHMIA-26MAR24-B84.5: researchability=30 < min=45
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHAUS-26MAR25-T88 -> category=OTHER (no rule matched)
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHAUS-26MAR25-T88: researchability=30 < min=45
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 7 opportunities.
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHMIA-26MAR24-B84.5 (conf=67.5 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:17:04 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:17:14 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:17:15 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:17:15 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 183 tickers; evaluating top 80.
+2026-03-24 20:17:20 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 13 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:17:20 | INFO     | vanguard | kalshi_agent | 7 specialist opportunities (from 13 total).
+2026-03-24 20:17:20 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:20 | INFO     | vanguard | kalshi_agent | Browsed KXDHSFUND-26MAR28 without trading.
+2026-03-24 20:17:24 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:17:24 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:17:35 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:17:35 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:17:35 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 179 tickers; evaluating top 80.
+2026-03-24 20:17:40 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 14 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:17:40 | INFO     | vanguard | kalshi_agent | 9 specialist opportunities (from 14 total).
+2026-03-24 20:17:40 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:48 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:58 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:09 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:11 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:20 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:30 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:39 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:44 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:18:55 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:19:03 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:19:04 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:19:07 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHMIA-26MAR24-T85 -> category=OTHER (no rule matched)
+2026-03-24 20:19:07 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHMIA-26MAR24-T85: researchability=30 < min=45
+2026-03-24 20:19:10 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHCHI-26MAR24-T50 -> category=OTHER (no rule matched)
+2026-03-24 20:19:10 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHCHI-26MAR24-T50: researchability=30 < min=45
+2026-03-24 20:19:10 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHMIA-26MAR24-B84.5 -> category=OTHER (no rule matched)
+2026-03-24 20:19:10 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHMIA-26MAR24-B84.5: researchability=30 < min=45
+2026-03-24 20:19:11 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:19:21 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:19:26 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:19:26 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 3 signals above threshold 60.0 from 9 opportunities.
+2026-03-24 20:19:30 | INFO     | vanguard | kalshi_agent | Trade sizing KXHIGHMIA-26MAR24-T85 | base_size_cents=95 trend_mult=0.982 human_mult=1.000 llm_mult=0.800 requested_size_cents=95 hard_cap_cents=199 final_capped_size_cents=95
+2026-03-24 20:19:30 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXHIGHMIA-26MAR24-T85 | reason=insufficient bot budget
+2026-03-24 20:19:43 | INFO     | vanguard | kalshi_agent | Trade sizing KXHIGHCHI-26MAR24-T50 | base_size_cents=87 trend_mult=0.982 human_mult=1.000 llm_mult=0.800 requested_size_cents=87 hard_cap_cents=199 final_capped_size_cents=87
+2026-03-24 20:19:43 | WARNING  | vanguard | kalshi_agent | Trade rejected by global guard: buy no on KXHIGHCHI-26MAR24-T50 | reason=insufficient bot budget
+2026-03-24 20:19:55 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHMIA-26MAR24-B84.5 (conf=65.7 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:19:55 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:19:56 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:20:02 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:20:02 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:20:02 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 230 tickers; evaluating top 80.
+2026-03-24 20:20:09 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 14 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:20:09 | INFO     | vanguard | kalshi_agent | 4 specialist opportunities (from 14 total).
+2026-03-24 20:20:09 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:20:18 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:20:26 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:20:37 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHDEN-26MAR24-B80.5 -> category=OTHER (no rule matched)
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHDEN-26MAR24-B80.5: researchability=30 < min=45
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 4 opportunities.
+2026-03-24 20:20:47 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHDEN-26MAR24-B80.5 (conf=68.4 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:20:48 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:20:48 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:20:58 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:20:58 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:20:58 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 137 tickers; evaluating top 80.
+2026-03-24 20:21:04 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus: 21 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:21:04 | INFO     | vanguard | kalshi_agent | 13 specialist opportunities (from 21 total).
+2026-03-24 20:21:05 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:13 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:20 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:25 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:37 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:48 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:21:57 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:05 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:16 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:25 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:22:36 | INFO     | vanguard | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXHIGHNY-26MAR24-B50.5 -> category=OTHER (no rule matched)
+2026-03-24 20:22:36 | INFO     | vanguard | kalshi_agent.analysis_engine | [research] Skipping research for KXHIGHNY-26MAR24-B50.5: researchability=30 < min=45
+2026-03-24 20:22:36 | WARNING  | vanguard | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:22:39 | INFO     | vanguard | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 60.0 from 10 opportunities.
+2026-03-24 20:22:39 | INFO     | vanguard | kalshi_agent | Pre-screen rejected buy no on KXHIGHNY-26MAR24-B50.5 (conf=64.5 below archetype floor) — skipped research + LLM to save API credits.
+2026-03-24 20:22:40 | INFO     | vanguard | kalshi_agent | [vanguard] Fetching balance...
+2026-03-24 20:22:40 | INFO     | vanguard | kalshi_agent | [vanguard] Balance received: 4982¢
+2026-03-24 20:22:49 | INFO     | vanguard | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:22:49 | WARNING  | vanguard | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:22:49 | INFO     | vanguard | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 166 tickers; evaluating top 80.
+
+
+============================================================
+### CMD3_log4
+============================================================
+2026-03-24 20:06:31 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:06:31 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:06:31 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 216 tickers; evaluating top 80.
+2026-03-24 20:06:35 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 13 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:06:35 | INFO     | oracle | kalshi_agent | 4 specialist opportunities (from 13 total).
+2026-03-24 20:06:36 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:06:40 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:06:50 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:06:57 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:07:12 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:07:19 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:07:21 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:07:24 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 0 signals above threshold 55.0 from 4 opportunities.
+2026-03-24 20:07:24 | INFO     | oracle | kalshi_agent | No signals above confidence threshold.
+2026-03-24 20:07:32 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:07:32 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:07:45 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:07:46 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:07:46 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 166 tickers; evaluating top 80.
+2026-03-24 20:07:52 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 9 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:07:52 | INFO     | oracle | kalshi_agent | 2 specialist opportunities (from 9 total).
+2026-03-24 20:07:52 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:07:52 | INFO     | oracle | kalshi_agent | Browsed KXBTCD-26MAR2417-T70049.99 without trading.
+2026-03-24 20:08:01 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:08:01 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:08:09 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:08:09 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:08:09 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 191 tickers; evaluating top 80.
+2026-03-24 20:08:15 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 7 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:08:15 | INFO     | oracle | kalshi_agent | 2 specialist opportunities (from 7 total).
+2026-03-24 20:08:15 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:08:15 | INFO     | oracle | kalshi_agent | Browsed KXBTC15M-26MAR241515-15 without trading.
+2026-03-24 20:08:25 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:08:25 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:08:30 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:08:30 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:08:30 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 179 tickers; evaluating top 80.
+2026-03-24 20:08:34 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 10 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:08:34 | INFO     | oracle | kalshi_agent | 1 specialist opportunities (from 10 total).
+2026-03-24 20:08:34 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:08:38 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:08:42 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:08:44 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 0 signals above threshold 55.0 from 1 opportunities.
+2026-03-24 20:08:44 | INFO     | oracle | kalshi_agent | No signals above confidence threshold.
+2026-03-24 20:08:54 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:08:54 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:09:03 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:09:03 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:09:03 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 145 tickers; evaluating top 80.
+2026-03-24 20:09:08 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 10 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:09:08 | INFO     | oracle | kalshi_agent | 1 specialist opportunities (from 10 total).
+2026-03-24 20:09:09 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:09:09 | INFO     | oracle | kalshi_agent | Browsed KXBTC15M-26MAR241515-15 without trading.
+2026-03-24 20:09:14 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:09:15 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:09:22 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:09:22 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:09:22 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 161 tickers; evaluating top 80.
+2026-03-24 20:09:26 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 9 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:09:26 | INFO     | oracle | kalshi_agent | 2 specialist opportunities (from 9 total).
+2026-03-24 20:09:26 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:09:26 | INFO     | oracle | kalshi_agent | Browsed KXBTCD-26MAR2417-T69549.99 without trading.
+2026-03-24 20:09:34 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:09:34 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:09:40 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:09:41 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:09:41 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 174 tickers; evaluating top 80.
+2026-03-24 20:09:44 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 6 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:09:44 | INFO     | oracle | kalshi_agent | 1 specialist opportunities (from 6 total).
+2026-03-24 20:09:44 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:09:53 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 0 signals above threshold 55.0 from 1 opportunities.
+2026-03-24 20:09:53 | INFO     | oracle | kalshi_agent | No signals above confidence threshold.
+2026-03-24 20:10:00 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:10:00 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:10:08 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:10:08 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:10:08 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 183 tickers; evaluating top 80.
+2026-03-24 20:10:12 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 8 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:10:12 | INFO     | oracle | kalshi_agent | 3 specialist opportunities (from 8 total).
+2026-03-24 20:10:12 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:10:27 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:10:37 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:10:50 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:10:53 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:10:56 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:11:02 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:11:08 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:11:13 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:11:17 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:11:17 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 0 signals above threshold 55.0 from 3 opportunities.
+2026-03-24 20:11:17 | INFO     | oracle | kalshi_agent | No signals above confidence threshold.
+2026-03-24 20:11:27 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:11:27 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:11:37 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:11:38 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:11:38 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 189 tickers; evaluating top 80.
+2026-03-24 20:11:44 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 10 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:11:44 | INFO     | oracle | kalshi_agent | No specialist-matched opportunities for oracle.
+2026-03-24 20:11:54 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:11:54 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:12:08 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:12:08 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:12:08 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 200 tickers; evaluating top 80.
+2026-03-24 20:12:13 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 13 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:12:13 | INFO     | oracle | kalshi_agent | 4 specialist opportunities (from 13 total).
+2026-03-24 20:12:13 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:25 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:29 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:33 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:12:46 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:12:53 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:12:58 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:13:00 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:13:02 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 4.0s …
+2026-03-24 20:13:11 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:13:16 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:13:19 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:13:22 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXETH-26MAR2416-B2110 prefix=KXETH -> category=CRYPTO sub=eth_price researchability=62
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.query_builder | [research] query_builder: ticker=KXETH-26MAR2416-B2110 category=CRYPTO researchability=62 num_queries=4 query_types=['primary', 'primary', 'statistics', 'news']
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='Ethereum ETH price today USD 2026'; trying next
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='Ethereum ETH price today USD 2026'; trying next
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='Ethereum price prediction $2,110 March 17 2026'; trying next
+2026-03-24 20:13:22 | INFO     | oracle | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='Ethereum price prediction $2,110 March 17 2026'; trying next
+2026-03-24 20:13:27 | INFO     | oracle | kalshi_agent.research.evidence_extractor | [research] evidence_extractor: question='Ethereum price at Mar 24, 2026 at 4pm EDT?' sources=8 quality=0.576 P(YES)=0.450 key_facts=5
+2026-03-24 20:13:27 | INFO     | oracle | kalshi_agent.analysis_engine | [research] Completed research for KXETH-26MAR2416-B2110: category=CRYPTO quality=0.576 P(YES)=0.450
+2026-03-24 20:13:27 | INFO     | oracle | kalshi_agent.analysis_engine | [research] KXETH-26MAR2416-B2110 → quality=0.58 prob=0.45 conf=73
+2026-03-24 20:13:27 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 55.0 from 4 opportunities.
+2026-03-24 20:13:30 | INFO     | oracle | kalshi_agent | Trade sizing KXETH-26MAR2416-B2110 | base_size_cents=228 trend_mult=0.700 human_mult=1.000 llm_mult=0.850 requested_size_cents=76 hard_cap_cents=348 final_capped_size_cents=76
+2026-03-24 20:13:30 | WARNING  | oracle | kalshi_agent | Trade rejected by global guard: buy no on KXETH-26MAR2416-B2110 | reason=insufficient bot budget
+2026-03-24 20:13:31 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:13:31 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:13:37 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:13:37 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:13:37 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 224 tickers; evaluating top 80.
+2026-03-24 20:13:43 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 15 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:13:43 | INFO     | oracle | kalshi_agent | 6 specialist opportunities (from 15 total).
+2026-03-24 20:13:43 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:13:43 | INFO     | oracle | kalshi_agent | Browsed KXBTCD-26MAR2416-T70099.99 without trading.
+2026-03-24 20:13:54 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:13:54 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:14:08 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:14:08 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:14:08 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 208 tickers; evaluating top 80.
+2026-03-24 20:14:12 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 17 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:14:12 | INFO     | oracle | kalshi_agent | 9 specialist opportunities (from 17 total).
+2026-03-24 20:14:12 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:21 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:30 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:41 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:50 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:14:57 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:08 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:15 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:25 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:15:38 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:15:42 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:15:46 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:15:51 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:15:54 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:15:56 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:04 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:09 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:16:11 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.market_classifier | [research] classifier: ticker=KXETH-26MAR2416-B2110 prefix=KXETH -> category=CRYPTO sub=eth_price researchability=62
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.query_builder | [research] query_builder: ticker=KXETH-26MAR2416-B2110 category=CRYPTO researchability=62 num_queries=4 query_types=['primary', 'primary', 'statistics', 'news']
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='Ethereum ETH price today USD 2026'; trying next
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='Ethereum ETH price today USD 2026'; trying next
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] Tavily daily budget exhausted — falling back to next provider
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] tavily returned 0 results for query='Ethereum price prediction $2,110 March 17 2026'; trying next
+2026-03-24 20:16:12 | INFO     | oracle | kalshi_agent.research.web_search | [research] duckduckgo returned 0 results for query='Ethereum price prediction $2,110 March 17 2026'; trying next
+2026-03-24 20:16:17 | INFO     | oracle | kalshi_agent.research.evidence_extractor | [research] evidence_extractor: question='Ethereum price at Mar 24, 2026 at 4pm EDT?' sources=8 quality=0.576 P(YES)=0.350 key_facts=5
+2026-03-24 20:16:17 | INFO     | oracle | kalshi_agent.analysis_engine | [research] Completed research for KXETH-26MAR2416-B2110: category=CRYPTO quality=0.576 P(YES)=0.350
+2026-03-24 20:16:17 | INFO     | oracle | kalshi_agent.analysis_engine | [research] KXETH-26MAR2416-B2110 → quality=0.58 prob=0.35 conf=72
+2026-03-24 20:16:17 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 1 signals above threshold 55.0 from 9 opportunities.
+2026-03-24 20:16:20 | INFO     | oracle | kalshi_agent | Central LLM rejected trade buy no on KXETH-26MAR2416-B2110 | rationale=Oracle bot already has 2 open positions with -304 cents daily PnL. Swarm is underwater (-598 cents total realized). Trade confidence of 85.14 is acceptable, but position concentration risk is critical: oracle would have 3 positions after this trade. Low liquidity (2306 vol_24h, 2 cent spread) on a binary prediction market with 2-year expiration creates execution and exit risk. Swarm-wide negative performance trend suggests capital preservation priority. | quant_confidence=85.1 | flags=['position_concentration_risk', 'bot_already_negative_pnl', 'low_market_liquidity', 'swarm_underwater_performance', 'long_dated_binary_expiration']
+2026-03-24 20:16:20 | INFO     | oracle | kalshi_agent | [oracle] Fetching balance...
+2026-03-24 20:16:20 | INFO     | oracle | kalshi_agent | [oracle] Balance received: 4982¢
+2026-03-24 20:16:34 | INFO     | oracle | kalshi_agent.market_scanner | Scanning active markets (mode=recent_focus) …
+2026-03-24 20:16:35 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 600 items at 3 pages; more data exists.
+2026-03-24 20:16:35 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus seed fetched 600 trades across 171 tickers; evaluating top 80.
+2026-03-24 20:16:42 | INFO     | oracle | kalshi_agent.market_scanner | Recent-focus: 11 markets passed filters out of 80 seeded tickers.
+2026-03-24 20:16:42 | INFO     | oracle | kalshi_agent | 7 specialist opportunities (from 11 total).
+2026-03-24 20:16:42 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:16:55 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:02 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:07 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:11 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:18 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:26 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets/trades: collected 10 items at 1 pages; more data exists.
+2026-03-24 20:17:37 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:17:43 | WARNING  | oracle | kalshi_agent.kalshi_client | Rate-limited (429). Backing off 2.0s …
+2026-03-24 20:17:48 | WARNING  | oracle | kalshi_agent.kalshi_client | Pagination cap reached for /markets: collected 50000 items at 50 pages; more data exists.
+2026-03-24 20:17:49 | INFO     | oracle | kalshi_agent.analysis_engine | Analysis: 0 signals above threshold 55.0 from 7 opportunities.
+2026-03-24 20:17:49 | INFO     | oracle | kalshi_agent | No signals above confidence threshold.
+2026-03-24 20:17:59 | INFO     | oracle | kalshi_agent.human_behavior | Session ended after 42 actions (0 trades, 42 browses).
+2026-03-24 20:17:59 | INFO     | oracle | kalshi_agent.human_behavior | Idle period: 162 min. Sleeping …
+

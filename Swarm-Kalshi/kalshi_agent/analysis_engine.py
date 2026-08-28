@@ -483,6 +483,11 @@ class AnalysisEngine:
             if side is None:
                 return None
 
+            # Reject trades below minimum edge threshold (Kalshi fees eat small edges)
+            min_edge_cents = float(self.cfg.get("min_edge_cents", 2))
+            if edge < min_edge_cents:
+                return None
+
             edge_sc  = self._edge_score(edge, opp)
             liq_sc   = self._liquidity_score(opp)
             vol_sc   = self._volume_score(opp)
@@ -681,7 +686,9 @@ class AnalysisEngine:
             return 40.0
         elif v >= 50:
             return 25.0
-        return 0.0
+        elif v >= 10:
+            return 10.0
+        return 10.0
 
     def _timing_score(self, opp: MarketOpportunity) -> float:
         """Score based on hours until expiration (sweet spot: 6–48h)."""
