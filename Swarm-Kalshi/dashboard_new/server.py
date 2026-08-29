@@ -32,6 +32,28 @@ START_TIME: float = time.time()
 
 BOTS = ["sentinel", "oracle", "pulse", "vanguard"]
 
+
+def _load_env_file():
+    """Load key-value pairs from .env if present into os.environ."""
+    env_file = PROJECT_ROOT / ".env"
+    if env_file.exists():
+        try:
+            with open(env_file, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+
+
+_load_env_file()
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -885,6 +907,7 @@ if __name__ == "__main__":
 
     # Set module-level globals used by route handlers
     PROJECT_ROOT = Path(args.project_root).resolve()
+    _load_env_file()
 
     print(f"[dashboard] Starting on http://{args.host}:{args.port}")
     print(f"[dashboard] Project root: {PROJECT_ROOT}")
