@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kalshi Swarm Dashboard</title>
+  <title>Kalshi Swarm — Institutional Trading Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -11,22 +14,29 @@
 
 <!-- ── Top Navigation Bar ────────────────────────────────── -->
 <nav class="topbar">
-  <div class="topbar-logo">KALSHI <span>SWARM</span> <span class="console-tag">COMMAND CONSOLE</span></div>
+  <div class="topbar-logo-wrap">
+    <div class="logo-mark">
+      <div class="logo-icon"></div>
+    </div>
+    <div class="topbar-logo">KALSHI <span>SWARM</span></div>
+    <span class="console-tag">ENTERPRISE v2.5</span>
+  </div>
   <div class="tab-strip">
-    <button class="tab-btn active" data-tab="console">Command Console</button>
-    <button class="tab-btn" data-tab="overview">Overview</button>
-    <button class="tab-btn" data-tab="learning">Learning Radar</button>
-    <button class="tab-btn" data-tab="llm">LLM Intelligence</button>
-    <button class="tab-btn" data-tab="trades">Trades</button>
-    <button class="tab-btn" data-tab="risk">Risk</button>
-    <button class="tab-btn" data-tab="system">System</button>
-    <button class="tab-btn" data-tab="controls">Controls</button>
-    <button class="tab-btn" data-tab="config">Config</button>
-    <button class="tab-btn" data-tab="admin">Admin</button>
+    <button class="tab-btn active" data-tab="console"><span class="tab-icon">⚡</span> Console</button>
+    <button class="tab-btn" data-tab="overview"><span class="tab-icon">📊</span> Overview</button>
+    <button class="tab-btn" data-tab="learning"><span class="tab-icon">📡</span> Learning Radar</button>
+    <button class="tab-btn" data-tab="llm"><span class="tab-icon">🧠</span> Gemini Brain</button>
+    <button class="tab-btn" data-tab="trades"><span class="tab-icon">📈</span> Trades</button>
+    <button class="tab-btn" data-tab="risk"><span class="tab-icon">🛡️</span> Risk</button>
+    <button class="tab-btn" data-tab="system"><span class="tab-icon">⚙️</span> System</button>
+    <button class="tab-btn" data-tab="controls"><span class="tab-icon">🎛️</span> Controls</button>
+    <button class="tab-btn" data-tab="config"><span class="tab-icon">📝</span> Config</button>
+    <button class="tab-btn" data-tab="admin"><span class="tab-icon">🔐</span> Admin</button>
   </div>
   <div class="topbar-right">
+    <div class="utc-clock" id="utc-clock">00:00:00 UTC</div>
     <span class="refresh-badge" id="refresh-time">Loading…</span>
-    <span class="status-dot" title="Live — auto-refresh every 15s"></span>
+    <span class="status-dot" title="Live Link Active — Auto-Refresh 5s"></span>
   </div>
 </nav>
 

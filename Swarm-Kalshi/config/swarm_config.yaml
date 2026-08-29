@@ -3,7 +3,6 @@ api:
   private_key_path: keys/kalshi-private.key
   base_url: https://demo-api.kalshi.co/trade-api/v2
   demo_mode: true
-
 swarm:
   unassigned_market_bot: vanguard
   global_daily_loss_limit_cents: 15000
@@ -43,19 +42,19 @@ trading:
   min_volume_24h: 100
   min_hours_to_expiry: 2
   max_hours_to_expiry: 240
-  max_position_pct: 0.04           # 4% max risk per trade for smooth curve
+  max_position_pct: 0.04
   max_open_positions: 3
   open_positions_scope: per_bot
   max_trades_per_day: 50
-  daily_loss_limit_cents: 2500     # $25.00 hard stop
+  daily_loss_limit_cents: 2500
   min_balance_cents: 500
-  max_drawdown_pct: 0.10           # 10% max drawdown
+  max_drawdown_pct: 0.1
   loss_streak_threshold: 4
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
   max_signals_per_cycle: 10
-  max_entry_price_cents: 60        # 22-60c high-win-rate sweet spot
-  min_entry_price_cents: 22        # Reject low-probability longshots
+  max_entry_price_cents: 60
+  min_entry_price_cents: 22
   market_scan_max_pages: 50
   scan_mode: recent_focus
   recent_trade_seed_pages: 3
@@ -74,7 +73,7 @@ trading:
   auto_pause_resume_hours: 12
 risk:
   daily_loss_limit_cents: 2500
-  max_drawdown_pct: 0.10
+  max_drawdown_pct: 0.1
   drawdown_pause_cooldown_minutes: 60
   min_trades_before_drawdown: 5
   drawdown_auto_reset_peak_after_cooldown: true
@@ -243,7 +242,7 @@ research:
       enabled: true
 position_sizing:
   method: fractional_kelly
-  kelly_fraction: 0.20
+  kelly_fraction: 0.2
   min_position_cents: 100
   max_position_pct: 0.04
 logging:
@@ -259,4 +258,3 @@ dashboard:
     username: admin
     password: ''
   refresh_interval_seconds: 15
-

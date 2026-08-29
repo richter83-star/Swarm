@@ -285,6 +285,11 @@ def api_llm():
                                "recent_decisions": recent, "error": err})
 
     try:
+        # Check if table exists
+        cur_t = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llm_decisions'")
+        if not cur_t.fetchone():
+            return json_response({"today": today_stats, "clean_period": clean_period, "recent_decisions": recent})
+
         # ── Today's decisions ─────────────────────────────────────────────
         cur = conn.execute(
             "SELECT bot_name, decision, rationale FROM llm_decisions "
@@ -320,7 +325,6 @@ def api_llm():
         }
 
         # ── Clean-period stats (all resolved outcomes) ────────────────────
-        # "Clean period" = all rows with a real outcome (win/loss), not quant fallback
         cur2 = conn.execute(
             "SELECT outcome, timestamp FROM llm_decisions "
             "WHERE outcome IS NOT NULL AND outcome != '' "
@@ -357,8 +361,9 @@ def api_llm():
             for r in cur3.fetchall()
         ]
 
+    except sqlite3.OperationalError:
+        pass
     except Exception as exc:
-        traceback.print_exc()
         return json_response({"today": today_stats, "clean_period": clean_period,
                                "recent_decisions": recent, "error": str(exc)})
     finally:

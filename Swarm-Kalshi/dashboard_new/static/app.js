@@ -399,42 +399,46 @@ function renderOverview() {
       const paused = b.paused;
       const active = b.active !== false;
       const pnlPos = pnl >= 0;
+      const tradePct = clamp((trades / (maxTrades || 1)) * 100, 0, 100);
 
-      let statusBadge, accentCls;
+      let statusBadge;
       if (!active) {
-        statusBadge = badge('inactive', 'red');
-        accentCls = 'inactive';
+        statusBadge = badge('inactive', 'error');
       } else if (paused) {
-        statusBadge = badge('paused', 'orange');
-        accentCls = 'paused';
+        statusBadge = badge('paused', 'warning');
       } else {
-        statusBadge = badge('active', 'green');
-        accentCls = '';
+        statusBadge = badge('active', 'success');
       }
 
       return `<div class="bot-card">
-        <div class="bot-card-accent ${accentCls}"></div>
         <div class="bot-card-header">
           <div class="bot-name">${bot}</div>
           ${statusBadge}
         </div>
-        <div class="bot-card-body">
-          <div>
-            <div class="bot-stat-label">Balance</div>
-            <div class="bot-stat-value">${fmt$(balance)}</div>
+        <div class="bot-metric-grid">
+          <div class="bot-metric-item">
+            <div class="bot-metric-label">Allocated Cash</div>
+            <div class="bot-metric-value">${fmt$(balance)}</div>
           </div>
-          <div>
-            <div class="bot-stat-label">Daily PnL</div>
-            <div class="bot-stat-value ${pnlPos ? 'positive' : 'negative'}">${pnlPos ? '+' : ''}${fmt$(pnl)}</div>
+          <div class="bot-metric-item">
+            <div class="bot-metric-label">Today P&L</div>
+            <div class="bot-metric-value" style="color:${pnlPos ? 'var(--color-emerald)' : 'var(--color-rose)'}">${pnlPos ? '+' : ''}${fmt$(pnl)}</div>
           </div>
-          <div>
-            <div class="bot-stat-label">Trades</div>
-            <div class="bot-stat-value">${trades}/${maxTrades}</div>
+          <div class="bot-metric-item">
+            <div class="bot-metric-label">Trade Execution</div>
+            <div class="bot-metric-value">${trades} / ${maxTrades}</div>
           </div>
-          <div>
-            <div class="bot-stat-label">Can Trade</div>
-            <div class="bot-stat-value">${b.can_trade !== false ? badge('yes','green') : badge('no','red')}</div>
+          <div class="bot-metric-item">
+            <div class="bot-metric-label">Gatekeeper</div>
+            <div class="bot-metric-value">${b.can_trade !== false ? '<span style="color:var(--color-emerald)">Approved</span>' : '<span style="color:var(--color-rose)">Locked</span>'}</div>
           </div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--text-muted);margin-bottom:0.25rem;">
+            <span>Daily Quota Utilization</span>
+            <span style="font-family:var(--font-mono)">${tradePct.toFixed(0)}%</span>
+          </div>
+          ${progressBar(tradePct, tradePct > 80 ? 'yellow' : '')}
         </div>
       </div>`;
     }).join('');
@@ -446,7 +450,7 @@ function renderOverview() {
   // Stats row
   const llm = State.data.llm;
   const sys = State.data.system;
-  const cleanWr = llm?.clean_period?.win_rate_pct ?? llm?.clean_period?.win_rate_pct ?? 0;
+  const cleanWr = llm?.clean_period?.win_rate_pct ?? 0;
   const llmApproval = llm?.today?.approval_rate_pct ?? 0;
   const tavily = sys?.tavily;
   const uptime = s?.uptime_seconds ?? sys?.uptime_seconds ?? 0;
@@ -454,21 +458,25 @@ function renderOverview() {
   const statsEl = document.getElementById('ov-stats-row');
   if (statsEl) {
     statsEl.innerHTML = `
-      <div class="stat-box">
-        <div class="stat-box-label">Win Rate</div>
-        <div class="stat-box-value ${cleanWr >= 55 ? 'green' : (cleanWr > 0 ? '' : 'red')}">${fmtPct(cleanWr)}</div>
+      <div class="card" style="padding:1rem;">
+        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Win Rate (Clean)</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${cleanWr >= 55 ? 'var(--color-emerald)' : (cleanWr > 0 ? 'var(--color-amber)' : '#ffffff')};margin-top:0.2rem;">${fmtPct(cleanWr)}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Baseline Gate: 55.0%</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-box-label">LLM Approval</div>
-        <div class="stat-box-value blue">${fmtPct(llmApproval)}</div>
+      <div class="card" style="padding:1rem;">
+        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Gemini Approval Alpha</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:var(--color-cyan);margin-top:0.2rem;">${fmtPct(llmApproval)}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Search Grounded</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-box-label">Tavily Credits</div>
-        <div class="stat-box-value ${tavily?.used_today > 24 ? 'orange' : ''}">${tavily?.used_today ?? 0}/${tavily?.budget ?? 30}</div>
+      <div class="card" style="padding:1rem;">
+        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Tavily Macro Search</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${tavily?.used_today > 24 ? 'var(--color-amber)' : '#ffffff'};margin-top:0.2rem;">${tavily?.used_today ?? 0} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ ${tavily?.budget ?? 30}</span></div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Credits used today</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-box-label">Uptime</div>
-        <div class="stat-box-value">${fmtUptime(uptime)}</div>
+      <div class="card" style="padding:1rem;">
+        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">System Uptime</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:#ffffff;margin-top:0.2rem;">${fmtUptime(uptime)}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Continuous session</div>
       </div>
     `;
   }
@@ -1472,6 +1480,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  function updateUtcClock() {
+    const el = document.getElementById('utc-clock');
+    if (!el) return;
+    const now = new Date();
+    const h = String(now.getUTCHours()).padStart(2, '0');
+    const m = String(now.getUTCMinutes()).padStart(2, '0');
+    const s = String(now.getUTCSeconds()).padStart(2, '0');
+    el.textContent = `${h}:${m}:${s} UTC`;
+  }
+  updateUtcClock();
+  setInterval(updateUtcClock, 1000);
 
   // Initial load
   switchTab('console');
