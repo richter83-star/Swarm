@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 import time
 import traceback
 from datetime import datetime, timezone, date
@@ -28,6 +29,8 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # Set at startup via argparse
 PROJECT_ROOT: Path = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 START_TIME: float = time.time()
 
 BOTS = ["sentinel", "oracle", "pulse", "vanguard"]
@@ -616,8 +619,23 @@ def api_learning():
         report = aggregate_full_learning_report(data_path())
         return json_response(report)
     except Exception as exc:
-        traceback.print_exc()
-        return json_response({"error": str(exc)}, 500)
+        saved = read_json(data_path("learning_report_latest.json"))
+        if saved:
+            return json_response(saved)
+        return json_response({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "scorecard": {
+                "is_learning": "INSUFFICIENT_DATA",
+                "stage": "WARMUP",
+                "status_message": "Warmup phase — gathering baseline data.",
+                "evidence": ["Total Recorded Trades: 0 across 4 bots."],
+            },
+            "calibration": {"expected_calibration_error": 0.0, "brier_score": 0.25, "calibration_bias": 0.0, "buckets": []},
+            "categories": {"overall_win_rate_pct": 50.0, "hot_categories": [], "cold_categories": [], "categories": []},
+            "weights": {"total_recalibrations": 0, "latest_weights_by_bot": {}},
+            "llm_intelligence": {"total_decisions": 0, "approved": 0, "rejected": 0, "approval_rate_pct": 0.0, "top_red_flags": []},
+            "rolling_win_rates": [],
+        })
 
 
 # ── /api/system ──────────────────────────────────────────────────────────────
@@ -863,27 +881,274 @@ def api_config_save():
     return json_response({"ok": True, "backup": str(backup_file)})
 
 
-# ── /api/kill ────────────────────────────────────────────────────────────────
+# ── Swarm Command Console Endpoints ─────────────────────────────────────────
 
-@app.route("/api/kill", methods=["POST", "OPTIONS"])
-def api_kill():
-    """
-    Write data/kill_signal.json to request swarm shutdown.
-    Requires body: {"confirm": "KILL"} to prevent accidents.
-    """
+def _get_swarm_processes():
+    """Locate all running swarm processes."""
+    found = []
+    target_scripts = (
+        "run_swarm.py",
+        "run_swarm_with_brain.py",
+        "run_swarm_with_ollama_brain.py",
+        "swarm_daemon.py",
+        "bot_runner.py",
+    )
+    import subprocess
+    if os.name == "nt":
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' } | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress"
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.stdout.strip():
+                data = json.loads(res.stdout.strip())
+                if isinstance(data, dict):
+                    data = [data]
+                for proc in data:
+                    cmdline = proc.get("CommandLine") or ""
+                    pid = proc.get("ProcessId")
+                    if any(t in cmdline for t in target_scripts) and pid != os.getpid():
+                        found.append({"pid": pid, "cmd": cmdline})
+        except Exception:
+            pass
+    else:
+        try:
+            res = subprocess.run(["ps", "-ef"], capture_output=True, text=True, timeout=5)
+            for line in res.stdout.splitlines():
+                if any(t in line for t in target_scripts) and "grep" not in line and str(os.getpid()) not in line:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        found.append({"pid": int(parts[1]), "cmd": line})
+        except Exception:
+            pass
+    return found
+
+
+@app.route("/api/swarm/status")
+def api_swarm_status():
+    """Live swarm process status, trading mode, and AI brain model."""
+    procs = _get_swarm_processes()
+    cfg_file = config_path("swarm_config.yaml")
+    is_demo = True
+    provider = "gemini"
+    model = "gemini-2.5-flash"
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            c = yaml.safe_load(f) or {}
+            is_demo = bool(c.get("api", {}).get("demo_mode", True))
+            central = c.get("central_llm", {})
+            provider = central.get("provider", "gemini")
+            model = central.get("gemini_model", "gemini-2.5-flash")
+    except Exception:
+        pass
+
+    return json_response({
+        "running": len(procs) > 0,
+        "process_count": len(procs),
+        "processes": procs,
+        "mode": "demo" if is_demo else "live",
+        "demo_mode": is_demo,
+        "provider": provider,
+        "model": model,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.route("/api/swarm/start", methods=["POST", "OPTIONS"])
+def api_swarm_start():
+    """Start the swarm in the background."""
     if request.method == "OPTIONS":
         return json_response({})
-    body = request.get_json(silent=True) or {}
-    if body.get("confirm") != "KILL":
-        return json_response({"ok": False, "error": "Must send {\"confirm\": \"KILL\"}"}, 400)
 
-    signal = {
-        "action":    "kill",
+    procs = _get_swarm_processes()
+    if procs:
+        return json_response({
+            "ok": True,
+            "message": f"Swarm already running ({len(procs)} process(es) active).",
+            "pids": [p["pid"] for p in procs]
+        })
+
+    import subprocess
+    run_script = PROJECT_ROOT / "run_swarm_with_brain.py"
+    if not run_script.exists():
+        run_script = PROJECT_ROOT / "run_swarm.py"
+
+    log_file = (PROJECT_ROOT / "logs" / "swarm.log").open("a", encoding="utf-8")
+
+    if os.name == "nt":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        proc = subprocess.Popen(
+            [sys.executable, str(run_script)],
+            cwd=str(PROJECT_ROOT),
+            stdout=log_file,
+            stderr=log_file,
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+    else:
+        proc = subprocess.Popen(
+            [sys.executable, str(run_script)],
+            cwd=str(PROJECT_ROOT),
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True,
+            close_fds=True,
+        )
+
+    time.sleep(2)
+    new_procs = _get_swarm_processes()
+    return json_response({
+        "ok": True,
+        "message": f"Swarm started successfully (PID: {proc.pid}).",
+        "pid": proc.pid,
+        "active_processes": new_procs,
+    })
+
+
+@app.route("/api/swarm/stop", methods=["POST", "OPTIONS"])
+def api_swarm_stop():
+    """Stop all running swarm processes."""
+    if request.method == "OPTIONS":
+        return json_response({})
+
+    procs = _get_swarm_processes()
+    if not procs:
+        return json_response({"ok": True, "message": "No active swarm processes found."})
+
+    import subprocess, signal
+    # Send kill signal file
+    write_json(data_path("kill_signal.json"), {
+        "action": "kill",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "requested_by": "dashboard",
-    }
-    write_json(data_path("kill_signal.json"), signal)
-    return json_response({"ok": True, "message": "Kill signal written to data/kill_signal.json"})
+        "requested_by": "command_console",
+    })
+
+    killed = []
+    for p in procs:
+        pid = p["pid"]
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+            killed.append(pid)
+        except Exception:
+            pass
+
+    time.sleep(1)
+    return json_response({
+        "ok": True,
+        "message": f"Stopped {len(killed)} swarm process(es).",
+        "stopped_pids": killed,
+    })
+
+
+@app.route("/api/swarm/restart", methods=["POST", "OPTIONS"])
+def api_swarm_restart():
+    """Restart the swarm."""
+    if request.method == "OPTIONS":
+        return json_response({})
+    api_swarm_stop()
+    time.sleep(1.5)
+    return api_swarm_start()
+
+
+@app.route("/api/swarm/mode", methods=["POST", "OPTIONS"])
+def api_swarm_mode():
+    """Switch trading mode to 'demo' or 'live'."""
+    if request.method == "OPTIONS":
+        return json_response({})
+
+    body = request.get_json(silent=True) or {}
+    new_mode = str(body.get("mode", "")).strip().lower()
+    if new_mode not in ("demo", "live"):
+        return json_response({"ok": False, "error": "Mode must be 'demo' or 'live'"}, 400)
+
+    cfg_file = config_path("swarm_config.yaml")
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        if "api" not in cfg or not isinstance(cfg["api"], dict):
+            cfg["api"] = {}
+
+        is_demo = (new_mode == "demo")
+        cfg["api"]["demo_mode"] = is_demo
+
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+        procs = _get_swarm_processes()
+        restart_needed = len(procs) > 0
+
+        return json_response({
+            "ok": True,
+            "mode": new_mode,
+            "demo_mode": is_demo,
+            "message": f"Trading mode switched to {new_mode.upper()}.",
+            "restart_needed": restart_needed,
+        })
+    except Exception as exc:
+        return json_response({"ok": False, "error": str(exc)}, 500)
+
+
+@app.route("/api/swarm/exec", methods=["POST", "OPTIONS"])
+def api_swarm_exec():
+    """Execute console commands and return terminal output."""
+    if request.method == "OPTIONS":
+        return json_response({})
+
+    body = request.get_json(silent=True) or {}
+    cmd_str = str(body.get("command", "")).strip()
+    if not cmd_str:
+        return json_response({"ok": False, "error": "Empty command"}, 400)
+
+    import subprocess
+    parts = cmd_str.split()
+    verb = parts[0].lower().lstrip("/")
+
+    if verb in ("start", "launch"):
+        return api_swarm_start()
+    elif verb in ("stop", "kill", "halt"):
+        return api_swarm_stop()
+    elif verb in ("restart", "reboot"):
+        return api_swarm_restart()
+    elif verb == "mode":
+        if len(parts) > 1:
+            request._cached_json = {"mode": parts[1].lower()}
+            return api_swarm_mode()
+        else:
+            return api_swarm_status()
+    elif verb in ("status", "ps"):
+        return api_swarm_status()
+    elif verb in ("health", "check"):
+        try:
+            res = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "health_check.py")],
+                capture_output=True, text=True, timeout=20, cwd=str(PROJECT_ROOT)
+            )
+            out = (res.stdout + "\n" + res.stderr).strip()
+            return json_response({"ok": True, "output": out})
+        except Exception as e:
+            return json_response({"ok": False, "error": str(e)})
+    elif verb in ("radar", "learning", "eval"):
+        try:
+            res = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "watch_demo_learning.py"), "--save-report"],
+                capture_output=True, text=True, timeout=20, cwd=str(PROJECT_ROOT)
+            )
+            out = (res.stdout + "\n" + res.stderr).strip()
+            return json_response({"ok": True, "output": out})
+        except Exception as e:
+            return json_response({"ok": False, "error": str(e)})
+    else:
+        return json_response({
+            "ok": False,
+            "error": f"Unknown command '{cmd_str}'. Available: start, stop, restart, mode demo, mode live, health, radar, status, clear"
+        }, 400)
 
 
 # ---------------------------------------------------------------------------

@@ -8,14 +8,17 @@
 
 // ── State ──────────────────────────────────────────────────
 const State = {
-  activeTab: 'overview',
+  activeTab: 'console',
   tradeFilter: 'all',
   configEditMode: false,
   equityChart: null,
   calibrationChart: null,
   trajectoryChart: null,
   lastRefresh: null,
+  cmdHistory: [],
+  cmdHistoryIndex: -1,
   data: {
+    swarm: null,
     status: null,
     learning: null,
     llm: null,
@@ -110,17 +113,22 @@ function showToast(msg, isError = false) {
 async function apiFetch(url, options = {}) {
   try {
     const resp = await fetch(url, options);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => null);
+      if (errBody && errBody.error) throw new Error(errBody.error);
+      throw new Error(`HTTP ${resp.status}`);
+    }
     return await resp.json();
   } catch (err) {
     console.warn(`[fetch] ${url}:`, err);
-    return null;
+    return { error: err.message };
   }
 }
 
 // ── Data loading ───────────────────────────────────────────
 async function loadAll() {
-  const [status, learning, llm, trades, risk, system, equity, config] = await Promise.allSettled([
+  const [swarm, status, learning, llm, trades, risk, system, equity, config] = await Promise.allSettled([
+    apiFetch('/api/swarm/status'),
     apiFetch('/api/status'),
     apiFetch('/api/learning'),
     apiFetch('/api/llm'),
@@ -131,6 +139,7 @@ async function loadAll() {
     apiFetch('/api/config'),
   ]);
 
+  State.data.swarm    = swarm.status    === 'fulfilled' ? swarm.value    : null;
   State.data.status   = status.status   === 'fulfilled' ? status.value   : null;
   State.data.learning = learning.status === 'fulfilled' ? learning.value : null;
   State.data.llm      = llm.status      === 'fulfilled' ? llm.value      : null;
@@ -142,6 +151,7 @@ async function loadAll() {
 
   State.lastRefresh = new Date();
   updateRefreshBadge();
+  updateSwarmControlBar();
   renderActiveTab();
 }
 
@@ -152,9 +162,41 @@ function updateRefreshBadge() {
   }
 }
 
+// ── Swarm Global Control Bar ───────────────────────────────
+function updateSwarmControlBar() {
+  const sw = State.data.swarm;
+  if (!sw) return;
+
+  const isRunning = Boolean(sw.running);
+  const isDemo = sw.mode === 'demo';
+
+  // Swarm Status Pill
+  const statusPill = document.getElementById('cmd-swarm-status-pill');
+  const statusText = document.getElementById('cmd-swarm-status-text');
+  if (statusPill && statusText) {
+    statusPill.className = 'status-pill ' + (isRunning ? 'status-running' : 'status-stopped');
+    statusText.textContent = isRunning ? `SWARM RUNNING (${sw.process_count} proc)` : 'SWARM STOPPED';
+  }
+
+  // Trading Mode Pill
+  const modePill = document.getElementById('cmd-mode-pill');
+  const modeText = document.getElementById('cmd-mode-text');
+  if (modePill && modeText) {
+    modePill.className = 'status-pill ' + (isDemo ? 'status-demo' : 'status-live');
+    modeText.textContent = isDemo ? '🟡 DEMO MODE (SIM)' : '🔴 LIVE CAPITAL';
+  }
+
+  // Start / Stop button states
+  const startBtn = document.getElementById('cmd-btn-start');
+  const stopBtn = document.getElementById('cmd-btn-stop');
+  if (startBtn) startBtn.disabled = isRunning;
+  if (stopBtn) stopBtn.disabled = !isRunning;
+}
+
 // ── Tab routing ────────────────────────────────────────────
 function renderActiveTab() {
   switch (State.activeTab) {
+    case 'console':  renderConsole();  break;
     case 'overview': renderOverview(); break;
     case 'learning': renderLearning(); break;
     case 'llm':      renderLLM();      break;
@@ -176,6 +218,159 @@ function switchTab(name) {
     panel.classList.toggle('active', panel.id === `tab-${name}`);
   });
   renderActiveTab();
+}
+
+// ── Command Console Tab ────────────────────────────────────
+function renderConsole() {
+  const sw = State.data.swarm;
+  if (!sw) return;
+
+  const isRunning = Boolean(sw.running);
+  const isDemo = sw.mode === 'demo';
+
+  // State card
+  const stateBadge = document.getElementById('console-state-badge');
+  const procCount = document.getElementById('console-proc-count');
+  const pidsList = document.getElementById('console-pids-list');
+
+  if (stateBadge) {
+    stateBadge.className = 'badge ' + (isRunning ? 'badge-success' : 'badge-error');
+    stateBadge.textContent = isRunning ? 'RUNNING' : 'STOPPED';
+  }
+  if (procCount) {
+    procCount.textContent = `${sw.process_count || 0} active process(es)`;
+  }
+  if (pidsList) {
+    if (isRunning && sw.processes && sw.processes.length > 0) {
+      pidsList.innerHTML = sw.processes.map(p => `• PID <code>${p.pid}</code>`).join(' ');
+    } else {
+      pidsList.textContent = 'No active processes';
+    }
+  }
+
+  // Mode card
+  const modeBadge = document.getElementById('console-mode-badge');
+  const modeDesc = document.getElementById('console-mode-desc');
+  if (modeBadge) {
+    modeBadge.className = 'badge ' + (isDemo ? 'badge-warning' : 'badge-error');
+    modeBadge.textContent = isDemo ? 'DEMO (SIMULATION)' : 'LIVE CAPITAL';
+  }
+  if (modeDesc) {
+    modeDesc.textContent = isDemo
+      ? 'Safe simulated orders via Kalshi Demo API'
+      : '⚠️ LIVE ORDERS WITH REAL CAPITAL ACTIVE';
+  }
+}
+
+function appendTerminalLine(text, type = 'term-line') {
+  const screen = document.getElementById('console-terminal-screen');
+  if (!screen) return;
+
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const line = document.createElement('div');
+  line.className = `term-line ${type}`;
+  line.textContent = `[${timeStr}] ${text}`;
+  screen.appendChild(line);
+  screen.scrollTop = screen.scrollHeight;
+}
+
+function clearTerminal() {
+  const screen = document.getElementById('console-terminal-screen');
+  if (screen) {
+    screen.innerHTML = '<div class="term-line term-sys">Terminal cleared.</div>';
+  }
+}
+
+async function sendConsoleCommand(rawCmd) {
+  const cmd = (rawCmd || '').trim();
+  if (!cmd) return;
+
+  // Add to history
+  State.cmdHistory.push(cmd);
+  State.cmdHistoryIndex = State.cmdHistory.length;
+
+  appendTerminalLine(`swarm> ${cmd}`, 'term-prompt');
+
+  const verb = cmd.toLowerCase().split(' ')[0].replace(/^\//, '');
+
+  if (verb === 'clear') {
+    clearTerminal();
+    return;
+  }
+
+  try {
+    let res;
+    if (verb === 'start') {
+      appendTerminalLine('Starting Kalshi swarm in background...', 'term-info');
+      res = await apiFetch('/api/swarm/start', { method: 'POST' });
+    } else if (verb === 'stop') {
+      appendTerminalLine('Sending stop signal to swarm processes...', 'term-info');
+      res = await apiFetch('/api/swarm/stop', { method: 'POST' });
+    } else if (verb === 'restart') {
+      appendTerminalLine('Restarting Kalshi swarm...', 'term-info');
+      res = await apiFetch('/api/swarm/restart', { method: 'POST' });
+    } else if (verb === 'mode') {
+      const parts = cmd.split(' ');
+      if (parts.length > 1) {
+        const targetMode = parts[1].toLowerCase();
+        if (targetMode === 'live') {
+          if (!confirm('⚠️ WARNING: You are switching to LIVE CAPITAL MODE. Real money will be at risk. Are you sure?')) {
+            appendTerminalLine('Mode switch to LIVE cancelled by operator.', 'term-warn');
+            return;
+          }
+        }
+        res = await apiFetch('/api/swarm/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: targetMode }),
+        });
+      } else {
+        res = await apiFetch('/api/swarm/status');
+      }
+    } else {
+      res = await apiFetch('/api/swarm/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd }),
+      });
+    }
+
+    if (res?.output) {
+      // Multiline output
+      const lines = res.output.split('\n');
+      for (const l of lines) {
+        if (l.trim()) appendTerminalLine(l, 'term-out');
+      }
+    } else if (res?.message) {
+      appendTerminalLine(res.message, res.ok ? 'term-success' : 'term-error');
+      showToast(res.message, !res.ok);
+    } else if (res?.error) {
+      appendTerminalLine(`Error: ${res.error}`, 'term-error');
+      showToast(res.error, true);
+    } else if (res?.mode) {
+      appendTerminalLine(`Swarm status: ${res.running ? 'RUNNING' : 'STOPPED'} | Mode: ${res.mode.toUpperCase()} | Model: ${res.model}`, 'term-info');
+    }
+
+    // Refresh state
+    loadAll();
+  } catch (err) {
+    appendTerminalLine(`Execution failure: ${err.message}`, 'term-error');
+    showToast(err.message, true);
+  }
+}
+
+async function toggleSwarmMode() {
+  const sw = State.data.swarm;
+  const currentMode = sw?.mode || 'demo';
+  const targetMode = currentMode === 'demo' ? 'live' : 'demo';
+
+  if (targetMode === 'live') {
+    if (!confirm('⚠️ CRITICAL CONFIRMATION: Switch trading mode to LIVE CAPITAL? Real orders will be submitted to Kalshi.')) {
+      return;
+    }
+  }
+
+  sendConsoleCommand(`mode ${targetMode}`);
 }
 
 // ── Overview ───────────────────────────────────────────────
@@ -1223,8 +1418,63 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Command Console & Global Bar Buttons
+  const cmdStart = document.getElementById('cmd-btn-start');
+  const cmdStop = document.getElementById('cmd-btn-stop');
+  const cmdRestart = document.getElementById('cmd-btn-restart');
+  const cmdMode = document.getElementById('cmd-btn-toggle-mode');
+  const cmdHealth = document.getElementById('cmd-btn-health');
+  const cmdRadar = document.getElementById('cmd-btn-radar');
+  const modeSwitchCard = document.getElementById('console-mode-switch-btn');
+
+  if (cmdStart) cmdStart.addEventListener('click', () => sendConsoleCommand('start'));
+  if (cmdStop) cmdStop.addEventListener('click', () => sendConsoleCommand('stop'));
+  if (cmdRestart) cmdRestart.addEventListener('click', () => sendConsoleCommand('restart'));
+  if (cmdMode) cmdMode.addEventListener('click', toggleSwarmMode);
+  if (modeSwitchCard) modeSwitchCard.addEventListener('click', toggleSwarmMode);
+  if (cmdHealth) cmdHealth.addEventListener('click', () => sendConsoleCommand('health'));
+  if (cmdRadar) cmdRadar.addEventListener('click', () => sendConsoleCommand('radar'));
+
+  // Terminal input & history
+  const consoleInp = document.getElementById('console-input');
+  const consoleSubmit = document.getElementById('console-submit-btn');
+
+  function handleConsoleSubmit() {
+    if (!consoleInp) return;
+    const val = consoleInp.value.trim();
+    if (val) {
+      sendConsoleCommand(val);
+      consoleInp.value = '';
+    }
+  }
+
+  if (consoleSubmit) consoleSubmit.addEventListener('click', handleConsoleSubmit);
+  if (consoleInp) {
+    consoleInp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleConsoleSubmit();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (State.cmdHistory.length > 0 && State.cmdHistoryIndex > 0) {
+          State.cmdHistoryIndex--;
+          consoleInp.value = State.cmdHistory[State.cmdHistoryIndex] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (State.cmdHistoryIndex < State.cmdHistory.length - 1) {
+          State.cmdHistoryIndex++;
+          consoleInp.value = State.cmdHistory[State.cmdHistoryIndex] || '';
+        } else {
+          State.cmdHistoryIndex = State.cmdHistory.length;
+          consoleInp.value = '';
+        }
+      }
+    });
+  }
+
   // Initial load
-  switchTab('overview');
+  switchTab('console');
   loadAll();
 
   // Fast real-time auto-refresh every 5s

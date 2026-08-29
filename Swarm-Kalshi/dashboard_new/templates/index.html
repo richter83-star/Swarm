@@ -11,9 +11,10 @@
 
 <!-- ── Top Navigation Bar ────────────────────────────────── -->
 <nav class="topbar">
-  <div class="topbar-logo">KALSHI <span>SWARM</span></div>
+  <div class="topbar-logo">KALSHI <span>SWARM</span> <span class="console-tag">COMMAND CONSOLE</span></div>
   <div class="tab-strip">
-    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn active" data-tab="console">Command Console</button>
+    <button class="tab-btn" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="learning">Learning Radar</button>
     <button class="tab-btn" data-tab="llm">LLM Intelligence</button>
     <button class="tab-btn" data-tab="trades">Trades</button>
@@ -29,12 +30,120 @@
   </div>
 </nav>
 
+<!-- ── Global Swarm Command Bar ────────────────────────────── -->
+<div class="command-bar">
+  <div class="command-bar-status">
+    <span id="cmd-swarm-status-pill" class="status-pill status-stopped">
+      <span class="status-indicator"></span>
+      <span id="cmd-swarm-status-text">SWARM STOPPED</span>
+    </span>
+    <span id="cmd-mode-pill" class="status-pill status-demo">
+      <span id="cmd-mode-text">🟡 DEMO MODE</span>
+    </span>
+    <span class="status-pill status-brain">
+      <span>🔷 Gemini 2.5 Flash</span>
+    </span>
+  </div>
+
+  <div class="command-bar-actions">
+    <button class="btn btn-cmd btn-cmd-start" id="cmd-btn-start" title="Start swarm in background">▶ Start</button>
+    <button class="btn btn-cmd btn-cmd-stop" id="cmd-btn-stop" title="Stop all swarm processes">⏹ Stop</button>
+    <button class="btn btn-cmd btn-cmd-restart" id="cmd-btn-restart" title="Restart swarm">🔄 Restart</button>
+    <button class="btn btn-cmd btn-cmd-mode" id="cmd-btn-toggle-mode" title="Toggle Demo / Live mode">⇄ Switch Mode</button>
+    <button class="btn btn-cmd btn-cmd-health" id="cmd-btn-health" title="Run 15-point health check">🩺 Health</button>
+    <button class="btn btn-cmd btn-cmd-radar" id="cmd-btn-radar" title="Run Demo Learning Radar">📡 Radar</button>
+  </div>
+</div>
+
 <!-- ── Tab Panels ─────────────────────────────────────────── -->
+
+<!-- ════════════════════════════════════════════════════════
+     TAB 0: COMMAND CONSOLE
+     ════════════════════════════════════════════════════════ -->
+<div class="tab-panel active" id="tab-console">
+  <div class="content">
+
+    <!-- Console Hero Cards -->
+    <div class="grid-3 section-gap">
+      <div class="card console-stat-card">
+        <div class="card-title">Swarm Execution State</div>
+        <div class="console-state-row">
+          <div id="console-state-badge" class="badge badge-error">STOPPED</div>
+          <div id="console-proc-count" class="text-muted" style="font-size:0.85rem">0 active processes</div>
+        </div>
+        <div id="console-pids-list" class="console-subtext">No processes running</div>
+      </div>
+
+      <div class="card console-stat-card">
+        <div class="card-title">Trading Environment Mode</div>
+        <div class="console-state-row">
+          <div id="console-mode-badge" class="badge badge-warning">DEMO (SIMULATION)</div>
+          <button id="console-mode-switch-btn" class="btn btn-sm btn-ghost">Switch Mode</button>
+        </div>
+        <div class="console-subtext" id="console-mode-desc">Safe simulated orders via Kalshi Demo API</div>
+      </div>
+
+      <div class="card console-stat-card">
+        <div class="card-title">Central AI Brain</div>
+        <div class="console-state-row">
+          <div class="badge badge-info">GEMINI 2.5 FLASH</div>
+          <span class="badge badge-success">READY</span>
+        </div>
+        <div class="console-subtext">Search Grounding: Active | Multi-Bot Gatekeeper</div>
+      </div>
+    </div>
+
+    <!-- Interactive Command Terminal -->
+    <div class="card section-gap console-terminal-card">
+      <div class="console-terminal-header">
+        <div class="terminal-dots">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span class="terminal-title">Kalshi Swarm Interactive Terminal Console</span>
+        </div>
+        <div class="terminal-quick-links">
+          <button class="term-btn" onclick="sendConsoleCommand('start')">start</button>
+          <button class="term-btn" onclick="sendConsoleCommand('stop')">stop</button>
+          <button class="term-btn" onclick="sendConsoleCommand('restart')">restart</button>
+          <button class="term-btn" onclick="sendConsoleCommand('mode demo')">mode demo</button>
+          <button class="term-btn" onclick="sendConsoleCommand('mode live')">mode live</button>
+          <button class="term-btn" onclick="sendConsoleCommand('health')">health</button>
+          <button class="term-btn" onclick="sendConsoleCommand('radar')">radar</button>
+          <button class="term-btn" onclick="sendConsoleCommand('status')">status</button>
+          <button class="term-btn" onclick="clearTerminal()">clear</button>
+        </div>
+      </div>
+
+      <!-- Terminal Output Window -->
+      <div class="terminal-screen" id="console-terminal-screen">
+        <div class="term-line term-sys">Kalshi Swarm Command Console v2.5 initialized.</div>
+        <div class="term-line term-sys">Provider: Google Gemini 2.5 Flash (Search Grounded).</div>
+        <div class="term-line term-prompt">Type a command or click a quick action above to begin.</div>
+      </div>
+
+      <!-- Terminal Input Line -->
+      <div class="terminal-input-bar">
+        <span class="terminal-prompt-symbol">swarm&gt;</span>
+        <input
+          type="text"
+          id="console-input"
+          class="terminal-input"
+          placeholder="Type command (e.g. start, stop, mode demo, mode live, health, radar)..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="btn btn-blue" id="console-submit-btn">Execute</button>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <!-- ════════════════════════════════════════════════════════
      TAB 1: OVERVIEW
      ════════════════════════════════════════════════════════ -->
-<div class="tab-panel active" id="tab-overview">
+<div class="tab-panel" id="tab-overview">
   <div class="content">
 
     <!-- Portfolio hero -->
