@@ -290,8 +290,14 @@ def calculate_central_llm_learning(data_dir: Path = DATA_DIR) -> Dict[str, Any]:
     conn = _open_db(db_path)
     if not conn:
         return {
-            "total_decisions": 0, "approved": 0, "rejected": 0,
-            "llm_alpha_active": False, "top_red_flags": [],
+            "total_decisions": 0,
+            "approved": 0,
+            "rejected": 0,
+            "approval_rate_pct": 0.0,
+            "resolved_approved_trades": 0,
+            "resolved_approved_win_rate_pct": 0.0,
+            "llm_alpha_active": False,
+            "top_red_flags": [],
         }
 
     try:
