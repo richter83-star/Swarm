@@ -128,45 +128,59 @@ def calculate_confidence_calibration(trades: List[Dict[str, Any]]) -> Dict[str, 
         cal_error = obs_wr - avg_conf if count > 0 else 0.0
 
         if count > 0:
+            obs_wr = round(wins / count * 100.0, 1)
+            avg_conf = round(sum(float(t["confidence"]) for t in b_trades) / count, 1)
+            cal_error = round(obs_wr - avg_conf, 1)
             total_ece_numerator += count * abs(obs_wr - avg_conf)
             total_evaluated += count
+        else:
+            obs_wr = None
+            avg_conf = round(midpoint, 1)
+            cal_error = None
 
         bucket_stats.append({
             "label": b["label"],
             "range": [b["min"], b["max"]],
             "midpoint": midpoint,
-            "avg_confidence": round(avg_conf, 1),
+            "avg_confidence": avg_conf,
             "trades": count,
             "wins": wins,
             "losses": losses,
-            "observed_win_rate": round(obs_wr, 1),
-            "calibration_error": round(cal_error, 1),
+            "observed_win_rate": obs_wr,
+            "calibration_error": cal_error,
         })
 
-    for t in settled:
-        c = float(t.get("confidence") or 50.0) / 100.0
-        actual = 1.0 if t.get("outcome") == "win" else 0.0
-        total_brier_sum += (c - actual) ** 2
+    if settled:
+        for t in settled:
+            c = float(t.get("confidence") or 50.0) / 100.0
+            actual = 1.0 if t.get("outcome") == "win" else 0.0
+            total_brier_sum += (c - actual) ** 2
 
-    ece = round(total_ece_numerator / total_evaluated, 2) if total_evaluated > 0 else 0.0
-    brier_score = round(total_brier_sum / len(settled), 4) if settled else 0.25
+        ece = round(total_ece_numerator / total_evaluated, 2) if total_evaluated > 0 else None
+        brier_score = round(total_brier_sum / len(settled), 4)
 
-    # Determine calibration bias
-    active_errors = [b["calibration_error"] for b in bucket_stats if b["trades"] >= 2]
-    avg_bias = round(sum(active_errors) / len(active_errors), 1) if active_errors else 0.0
-    
-    if avg_bias > 5.0:
-        bias_desc = f"Underconfident (+{avg_bias}%) — wins more than expected"
-    elif avg_bias < -5.0:
-        bias_desc = f"Overconfident ({avg_bias}%) — wins less than expected"
+        # Determine calibration bias
+        active_errors = [b["calibration_error"] for b in bucket_stats if b["trades"] >= 2 and b["calibration_error"] is not None]
+        avg_bias = round(sum(active_errors) / len(active_errors), 1) if active_errors else 0.0
+        
+        if avg_bias > 5.0:
+            bias_desc = f"Underconfident (+{avg_bias}%) — wins more than expected"
+        elif avg_bias < -5.0:
+            bias_desc = f"Overconfident ({avg_bias}%) — wins less than expected"
+        else:
+            bias_desc = "Well-Calibrated (bias near zero)"
     else:
-        bias_desc = "Well-Calibrated (bias near zero)"
+        ece = None
+        brier_score = None
+        avg_bias = None
+        bias_desc = "Insufficient Data (Awaiting settled trades)"
 
     return {
         "buckets": bucket_stats,
         "total_settled": len(settled),
         "expected_calibration_error": ece,
         "brier_score": brier_score,
+        "brier_score_prior": 0.2500,
         "calibration_bias": avg_bias,
         "calibration_verdict": bias_desc,
     }
@@ -188,7 +202,7 @@ def calculate_category_specialization(trades: List[Dict[str, Any]]) -> Dict[str,
 
     total_settled_wins = sum(c["wins"] for c in cats.values())
     total_settled_trades = sum(c["wins"] + c["losses"] for c in cats.values())
-    overall_wr = (total_settled_wins / total_settled_trades * 100.0) if total_settled_trades > 0 else 50.0
+    overall_wr = round(total_settled_wins / total_settled_trades * 100.0, 1) if total_settled_trades > 0 else None
 
     category_list = []
     hot_categories = []
@@ -196,10 +210,10 @@ def calculate_category_specialization(trades: List[Dict[str, Any]]) -> Dict[str,
 
     for name, stat in cats.items():
         decided = stat["wins"] + stat["losses"]
-        wr = (stat["wins"] / decided * 100.0) if decided > 0 else 0.0
+        wr = round(stat["wins"] / decided * 100.0, 1) if decided > 0 else None
         
         # Adaptive multiplier calculation (0.7 to 1.3)
-        if decided >= 3:
+        if decided >= 3 and overall_wr is not None:
             multiplier = round(max(0.7, min(1.3, 1.0 + (wr - overall_wr) / 100.0)), 2)
         else:
             multiplier = 1.0
@@ -218,17 +232,17 @@ def calculate_category_specialization(trades: List[Dict[str, Any]]) -> Dict[str,
             "settled": decided,
             "wins": stat["wins"],
             "losses": stat["losses"],
-            "win_rate_pct": round(wr, 1),
+            "win_rate_pct": wr,
             "pnl_cents": stat["pnl_cents"],
             "multiplier": multiplier,
             "status": status,
         })
 
-    category_list.sort(key=lambda x: (x["settled"], x["win_rate_pct"]), reverse=True)
+    category_list.sort(key=lambda x: (x["settled"], x["win_rate_pct"] or 0), reverse=True)
 
     return {
         "categories": category_list,
-        "overall_win_rate_pct": round(overall_wr, 1),
+        "overall_win_rate_pct": overall_wr,
         "hot_categories": hot_categories,
         "cold_categories": cold_categories,
         "specialization_active": len(hot_categories) > 0 or len(cold_categories) > 0,
@@ -338,15 +352,15 @@ def calculate_central_llm_learning(data_dir: Path = DATA_DIR) -> Dict[str, Any]:
         and r.get("outcome") in ("win", "loss")
     ]
     resolved_wins = sum(1 for r in resolved_approved if r.get("outcome") == "win")
-    llm_win_rate = (resolved_wins / len(resolved_approved) * 100.0) if resolved_approved else 0.0
+    llm_win_rate = round(resolved_wins / len(resolved_approved) * 100.0, 1) if resolved_approved else None
 
     return {
         "total_decisions": total,
         "approved": approved,
         "rejected": rejected,
-        "approval_rate_pct": round(approved / total * 100.0, 1) if total else 0.0,
+        "approval_rate_pct": round(approved / total * 100.0, 1) if total else None,
         "resolved_approved_trades": len(resolved_approved),
-        "resolved_approved_win_rate_pct": round(llm_win_rate, 1),
+        "resolved_approved_win_rate_pct": llm_win_rate,
         "top_red_flags": sorted_flags[:8],
         "llm_alpha_active": total > 0,
     }
@@ -386,9 +400,17 @@ def generate_learning_scorecard(
     settled_trades = calibration.get("total_settled", 0)
 
     # 1. Calibration verdict
-    brier = calibration.get("brier_score", 0.25)
-    ece = calibration.get("expected_calibration_error", 0.0)
-    cal_score = 100 - min(100, int(ece * 1.5 + brier * 100))
+    brier_val = calibration.get("brier_score")
+    ece_val = calibration.get("expected_calibration_error")
+    
+    if settled_trades > 0 and ece_val is not None and brier_val is not None:
+        cal_score = 100 - min(100, int(ece_val * 1.5 + brier_val * 100))
+        ece_str = f"{ece_val}%"
+        brier_str = f"{brier_val:.4f}"
+    else:
+        cal_score = 50
+        ece_str = "N/A (Awaiting Trades)"
+        brier_str = "Prior 0.2500 (Baseline)"
 
     # 2. Dynamic adaptation verdict
     recalibs = weights.get("total_recalibrations", 0)
@@ -410,12 +432,15 @@ def generate_learning_scorecard(
         status_message = f"Collecting Trade Outcomes ({settled_trades} settled) — calibrating confidence curves."
         is_learning = "CALIBRATING"
 
+    app_rate = llm.get("approval_rate_pct")
+    app_str = f"{app_rate}%" if app_rate is not None else "N/A"
+
     evidence = [
         f"Total Recorded Trades: {total_trades} across {len(BOT_NAMES)} bots ({settled_trades} settled).",
-        f"Confidence Calibration: ECE={ece}%, Brier Score={brier} ({calibration.get('calibration_verdict')}).",
+        f"Confidence Calibration: ECE={ece_str}, Brier Score={brier_str} ({calibration.get('calibration_verdict')}).",
         f"Category Specialization: {len(categories.get('hot_categories', []))} hot / {len(categories.get('cold_categories', []))} cold categories identified.",
         f"Feature Weights: {recalibs} strategic weight recalibration(s) logged.",
-        f"Central LLM Intelligence: {llm.get('total_decisions', 0)} decisions analyzed with {llm.get('approval_rate_pct', 0.0)}% approval rate.",
+        f"Central LLM Intelligence: {llm.get('total_decisions', 0)} decisions analyzed ({app_str} approval rate).",
     ]
 
     return {
@@ -465,7 +490,9 @@ class Colors:
     RESET = "\033[0m"
 
 
-def _bar(pct: float, length: int = 20, fill_char: str = "█") -> str:
+def _bar(pct: Optional[float], length: int = 20, fill_char: str = "█") -> str:
+    if pct is None:
+        return "░" * length
     filled = int(max(0.0, min(100.0, pct)) / 100.0 * length)
     return fill_char * filled + "░" * (length - filled)
 
@@ -495,25 +522,37 @@ def render_terminal_report(report: Dict[str, Any]) -> None:
 
     # 2. Calibration Curve
     print(f"{Colors.BOLD}{Colors.MAGENTA}─── 1. CONFIDENCE CALIBRATION & ERROR ANALYSIS ────────────────────────────────{Colors.RESET}")
-    print(f" ECE (Expected Calibration Error): {Colors.BOLD}{cal['expected_calibration_error']}%{Colors.RESET}   |   Brier Score: {Colors.BOLD}{cal['brier_score']}{Colors.RESET}   |   Bias: {cal['calibration_bias']}%")
+    ece_display = f"{cal['expected_calibration_error']}%" if cal.get("expected_calibration_error") is not None else "N/A (Awaiting Trades)"
+    brier_display = f"{cal['brier_score']:.4f}" if cal.get("brier_score") is not None else "0.2500 (Prior Baseline)"
+    bias_display = f"{cal['calibration_bias']:+.1f}%" if cal.get("calibration_bias") is not None else "N/A"
+    
+    print(f" ECE (Expected Calibration Error): {Colors.BOLD}{ece_display}{Colors.RESET}   |   Brier Score: {Colors.BOLD}{brier_display}{Colors.RESET}   |   Bias: {bias_display}")
     print(f" {'Bucket':<10} {'Trades':<8} {'Wins':<6} {'Observed WR':<14} {'Expected':<10} {'Error':<8} {'Calibration Visual':<22}")
     print(f" {'─'*9:<10} {'─'*7:<8} {'─'*5:<6} {'─'*12:<14} {'─'*8:<10} {'─'*6:<8} {'─'*20:<22}")
     for b in cal["buckets"]:
         wr = b["observed_win_rate"]
-        bar = _bar(wr, 16)
-        err_str = f"{b['calibration_error']:+.1f}%" if b["trades"] > 0 else "0.0%"
-        print(f" {b['label']:<10} {b['trades']:<8} {b['wins']:<6} {wr:>5.1f}%        {b['avg_confidence']:>5.1f}%     {err_str:<8} [{bar}]")
+        if wr is not None:
+            wr_str = f"{wr:>5.1f}%"
+            err_str = f"{b['calibration_error']:+.1f}%"
+            bar = _bar(wr, 16)
+        else:
+            wr_str = "—"
+            err_str = "—"
+            bar = "░" * 16
+        print(f" {b['label']:<10} {b['trades']:<8} {b['wins'] if b['trades'] > 0 else '—':<6} {wr_str:<14} {b['avg_confidence']:>5.1f}%     {err_str:<8} [{bar}]")
     print()
 
     # 3. Category Specialization
     print(f"{Colors.BOLD}{Colors.YELLOW}─── 2. CATEGORY EDGE & ADAPTIVE MULTIPLIERS ───────────────────────────────────{Colors.RESET}")
-    print(f" Overall Win Rate: {cats['overall_win_rate_pct']}%   |   Hot: {cats['hot_categories'] or 'None yet'}   |   Cold: {cats['cold_categories'] or 'None yet'}")
+    overall_wr_display = f"{cats['overall_win_rate_pct']}%" if cats.get("overall_win_rate_pct") is not None else "N/A (0 settled)"
+    print(f" Overall Win Rate: {overall_wr_display}   |   Hot: {cats['hot_categories'] or 'None yet'}   |   Cold: {cats['cold_categories'] or 'None yet'}")
     print(f" {'Category':<16} {'Trades':<8} {'Wins':<6} {'Win Rate':<10} {'Total PnL':<12} {'Multiplier':<12} {'Status'}")
     print(f" {'─'*15:<16} {'─'*7:<8} {'─'*5:<6} {'─'*8:<10} {'─'*10:<12} {'─'*10:<12} {'─'*8}")
     for c in cats["categories"][:8]:
         pnl = f"{c['pnl_cents']/100:+.2f}$"
         st = f"{Colors.GREEN}🔥 HOT{Colors.RESET}" if c["status"] == "hot" else (f"{Colors.RED}❄️ COLD{Colors.RESET}" if c["status"] == "cold" else "⚖️ Neutral")
-        print(f" {c['category']:<16} {c['trades']:<8} {c['wins']:<6} {c['win_rate_pct']:>5.1f}%    {pnl:<12} {c['multiplier']:>4.2f}x       {st}")
+        c_wr = f"{c['win_rate_pct']:>5.1f}%" if c.get("win_rate_pct") is not None else "—"
+        print(f" {c['category']:<16} {c['trades']:<8} {c['wins']:<6} {c_wr:<10} {pnl:<12} {c['multiplier']:>4.2f}x       {st}")
     print()
 
     # 4. Feature Weights & Recalibration
@@ -528,7 +567,13 @@ def render_terminal_report(report: Dict[str, Any]) -> None:
 
     # 5. Central LLM Brain Filter Alpha
     print(f"{Colors.BOLD}{Colors.GREEN}─── 4. CENTRAL LLM BRAIN FILTERING ALPHA ─────────────────────────────────────{Colors.RESET}")
-    print(f" Total Decisions: {llm['total_decisions']}   |   Approved: {llm['approved']} ({llm['approval_rate_pct']}%)   |   Rejected: {llm['rejected']}")
+    app_pct_str = f"{llm['approval_rate_pct']}%" if llm.get("approval_rate_pct") is not None else "N/A"
+    print(f" Total Decisions: {llm['total_decisions']}   |   Approved: {llm['approved']} ({app_pct_str})   |   Rejected: {llm['rejected']}")
+    if llm["top_red_flags"]:
+        print(" Top Rejection Red Flags:")
+        for rf in llm["top_red_flags"][:5]:
+            print(f"   - {rf['flag']}: {rf['count']} times")
+    print(f"{Colors.BOLD}{Colors.CYAN}════════════════════════════════════════════════════════════════════════════════{Colors.RESET}\n")
     if llm["top_red_flags"]:
         print(" Top Rejection Red Flags:")
         for rf in llm["top_red_flags"][:5]:

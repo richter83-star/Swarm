@@ -450,8 +450,10 @@ function renderOverview() {
   // Stats row
   const llm = State.data.llm;
   const sys = State.data.system;
-  const cleanWr = llm?.clean_period?.win_rate_pct ?? 0;
-  const llmApproval = llm?.today?.approval_rate_pct ?? 0;
+  const hasCleanTrades = (llm?.clean_period?.total_resolved || 0) > 0;
+  const cleanWr = hasCleanTrades ? llm.clean_period.win_rate_pct : null;
+  const hasLlmDecisions = (llm?.today?.total || 0) > 0;
+  const llmApproval = hasLlmDecisions ? llm.today.approval_rate_pct : null;
   const tavily = sys?.tavily;
   const uptime = s?.uptime_seconds ?? sys?.uptime_seconds ?? 0;
 
@@ -460,13 +462,13 @@ function renderOverview() {
     statsEl.innerHTML = `
       <div class="card" style="padding:1rem;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Win Rate (Clean)</div>
-        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${cleanWr >= 55 ? 'var(--color-emerald)' : (cleanWr > 0 ? 'var(--color-amber)' : '#ffffff')};margin-top:0.2rem;">${fmtPct(cleanWr)}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Baseline Gate: 55.0%</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${hasCleanTrades && cleanWr >= 55 ? 'var(--color-emerald)' : (hasCleanTrades && cleanWr > 0 ? 'var(--color-amber)' : 'var(--text-muted)')};margin-top:0.2rem;">${fmtPct(cleanWr)}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">${hasCleanTrades ? 'Baseline Gate: 55.0%' : 'Awaiting 50 settled trades'}</div>
       </div>
       <div class="card" style="padding:1rem;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Gemini Approval Alpha</div>
-        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:var(--color-cyan);margin-top:0.2rem;">${fmtPct(llmApproval)}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Search Grounded</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${hasLlmDecisions ? 'var(--color-cyan)' : 'var(--text-muted)'};margin-top:0.2rem;">${fmtPct(llmApproval)}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">${hasLlmDecisions ? 'Search Grounded' : 'Awaiting decisions'}</div>
       </div>
       <div class="card" style="padding:1rem;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Tavily Macro Search</div>
@@ -578,6 +580,7 @@ function renderLearning() {
   const rolling = data.rolling_win_rates ?? [];
 
   // 1. Hero scorecard
+  const hasSettled = (cal.total_settled || 0) > 0;
   const badgeEl = document.getElementById('learn-verdict-badge');
   const stageEl = document.getElementById('learn-stage-title');
   const msgEl = document.getElementById('learn-status-msg');
@@ -586,21 +589,31 @@ function renderLearning() {
   const recalibEl = document.getElementById('learn-recalib-count');
 
   if (badgeEl) {
-    const isL = sc.is_learning || 'CALIBRATING';
+    const isL = sc.is_learning || 'INSUFFICIENT_DATA';
     badgeEl.textContent = isL;
     badgeEl.className = 'badge ' + (isL === 'YES' ? 'badge-success' : (isL === 'CALIBRATING' ? 'badge-info' : 'badge-warning'));
   }
   if (stageEl) stageEl.textContent = sc.stage || 'Data Collection & Calibration';
   if (msgEl) msgEl.textContent = sc.status_message || 'Analyzing confidence calibration and strategy evolution.';
   if (eceEl) {
-    const ece = cal.expected_calibration_error ?? 0;
-    eceEl.textContent = fmtPct(ece);
-    eceEl.style.color = ece < 15 ? '#34d399' : (ece < 35 ? '#fbbf24' : '#f43f5e');
+    const ece = cal.expected_calibration_error;
+    if (hasSettled && ece != null) {
+      eceEl.textContent = fmtPct(ece);
+      eceEl.style.color = ece < 15 ? '#34d399' : (ece < 35 ? '#fbbf24' : '#f43f5e');
+    } else {
+      eceEl.textContent = '— (No Data)';
+      eceEl.style.color = '#94a3b8';
+    }
   }
   if (brierEl) {
-    const brier = cal.brier_score ?? 0;
-    brierEl.textContent = brier.toFixed(4);
-    brierEl.style.color = brier < 0.20 ? '#34d399' : (brier < 0.35 ? '#38bdf8' : '#fbbf24');
+    const brier = cal.brier_score;
+    if (hasSettled && brier != null) {
+      brierEl.textContent = brier.toFixed(4);
+      brierEl.style.color = brier < 0.20 ? '#34d399' : (brier < 0.35 ? '#38bdf8' : '#fbbf24');
+    } else {
+      brierEl.textContent = '0.2500 (Prior Baseline)';
+      brierEl.style.color = '#94a3b8';
+    }
   }
   if (recalibEl) {
     recalibEl.textContent = weights.total_recalibrations ?? 0;
@@ -618,15 +631,22 @@ function renderLearning() {
       bucketsTbody.innerHTML = '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem;">No calibration data yet.</td></tr>';
     } else {
       bucketsTbody.innerHTML = buckets.map(b => {
-        const err = b.calibration_error ?? 0;
-        const errCls = Math.abs(err) <= 10 ? 'green' : (Math.abs(err) <= 25 ? 'orange' : 'red');
+        const hasTrades = (b.trades || 0) > 0;
+        const obsWrStr = hasTrades && b.observed_win_rate != null ? fmtPct(b.observed_win_rate) : '—';
+        let errStr = '—';
+        let errCls = 'text-muted';
+        if (hasTrades && b.calibration_error != null) {
+          const err = b.calibration_error;
+          errStr = (err > 0 ? '+' : '') + fmtPct(err);
+          errCls = Math.abs(err) <= 10 ? 'green' : (Math.abs(err) <= 25 ? 'orange' : 'red');
+        }
         return `
           <tr>
             <td><strong>${esc(b.label)}</strong></td>
             <td>${b.trades}</td>
-            <td>${b.wins}</td>
-            <td>${fmtPct(b.observed_win_rate)}</td>
-            <td class="${errCls}">${err > 0 ? '+' : ''}${fmtPct(err)}</td>
+            <td>${hasTrades ? b.wins : '—'}</td>
+            <td>${obsWrStr}</td>
+            <td class="${errCls}">${errStr}</td>
           </tr>
         `;
       }).join('');
@@ -641,19 +661,22 @@ function renderLearning() {
       catsTbody.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:1rem;">No category data yet.</td></tr>';
     } else {
       catsTbody.innerHTML = categoryList.slice(0, 10).map(c => {
+        const hasDecided = (c.settled || 0) > 0;
         const st = c.status;
         const stBadge = st === 'hot'
           ? '<span class="badge badge-success">🔥 Hot</span>'
           : (st === 'cold' ? '<span class="badge badge-danger">❄️ Cold</span>' : '<span class="badge badge-secondary">⚖️ Neutral</span>');
         const pnlStr = fmt$(c.pnl_cents);
         const pnlCls = c.pnl_cents >= 0 ? 'green' : 'red';
+        const wrStr = hasDecided && c.win_rate_pct != null ? fmtPct(c.win_rate_pct) : '—';
+        const multStr = hasDecided ? `${c.multiplier.toFixed(2)}x` : '1.00x (Baseline)';
         return `
           <tr>
             <td><strong>${esc(c.category)}</strong></td>
             <td>${c.trades}</td>
-            <td>${c.wins}</td>
-            <td>${fmtPct(c.win_rate_pct)}</td>
-            <td><strong>${c.multiplier.toFixed(2)}x</strong></td>
+            <td>${hasDecided ? c.wins : '—'}</td>
+            <td>${wrStr}</td>
+            <td><strong>${multStr}</strong></td>
             <td>${stBadge}</td>
           </tr>
         `;
@@ -699,13 +722,16 @@ function renderLearning() {
       </div>
     `).join('') || '<div style="color:#64748b; font-size:0.8rem;">No rejections flagged yet.</div>';
 
+    const hasDecisions = (llm.total_decisions || 0) > 0;
+    const appRateStr = hasDecisions && llm.approval_rate_pct != null ? fmtPct(llm.approval_rate_pct) : 'N/A (No decisions)';
+
     weightsGrid.innerHTML = `
       ${botCards || defaultWeightsCard}
       <div style="background:rgba(255,255,255,0.03); padding:0.85rem; border-radius:6px; border:1px solid rgba(255,255,255,0.06);">
         <div style="font-weight:600; font-size:0.85rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.5rem;">Central LLM Filtering Impact</div>
         <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.75rem;">
           <div style="display:flex; justify-content:space-between;"><span>Total Decisions</span><strong>${llm.total_decisions ?? 0}</strong></div>
-          <div style="display:flex; justify-content:space-between;"><span>Approved Rate</span><strong style="color:#34d399;">${fmtPct(llm.approval_rate_pct)}</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Approved Rate</span><strong style="color:${hasDecisions ? '#34d399' : '#94a3b8'};">${appRateStr}</strong></div>
           <div style="display:flex; justify-content:space-between;"><span>Filtered Out</span><strong style="color:#f43f5e;">${llm.rejected ?? 0} trades</strong></div>
         </div>
         <div style="font-size:0.75rem; font-weight:600; color:#818cf8; margin-bottom:0.25rem;">Top Rejection Red Flags:</div>
@@ -721,11 +747,15 @@ function renderCalibrationChart(cal) {
 
   const buckets = cal.buckets ?? [];
   const labels = buckets.map(b => b.label);
-  const observed = buckets.map(b => b.observed_win_rate ?? 0);
+  const hasSettled = (cal.total_settled || 0) > 0;
+  const observed = buckets.map(b => ((b.trades || 0) > 0 && b.observed_win_rate != null) ? b.observed_win_rate : null);
   const ideal = buckets.map(b => b.midpoint ?? 50);
+
+  const observedLabel = hasSettled ? 'Observed Win Rate (%)' : 'Observed (Awaiting Observations)';
 
   if (State.calibrationChart) {
     State.calibrationChart.data.labels = labels;
+    State.calibrationChart.data.datasets[0].label = observedLabel;
     State.calibrationChart.data.datasets[0].data = observed;
     State.calibrationChart.data.datasets[1].data = ideal;
     State.calibrationChart.update('none');
@@ -738,7 +768,7 @@ function renderCalibrationChart(cal) {
       labels,
       datasets: [
         {
-          label: 'Observed Win Rate (%)',
+          label: observedLabel,
           data: observed,
           backgroundColor: 'rgba(99, 102, 241, 0.75)',
           borderColor: '#818cf8',
@@ -747,7 +777,7 @@ function renderCalibrationChart(cal) {
         },
         {
           type: 'line',
-          label: 'Ideal Calibration (45°)',
+          label: 'Ideal Reference Calibration (45°)',
           data: ideal,
           borderColor: '#94a3b8',
           borderDash: [5, 5],
@@ -766,7 +796,10 @@ function renderCalibrationChart(cal) {
         legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.dataset.label}: ${parseFloat(ctx.raw).toFixed(1)}%`,
+            label: ctx => {
+              if (ctx.raw === null) return ` ${ctx.dataset.label}: No observations yet`;
+              return ` ${ctx.dataset.label}: ${parseFloat(ctx.raw).toFixed(1)}%`;
+            }
           }
         }
       },
@@ -877,6 +910,7 @@ function renderLLM() {
   // Header stats
   const h = document.getElementById('llm-header-stats');
   if (h) {
+    const hasToday = (today.total || 0) > 0;
     h.innerHTML = `
       <div class="stat-box">
         <div class="stat-box-label">Evaluated Today</div>
@@ -888,11 +922,11 @@ function renderLLM() {
       </div>
       <div class="stat-box">
         <div class="stat-box-label">Approval Rate</div>
-        <div class="stat-box-value blue">${fmtPct(today.approval_rate_pct)}</div>
+        <div class="stat-box-value ${hasToday ? 'blue' : 'text-muted'}">${hasToday && today.approval_rate_pct != null ? fmtPct(today.approval_rate_pct) : 'N/A'}</div>
       </div>
       <div class="stat-box">
         <div class="stat-box-label">Real LLM %</div>
-        <div class="stat-box-value">${fmtPct(today.real_llm_pct)}</div>
+        <div class="stat-box-value ${hasToday ? '' : 'text-muted'}">${hasToday && today.real_llm_pct != null ? fmtPct(today.real_llm_pct) : 'N/A'}</div>
       </div>
       <div class="stat-box">
         <div class="stat-box-label">Quant Fallback</div>
@@ -904,8 +938,10 @@ function renderLLM() {
   // Progress bars
   const pb = document.getElementById('llm-progress-bars');
   if (pb) {
-    const realPct = today.real_llm_pct ?? 0;
-    const wrPct = cp.win_rate_pct ?? 0;
+    const hasToday = (today.total || 0) > 0;
+    const realPct = hasToday ? (today.real_llm_pct ?? 0) : 0;
+    const hasClean = (cp.total_resolved || 0) > 0;
+    const wrPct = hasClean ? (cp.win_rate_pct ?? 0) : 0;
     const tcCurrent = cp.total_resolved ?? 0;
     const tcTarget = 50;
     const tcPct = clamp((tcCurrent / tcTarget) * 100, 0, 100);
@@ -920,16 +956,16 @@ function renderLLM() {
           </div>
           ${progressBar(realPct, realPct < 50 ? 'orange' : '', true)}
         </div>
-        <div class="mt-1 text-muted" style="font-size:0.75rem">${fmtPct(realPct)} real LLM — ${fmtPct(100 - realPct)} quant fallback</div>
+        <div class="mt-1 text-muted" style="font-size:0.75rem">${hasToday ? `${fmtPct(today.real_llm_pct)} real LLM — ${fmtPct(100 - today.real_llm_pct)} quant fallback` : 'Awaiting LLM calls'}</div>
       </div>
       <div class="card mt-2">
         <div class="card-title">Clean Period Win Rate</div>
         <div class="progress-wrap">
           <div class="progress-label">
             <span>Win rate (target: 55%)</span>
-            <span class="prog-val">${fmtPct(wrPct)}</span>
+            <span class="prog-val">${hasClean && cp.win_rate_pct != null ? fmtPct(wrPct) : 'N/A (0 settled)'}</span>
           </div>
-          ${progressBar(clamp((wrPct / 55) * 100, 0, 100), wrPct >= 55 ? '' : (wrPct > 40 ? 'yellow' : 'red'), true)}
+          ${progressBar(hasClean ? clamp((wrPct / 55) * 100, 0, 100) : 0, wrPct >= 55 ? '' : (wrPct > 40 ? 'yellow' : 'red'), true)}
         </div>
       </div>
       <div class="card mt-2">
@@ -941,7 +977,7 @@ function renderLLM() {
           </div>
           ${progressBar(tcPct, tcCurrent >= tcTarget ? '' : 'blue', true)}
         </div>
-        <div class="mt-1 text-muted" style="font-size:0.75rem">Since ${esc(cp.start_date ?? '—')}</div>
+        <div class="mt-1 text-muted" style="font-size:0.75rem">Since ${esc(cp.start_date ?? '—')} (Fresh build warmup)</div>
       </div>
     `;
   }

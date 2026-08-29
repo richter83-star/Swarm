@@ -842,24 +842,23 @@ def check_error_storm(lookback_minutes: int = 30, threshold: int = 5) -> dict:
 # Check 11: Dashboard process alive
 # ---------------------------------------------------------------------------
 def check_dashboard_alive() -> dict:
-    """Verify the dashboard web server is responding on port 8080.
-
-    Reports status only — auto-restart removed as it was triggering
-    duplicate swarm processes when the dashboard is simply not deployed.
-    """
+    """Verify the dashboard web server is responding."""
     import socket
 
-    port = 8080
+    ports = [8888, 8080]
     host = "127.0.0.1"
 
-    try:
-        with socket.create_connection((host, port), timeout=5):
-            return {"status": "OK", "details": f"Dashboard responding on {host}:{port}"}
-    except OSError:
-        return {
-            "status": "WARNING",
-            "details": f"Dashboard not responding on :{port} — not deployed or stopped",
-        }
+    for port in ports:
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return {"status": "OK", "details": f"Dashboard responding on {host}:{port}"}
+        except OSError:
+            pass
+
+    return {
+        "status": "WARNING",
+        "details": f"Dashboard not responding on {host}:{ports[0]} or :{ports[1]}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +937,23 @@ def check_llm_health(recommendations: List[str]) -> dict:
         return {"status": "WARNING", "details": "Could not open LLM DB"}
 
     try:
+        # Check if table exists
+        cur_t = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llm_decisions'")
+        if not cur_t.fetchone():
+            return {
+                "status": "OK",
+                "details": "Clean period: 0 evaluated (Awaiting decisions)",
+                "approval_rate_pct": None,
+                "win_rate_pct": None,
+                "resolved_trades": 0,
+                "real_llm_decisions": 0,
+                "quant_fallback_decisions": 0,
+                "today_evaluated": 0,
+                "today_approved": 0,
+                "today_quant_fallbacks": 0,
+                "guardrail_progress": "Awaiting decisions",
+            }
+
         today = _now_utc().strftime("%Y-%m-%d")
 
         # --- Clean period totals ---
@@ -963,7 +979,7 @@ def check_llm_health(recommendations: List[str]) -> dict:
         ).fetchall()
         resolved = len(settled)
         wins     = sum(1 for (o,) in settled if o == "win")
-        win_rate = (wins / resolved * 100) if resolved else 0.0
+        win_rate = (wins / resolved * 100) if resolved else None
 
         # --- Today's usage ---
         today_total    = conn.execute(
@@ -979,15 +995,19 @@ def check_llm_health(recommendations: List[str]) -> dict:
             (today,)
         ).fetchone()[0]
 
-        approval_rate = (approved / total * 100) if total else 0.0
-        llm_real_pct  = (real_llm / total * 100)  if total else 0.0
+        approval_rate = (approved / total * 100) if total else None
+        llm_real_pct  = (real_llm / total * 100)  if total else None
         qfb_pct_today = (today_qfb / today_total * 100) if today_total else 0.0
 
         status  = "OK"
+        app_str = f"{approval_rate:.1f}%" if approval_rate is not None else "N/A"
+        real_str = f"{llm_real_pct:.1f}%" if llm_real_pct is not None else "N/A"
+        wr_str = f"{win_rate:.1f}%" if win_rate is not None else "N/A"
+
         details_parts = [
-            f"Clean period: {total} evaluated | {approved} approved ({approval_rate:.1f}%)",
-            f"Real LLM: {real_llm} ({llm_real_pct:.1f}%) | Quant fallback: {quant_fb}",
-            f"Win rate: {win_rate:.1f}% on {resolved} resolved trades",
+            f"Clean period: {total} evaluated | {approved} approved ({app_str})",
+            f"Real LLM: {real_llm} ({real_str}) | Quant fallback: {quant_fb}",
+            f"Win rate: {wr_str} on {resolved} resolved trades",
             f"Today: {today_total} evaluated | {today_approved} approved | {today_qfb} fallbacks ({qfb_pct_today:.0f}%)",
         ]
 
@@ -998,18 +1018,18 @@ def check_llm_health(recommendations: List[str]) -> dict:
                 f"Resolved trades: {resolved}/{MIN_RESOLVED} needed before guardrails considered"
             )
         else:
-            if win_rate >= WIN_RATE_TARGET:
+            if win_rate is not None and win_rate >= WIN_RATE_TARGET:
                 guardrail_parts.append(
                     f"✅ Win rate {win_rate:.1f}% ≥ {WIN_RATE_TARGET}% target "
                     f"({resolved} trades) — consider loosening confidence threshold"
                 )
                 recommendations.append(
                     f"Win rate {win_rate:.1f}% on {resolved} clean trades "
-                    f"— eligble to lower confidence threshold 70%→65%"
+                    f"— eligible to lower confidence threshold 70%→65%"
                 )
             else:
                 guardrail_parts.append(
-                    f"Win rate {win_rate:.1f}% (target {WIN_RATE_TARGET}%) "
+                    f"Win rate {wr_str} (target {WIN_RATE_TARGET}%) "
                     f"on {resolved} trades — hold guardrails"
                 )
         details_parts += guardrail_parts
@@ -1018,13 +1038,13 @@ def check_llm_health(recommendations: List[str]) -> dict:
         if today_total > 10 and qfb_pct_today > 50:
             status = "WARNING"
             details_parts.append(
-                f"⚠️ {qfb_pct_today:.0f}% quant fallback today — Anthropic API key may be broken"
+                f"⚠️ {qfb_pct_today:.0f}% quant fallback today — LLM API key may be broken"
             )
             recommendations.append(
-                "LLM quant fallback rate >50% — run validate_api_key() check on ANTHROPIC_API_KEY"
+                "LLM quant fallback rate >50% — run validate_api_key() check on GEMINI_API_KEY"
             )
 
-        if resolved >= 20 and win_rate < 40:
+        if resolved >= 20 and win_rate is not None and win_rate < 40:
             status = "WARNING"
             details_parts.append(
                 f"⚠️ Win rate {win_rate:.1f}% on {resolved} trades — below safe threshold"
@@ -1036,8 +1056,8 @@ def check_llm_health(recommendations: List[str]) -> dict:
         return {
             "status": status,
             "details": " | ".join(details_parts),
-            "approval_rate_pct": round(approval_rate, 1),
-            "win_rate_pct": round(win_rate, 1),
+            "approval_rate_pct": round(approval_rate, 1) if approval_rate is not None else None,
+            "win_rate_pct": round(win_rate, 1) if win_rate is not None else None,
             "resolved_trades": resolved,
             "real_llm_decisions": real_llm,
             "quant_fallback_decisions": quant_fb,
@@ -1067,11 +1087,12 @@ def check_learning_adaptation(recommendations: List[str]) -> dict:
         cats = report.get("categories", {})
 
         is_learning = scorecard.get("is_learning", "UNKNOWN")
-        ece = cal.get("expected_calibration_error", 0.0)
+        ece = cal.get("expected_calibration_error")
         recalibs = weights.get("total_recalibrations", 0)
         settled = scorecard.get("settled_trades", 0)
+        ece_str = f"{ece}%" if ece is not None else "N/A"
 
-        details = f"Status: {is_learning} | Settled: {settled} | ECE: {ece}% | Recalibrations: {recalibs} | Tilt: {len(cats.get('hot_categories', []))} hot/{len(cats.get('cold_categories', []))} cold"
+        details = f"Status: {is_learning} | Settled: {settled} | ECE: {ece_str} | Recalibrations: {recalibs} | Tilt: {len(cats.get('hot_categories', []))} hot/{len(cats.get('cold_categories', []))} cold"
         
         status = "OK"
         if is_learning == "YES":
@@ -1081,7 +1102,7 @@ def check_learning_adaptation(recommendations: List[str]) -> dict:
         elif is_learning == "INSUFFICIENT_DATA":
             status = "INFO"
 
-        if ece > 50.0 and settled >= 20:
+        if ece is not None and ece > 50.0 and settled >= 20:
             recommendations.append(f"Learning Radar: High calibration error ({ece}%) — overconfidence bias detected")
 
         return {

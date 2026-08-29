@@ -271,12 +271,12 @@ def api_llm():
     # Defaults
     today_stats = {
         "total": 0, "approved": 0, "rejected": 0,
-        "approval_rate_pct": 0.0,
-        "real_llm": 0, "quant_fallback": 0, "real_llm_pct": 0.0,
+        "approval_rate_pct": None,
+        "real_llm": 0, "quant_fallback": 0, "real_llm_pct": None,
         "per_bot": {b: {"total": 0, "approved": 0} for b in BOTS},
     }
     clean_period = {
-        "total_resolved": 0, "wins": 0, "win_rate_pct": 0.0, "start_date": today,
+        "total_resolved": 0, "wins": 0, "win_rate_pct": None, "start_date": today,
     }
     recent = []
 
@@ -317,10 +317,10 @@ def api_llm():
             "total":              total,
             "approved":           approved,
             "rejected":           total - approved,
-            "approval_rate_pct":  round(approved / total * 100, 1) if total else 0.0,
+            "approval_rate_pct":  round(approved / total * 100, 1) if total else None,
             "real_llm":           real_llm,
             "quant_fallback":     quant_fallback,
-            "real_llm_pct":       round(real_llm / total * 100, 1) if total else 0.0,
+            "real_llm_pct":       round(real_llm / total * 100, 1) if total else None,
             "per_bot":            per_bot,
         }
 
@@ -339,7 +339,7 @@ def api_llm():
         clean_period = {
             "total_resolved":  total_res,
             "wins":            wins,
-            "win_rate_pct":    round(wins / total_res * 100, 1) if total_res else 0.0,
+            "win_rate_pct":    round(wins / total_res * 100, 1) if total_res else None,
             "start_date":      start_date,
         }
 
@@ -635,10 +635,28 @@ def api_learning():
                 "status_message": "Warmup phase — gathering baseline data.",
                 "evidence": ["Total Recorded Trades: 0 across 4 bots."],
             },
-            "calibration": {"expected_calibration_error": 0.0, "brier_score": 0.25, "calibration_bias": 0.0, "buckets": []},
-            "categories": {"overall_win_rate_pct": 50.0, "hot_categories": [], "cold_categories": [], "categories": []},
+            "calibration": {
+                "expected_calibration_error": None,
+                "brier_score": None,
+                "brier_score_prior": 0.2500,
+                "calibration_bias": None,
+                "calibration_verdict": "Insufficient Data (Awaiting settled trades)",
+                "buckets": [],
+            },
+            "categories": {
+                "overall_win_rate_pct": None,
+                "hot_categories": [],
+                "cold_categories": [],
+                "categories": [],
+            },
             "weights": {"total_recalibrations": 0, "latest_weights_by_bot": {}},
-            "llm_intelligence": {"total_decisions": 0, "approved": 0, "rejected": 0, "approval_rate_pct": 0.0, "top_red_flags": []},
+            "llm_intelligence": {
+                "total_decisions": 0,
+                "approved": 0,
+                "rejected": 0,
+                "approval_rate_pct": None,
+                "top_red_flags": [],
+            },
             "rolling_win_rates": [],
         })
 
