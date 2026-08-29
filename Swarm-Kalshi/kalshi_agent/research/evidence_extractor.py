@@ -254,25 +254,39 @@ class KalshiEvidenceExtractor:
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
+        self._provider = str(self._config.get("extraction_provider", "gemini")).lower()
         self._model = str(
-            self._config.get("extraction_model", "claude-haiku-4-5-20251001")
+            self._config.get("extraction_model")
+            or ("gemini-2.5-flash" if self._provider in {"gemini", "google"} else "claude-haiku-4-5-20251001")
         )
         self._max_tokens = int(self._config.get("llm_max_tokens", 1500))
-        # API key: config takes precedence, then explicit env var read.
-        # Read os.environ explicitly (same pattern as LLMAdvisor) rather than
-        # relying on the SDK's internal env-var lookup, which can fail under
-        # systemd if the var was loaded after process start via _load_env_file().
-        self._api_key: Optional[str] = (
-            self._config.get("extraction_api_key")
-            or self._config.get("anthropic_api_key")
-            or os.environ.get("ANTHROPIC_API_KEY")
-            or None
-        )
-        if not self._api_key:
-            log.warning(
-                "[research] evidence_extractor: ANTHROPIC_API_KEY not found — "
-                "LLM extraction will fail. Set key in .env or swarm_config.yaml."
+
+        if self._provider in {"gemini", "google"}:
+            self._api_key = (
+                self._config.get("extraction_api_key")
+                or self._config.get("gemini_api_key")
+                or os.environ.get("GEMINI_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+                or os.environ.get("GOOGLE_GENAI_API_KEY")
+                or None
             )
+            if not self._api_key:
+                log.warning(
+                    "[research] evidence_extractor: GEMINI_API_KEY not found — "
+                    "LLM extraction will fail. Set key in .env or swarm_config.yaml."
+                )
+        else:
+            self._api_key = (
+                self._config.get("extraction_api_key")
+                or self._config.get("anthropic_api_key")
+                or os.environ.get("ANTHROPIC_API_KEY")
+                or None
+            )
+            if not self._api_key:
+                log.warning(
+                    "[research] evidence_extractor: ANTHROPIC_API_KEY not found — "
+                    "LLM extraction will fail. Set key in .env or swarm_config.yaml."
+                )
 
     async def extract(
         self,
@@ -320,9 +334,12 @@ class KalshiEvidenceExtractor:
             sources_block=sources_block,
         )
 
-        # Call Anthropic API
+        # Call LLM API (Gemini or Anthropic)
         try:
-            raw_text = await self._call_anthropic(prompt)
+            if self._provider in {"gemini", "google"}:
+                raw_text = await self._call_gemini(prompt)
+            else:
+                raw_text = await self._call_anthropic(prompt)
         except Exception as exc:
             log.warning("[research] evidence_extractor: LLM call failed: %s", exc)
             return EvidencePackage(
@@ -386,6 +403,57 @@ class KalshiEvidenceExtractor:
             len(package.key_facts),
         )
         return package
+
+    async def _call_gemini(self, prompt: str) -> str:
+        """Call Gemini API using google-genai or REST."""
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=self._api_key)
+            gen_cfg = types.GenerateContentConfig(
+                system_instruction="You are a precise research analyst for prediction markets. Return only valid JSON. Never fabricate data.",
+                temperature=0.1,
+                max_output_tokens=self._max_tokens,
+                response_mime_type="application/json",
+            )
+            # Run sync client in thread to avoid blocking asyncio loop
+            import asyncio
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model=self._model,
+                    contents=prompt,
+                    config=gen_cfg,
+                )
+            )
+            return resp.text or "{}"
+        except ImportError:
+            import urllib.request
+            import asyncio
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent?key={self._api_key}"
+            payload = json.dumps({
+                "system_instruction": {"parts": [{"text": "You are a precise research analyst for prediction markets. Return only valid JSON. Never fabricate data."}]},
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": self._max_tokens,
+                    "responseMimeType": "application/json",
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type": "application/json"})
+            loop = asyncio.get_event_loop()
+            def _sync_req():
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            body = await loop.run_in_executor(None, _sync_req)
+            candidates = body.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "{}")
+            return "{}"
 
     async def _call_anthropic(self, prompt: str) -> str:
         """Call Anthropic API using the anthropic library."""

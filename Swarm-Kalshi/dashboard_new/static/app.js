@@ -942,13 +942,13 @@ function renderSystem() {
     `;
   }
 
-  // LLM Brain status
-  const anthropicEl = document.getElementById('sys-anthropic');
-  if (anthropicEl) {
-    const ok = (sys.llm_status === 'ok' || sys.anthropic_status === 'ok');
+  // Gemini AI Brain status
+  const llmEl = document.getElementById('sys-llm') || document.getElementById('sys-anthropic');
+  if (llmEl) {
+    const ok = (sys.llm_status === 'ok' || sys.gemini_status === 'ok' || sys.anthropic_status === 'ok');
     const providerName = sys.llm_provider ? (sys.llm_provider.charAt(0).toUpperCase() + sys.llm_provider.slice(1)) : 'Gemini';
-    const modelName = sys.llm_model ? ` (${sys.llm_model})` : '';
-    anthropicEl.innerHTML = `LLM Brain [${providerName}${modelName}]: ${ok ? badge('OK','green') : badge('ERROR','red')}`;
+    const modelName = sys.llm_model ? ` (${sys.llm_model})` : ' (gemini-2.5-flash)';
+    llmEl.innerHTML = `<strong>Gemini Brain:</strong> ${badge(providerName + modelName, 'blue')} ${ok ? badge('ONLINE (Google GenAI)','green') : badge('KEY/API ERROR','red')}`;
   }
 
   // Uptime

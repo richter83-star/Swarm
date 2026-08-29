@@ -82,12 +82,21 @@ def validate_config(cfg: Dict[str, Any], project_root: Path | None = None) -> No
             warnings.append(f"api.base_url does not use HTTPS: '{base_url}'")
 
     # ------------------------------------------------------------------
-    # [central_llm] section — validate Anthropic key when provider=anthropic
+    # [central_llm] section — validate Gemini/Anthropic keys
     # ------------------------------------------------------------------
     central_llm = cfg.get("central_llm")
     if isinstance(central_llm, dict) and bool(central_llm.get("enabled", True)):
-        provider = str(central_llm.get("provider", "anthropic")).strip().lower()
-        if provider in {"anthropic", "claude"}:
+        provider = str(central_llm.get("provider", "gemini")).strip().lower()
+        if provider in {"gemini", "google"}:
+            api_key = str(central_llm.get("gemini_api_key", "")).strip() or str(
+                os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+            ).strip()
+            if not api_key:
+                errors.append(
+                    "central_llm.provider is 'gemini' but no API key found. "
+                    "Set central_llm.gemini_api_key in config or GEMINI_API_KEY in .env."
+                )
+        elif provider in {"anthropic", "claude"}:
             api_key = str(central_llm.get("anthropic_api_key", "")).strip() or str(
                 os.environ.get("ANTHROPIC_API_KEY", "")
             ).strip()

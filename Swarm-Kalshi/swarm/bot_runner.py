@@ -313,10 +313,12 @@ class BotRunner:
         if not bool(auto_cfg.get("enabled", False)):
             return
 
-        central_cfg = dict(self.cfg.get("central_llm", {}) or {})
-        central_cfg["enabled"] = True
-        if bool(auto_cfg.get("anthropic_only", True)):
+        if bool(auto_cfg.get("gemini_only", False)) or bool(auto_cfg.get("google_only", False)):
+            central_cfg["provider"] = "gemini"
+        elif bool(auto_cfg.get("anthropic_only", False)):
             central_cfg["provider"] = "anthropic"
+        else:
+            central_cfg.setdefault("provider", "gemini")
         if bool(auto_cfg.get("require_llm_for_trade", True)):
             central_cfg["allow_quant_fallback_on_error"] = False
             central_cfg["fail_open"] = False

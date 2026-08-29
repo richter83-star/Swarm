@@ -350,6 +350,68 @@ async def _call_anthropic(prompt: str, config: dict[str, Any]) -> str:
     return "\n".join(parts) or "{}"
 
 
+async def _call_gemini(prompt: str, config: dict[str, Any]) -> str:
+    """Call Gemini API asynchronously."""
+    import os
+    import asyncio
+    api_key = (
+        config.get("extraction_api_key")
+        or config.get("gemini_api_key")
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GOOGLE_GENAI_API_KEY")
+        or None
+    )
+    model = config.get("extraction_model", "gemini-2.5-flash")
+    max_tokens = int(config.get("llm_max_tokens", 1500))
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        gen_cfg = types.GenerateContentConfig(
+            system_instruction="You are a precise research analyst. Return only valid JSON. Never fabricate data.",
+            temperature=0.1,
+            max_output_tokens=max_tokens,
+            response_mime_type="application/json",
+        )
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=gen_cfg,
+            )
+        )
+        return resp.text or "{}"
+    except ImportError:
+        import urllib.request
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = json.dumps({
+            "system_instruction": {"parts": [{"text": "You are a precise research analyst. Return only valid JSON. Never fabricate data."}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": "application/json",
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type": "application/json"})
+        loop = asyncio.get_event_loop()
+        def _sync_req():
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        body = await loop.run_in_executor(None, _sync_req)
+        candidates = body.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "{}")
+        return "{}"
+
+
 # ── EvidenceExtractor ─────────────────────────────────────────────────
 
 class EvidenceExtractor:
@@ -357,8 +419,8 @@ class EvidenceExtractor:
 
     def __init__(self, config: dict[str, Any]):
         self._config = config
-        # "openai" or "anthropic" (default: anthropic to match the swarm's existing provider)
-        self._provider = str(config.get("extraction_provider", "anthropic")).lower()
+        # "gemini" (default), "openai", or "anthropic"
+        self._provider = str(config.get("extraction_provider", "gemini")).lower()
 
     async def extract(
         self,
@@ -399,7 +461,9 @@ class EvidenceExtractor:
         )
 
         try:
-            if self._provider == "openai":
+            if self._provider in {"gemini", "google"}:
+                raw_text = await _call_gemini(prompt, self._config)
+            elif self._provider == "openai":
                 raw_text = await _call_openai(prompt, self._config)
             else:
                 raw_text = await _call_anthropic(prompt, self._config)

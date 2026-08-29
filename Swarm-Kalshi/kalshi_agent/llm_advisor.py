@@ -60,8 +60,11 @@ class LLMAdvisor:
 
     DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": True,
+        "provider": "gemini",
         "api_key": "",
-        "model": "claude-haiku-4-5-20251001",
+        "gemini_api_key": "",
+        "gemini_model": "gemini-2.5-flash",
+        "model": "gemini-2.5-flash",
         "max_tokens": 300,
         "temperature": 0.1,
         "pre_screen_threshold": 60.0,
@@ -116,18 +119,35 @@ class LLMAdvisor:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.cfg = {**self.DEFAULT_CONFIG, **(config or {})}
         self._enabled = self.cfg.get("enabled", True)
+        self._provider = str(self.cfg.get("provider", "gemini")).lower()
 
         # Resolve API key: config > env var
-        self._api_key: str = (
-            self.cfg.get("api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
-        )
-        if self._enabled and not self._api_key:
-            logger.warning(
-                "LLMAdvisor: no API key found. "
-                "Set 'llm_advisor.api_key' in config or ANTHROPIC_API_KEY env var. "
-                "LLM advice disabled."
-            )
-            self._enabled = False
+        if self._provider in {"gemini", "google"}:
+            self._api_key = str(
+                self.cfg.get("gemini_api_key")
+                or self.cfg.get("api_key")
+                or os.environ.get("GEMINI_API_KEY", "")
+                or os.environ.get("GOOGLE_API_KEY", "")
+                or os.environ.get("GOOGLE_GENAI_API_KEY", "")
+            ).strip()
+            if self._enabled and not self._api_key:
+                logger.warning(
+                    "LLMAdvisor: no Gemini API key found. "
+                    "Set 'llm_advisor.gemini_api_key' in config or GEMINI_API_KEY env var. "
+                    "LLM advice disabled."
+                )
+                self._enabled = False
+        else:
+            self._api_key = str(
+                self.cfg.get("api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
+            ).strip()
+            if self._enabled and not self._api_key:
+                logger.warning(
+                    "LLMAdvisor: no Anthropic API key found. "
+                    "Set 'llm_advisor.api_key' in config or ANTHROPIC_API_KEY env var. "
+                    "LLM advice disabled."
+                )
+                self._enabled = False
 
         # Simple TTL cache: ticker -> (timestamp, result_dict)
         self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -259,43 +279,96 @@ class LLMAdvisor:
         market_context: Optional[Dict[str, Any]],
         external_signals: Optional[Dict[str, float]],
     ) -> Optional[Dict[str, Any]]:
-        """Call the Anthropic API and parse the JSON response."""
+        """Call Gemini or Anthropic API and parse the JSON response."""
         try:
-            import urllib.request
-            import urllib.error
-
             prompt = self._build_prompt(
                 ticker, title, category, side, market_context, external_signals
             )
 
-            payload = json.dumps({
-                "model": self.cfg["model"],
-                "max_tokens": int(self.cfg["max_tokens"]),
-                "temperature": float(self.cfg["temperature"]),
-                "system": self._SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": prompt}],
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages",
-                data=payload,
-                method="POST",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": self._api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-            )
-
-            timeout = int(self.cfg["timeout_seconds"])
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-
             text = ""
-            for block in body.get("content", []):
-                if block.get("type") == "text":
-                    text = block["text"].strip()
-                    break
+            if self._provider in {"gemini", "google"}:
+                try:
+                    from google import genai
+                    from google.genai import types
+
+                    client = genai.Client(api_key=self._api_key)
+                    model_name = str(self.cfg.get("gemini_model") or self.cfg.get("model") or "gemini-2.5-flash")
+                    cfg_kwargs: Dict[str, Any] = {
+                        "system_instruction": self._SYSTEM_PROMPT,
+                        "temperature": float(self.cfg.get("temperature", 0.1)),
+                        "max_output_tokens": int(self.cfg.get("max_tokens", 300)),
+                        "response_mime_type": "application/json",
+                    }
+                    if bool(self.cfg.get("search_grounding", False)):
+                        cfg_kwargs["tools"] = [{"google_search": {}}]
+
+                    gen_cfg = types.GenerateContentConfig(**cfg_kwargs)
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=gen_cfg,
+                    )
+                    text = response.text or ""
+                except ImportError:
+                    # Fallback to direct REST API call to Google Generative Language API
+                    import urllib.request
+                    import urllib.error
+                    model_name = str(self.cfg.get("gemini_model") or self.cfg.get("model") or "gemini-2.5-flash")
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self._api_key}"
+                    payload = json.dumps({
+                        "system_instruction": {"parts": [{"text": self._SYSTEM_PROMPT}]},
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": float(self.cfg.get("temperature", 0.1)),
+                            "maxOutputTokens": int(self.cfg.get("max_tokens", 300)),
+                            "responseMimeType": "application/json",
+                        }
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        url,
+                        data=payload,
+                        method="POST",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    timeout = int(self.cfg.get("timeout_seconds", 10))
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        body = json.loads(resp.read().decode("utf-8"))
+                    candidates = body.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            text = parts[0].get("text", "")
+            else:
+                import urllib.request
+                import urllib.error
+
+                payload = json.dumps({
+                    "model": self.cfg["model"],
+                    "max_tokens": int(self.cfg["max_tokens"]),
+                    "temperature": float(self.cfg["temperature"]),
+                    "system": self._SYSTEM_PROMPT,
+                    "messages": [{"role": "user", "content": prompt}],
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/messages",
+                    data=payload,
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": self._api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                )
+
+                timeout = int(self.cfg["timeout_seconds"])
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+
+                for block in body.get("content", []):
+                    if block.get("type") == "text":
+                        text = block["text"].strip()
+                        break
 
             # Strip possible markdown fences
             if text.startswith("```"):

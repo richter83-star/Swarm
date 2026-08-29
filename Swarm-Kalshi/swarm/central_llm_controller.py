@@ -104,7 +104,7 @@ class CentralLLMController:
     def __init__(self, config: Optional[Dict[str, Any]], project_root: str):
         self.cfg = {**self.DEFAULT_CONFIG, **(config or {})}
         self._enabled = bool(self.cfg.get("enabled", False))
-        self._provider = str(self.cfg.get("provider", "anthropic")).lower()
+        self._provider = str(self.cfg.get("provider", "gemini")).lower()
         self._project_root = Path(project_root).resolve()
         self._db_path = self._project_root / str(self.cfg.get("db_path", "data/central_llm_controller.db"))
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
