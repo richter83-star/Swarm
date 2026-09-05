@@ -4,28 +4,143 @@
 unknown_category_policy: probabilistic  # strict | probabilistic
 
 series_prefix_to_category:
+  # Economics / Financials
   KXFED: economics
   KXCPI: economics
   KXBTCD: economics
   KXETH: economics
+  KXGDP: economics
+  KXUNEMP: economics
+  KXINX: economics
+  KXNDX: economics
+  KXSPX: economics
+  KXTSLA: economics
+  KXNVDA: economics
+  KXAAPL: economics
+  KXMSFT: economics
+  KXAMZN: economics
+  KXGOOGL: economics
+
+  # Weather / Science
   KXTEMP: weather
   KXRAIN: weather
   KXSNOW: weather
   KXHURR: weather
+  KXWIND: weather
+
+  # Politics / Government
   KXELECT: politics
   KXPRES: politics
   KXCONG: politics
+  KXSENATE: politics
+  KXHOUSE: politics
+  KXGOV: politics
+  KXSUPREME: politics
+
+  # Sports & eSports
+  KXMLBGAME: sports
+  KXMLBSPREAD: sports
+  KXMLBTOTAL: sports
+  KXMLBRFI: sports
+  KXMLB: sports
+  KXEPLGAME: sports
+  KXEPLBTTS: sports
+  KXEPLTOTAL: sports
+  KXEPL: sports
+  KXSERIEAGAME: sports
+  KXSERIEATOTAL: sports
+  KXSERIEA: sports
+  KXLIGUE1GAME: sports
+  KXLIGUE1TOTAL: sports
+  KXLIGUE1: sports
+  KXBUNGAME: sports
+  KXBUNTOTAL: sports
+  KXBUN: sports
+  KXNBAGAME: sports
+  KXNBASPREAD: sports
+  KXNBATOTAL: sports
+  KXNBA: sports
+  KXNFLGAME: sports
+  KXNFLSPREAD: sports
+  KXNFLTOTAL: sports
+  KXNFL: sports
+  KXNHLGAME: sports
+  KXNHLTOTAL: sports
+  KXNHL: sports
+  KXLALIGAGAME: sports
+  KXLALIGASPREAD: sports
+  KXLALIGATOTAL: sports
+  KXLALIGA: sports
+  KXLIGAMXGAME: sports
+  KXLIGAMXTOTAL: sports
+  KXLIGAMX: sports
+  KXUCLGAME: sports
+  KXUCL: sports
+  KXCS2GAME: sports
+  KXCS2MAP: sports
+  KXCS2: sports
+  KXDOTA2GAME: sports
+  KXDOTA2MAP: sports
+  KXDOTA2: sports
+  KXVALORANTGAME: sports
+  KXVALORANTMAP: sports
+  KXVALORANT: sports
+  KXNPBGAME: sports
+  KXNPB: sports
+  KXKBOGAME: sports
+  KXKBO: sports
+  KXWNBAGAME: sports
+  KXWNBATOTAL: sports
+  KXWNBA: sports
+  KXUFCGAME: sports
+  KXUFC: sports
+  KXBOXINGGAME: sports
+  KXBOXING: sports
+  KXMMA: sports
+  KXATPGAME: sports
+  KXATP: sports
+  KXWTAGAME: sports
+  KXWTA: sports
+  KXPGAGAME: sports
+  KXPGA: sports
+  KXF1: sports
+  KXCFL: sports
+  KXNCAAF: sports
+  KXNCAAB: sports
+  KXMLSGAME: sports
+  KXMLSTOTAL: sports
+  KXMLS: sports
 
 title_keywords:
+  # Politics
   election: politics
   president: politics
   senate: politics
   house: politics
+  congress: politics
+  presidential: politics
+  democrat: politics
+  republican: politics
+  governor: politics
+  white house: politics
+
+  # Economics
   inflation: economics
   gdp: economics
   unemployment: economics
   fed: economics
+  federal reserve: economics
+  interest rate: economics
+  cpi: economics
   bitcoin: economics
+  crypto: economics
+  ethereum: economics
+  treasury: economics
+  stock: economics
+  nasdaq: economics
+  s&p: economics
+
+  # Weather
   weather: weather
   rain: weather
   snow: weather
@@ -35,17 +150,65 @@ title_keywords:
   climate: weather
   science: weather
 
+  # Sports
+  vs: sports
+  winner: sports
+  win by: sports
+  points: sports
+  goals: sports
+  runs: sports
+  over/under: sports
+  both teams to score: sports
+  btts: sports
+  mlb: sports
+  nba: sports
+  nfl: sports
+  nhl: sports
+  premier league: sports
+  la liga: sports
+  champions league: sports
+  dota: sports
+  counter-strike: sports
+  valorant: sports
+  esports: sports
+  baseball: sports
+  basketball: sports
+  football: sports
+  soccer: sports
+  hockey: sports
+  tennis: sports
+  golf: sports
+
 event_patterns:
   elect: politics
   pres: politics
   cong: politics
+  sen: politics
+  gov: politics
   cpi: economics
   fed: economics
   gdp: economics
   unemp: economics
   btc: economics
+  eth: economics
+  rate: economics
   temp: weather
   rain: weather
   snow: weather
   hurr: weather
+  storm: weather
   climate: weather
+  game: sports
+  spread: sports
+  total: sports
+  btts: sports
+  match: sports
+  mlb: sports
+  nba: sports
+  nfl: sports
+  nhl: sports
+  epl: sports
+  laliga: sports
+  cs2: sports
+  dota: sports
+  val: sports

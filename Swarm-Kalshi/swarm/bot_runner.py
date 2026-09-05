@@ -101,6 +101,10 @@ class BotRunner:
             5,
             int(self.cfg.get("swarm", {}).get("status_heartbeat_seconds", 15)),
         )
+        self._exchange_auth_status: str = "unverified"
+        self._sensors_verified: bool = False
+        self._positions_verified: bool = False
+        self._last_auth_error: str = ""
 
         # Initialize all modules
         api_cfg = self.cfg["api"]
@@ -313,6 +317,7 @@ class BotRunner:
         if not bool(auto_cfg.get("enabled", False)):
             return
 
+        central_cfg = dict(self.cfg.get("central_llm", {}) or {})
         if bool(auto_cfg.get("gemini_only", False)) or bool(auto_cfg.get("google_only", False)):
             central_cfg["provider"] = "gemini"
         elif bool(auto_cfg.get("anthropic_only", False)):
@@ -520,15 +525,22 @@ class BotRunner:
             logger.warning("Failed to load risk state file: %s", exc)
 
     def _save_risk_state(self) -> None:
-        """Persist current risk state to disk atomically."""
-        try:
-            state = self.risk.export_state()
-            temp_file = self._risk_state_file.with_suffix(".tmp")
-            with open(temp_file, "w", encoding="utf-8") as fh:
-                json.dump(state, fh, indent=2)
-            temp_file.replace(self._risk_state_file)
-        except Exception as exc:
-            logger.warning("Failed to save risk state file: %s", exc)
+        """Persist current risk state to disk atomically with retry on Windows."""
+        for attempt in range(3):
+            try:
+                state = self.risk.export_state()
+                temp_file = self._risk_state_file.with_suffix(".tmp")
+                with open(temp_file, "w", encoding="utf-8") as fh:
+                    json.dump(state, fh, indent=2)
+                temp_file.replace(self._risk_state_file)
+                break
+            except (PermissionError, OSError):
+                if attempt < 2:
+                    time.sleep(0.05)
+                    continue
+            except Exception as exc:
+                logger.warning("Failed to save risk state file: %s", exc)
+                break
 
     # ------------------------------------------------------------------
     # Market filtering
@@ -996,6 +1008,9 @@ class BotRunner:
             return 0
 
         capped_count = min(requested_count, int(hard_cap_cents // price_cents))
+        if capped_count == 0 and requested_count >= 1 and balance_cents >= price_cents:
+            capped_count = 1
+
         final_notional = int(capped_count * price_cents)
         logger.info(
             "Trade sizing %s | base_size_cents=%d trend_mult=%.3f human_mult=%.3f "
@@ -1040,6 +1055,17 @@ class BotRunner:
 
     def _execute_trade(self, signal) -> None:
         """Execute a trade -- mirrors agent.py logic."""
+        is_demo = bool(self.cfg.get("api", {}).get("demo_mode", True))
+        if not is_demo and (
+            not getattr(self, "_sensors_verified", True) or getattr(self, "_exchange_auth_status", "ok") != "ok"
+        ):
+            logger.critical(
+                "FAIL-CLOSED: Live order rejected because exchange sensors / auth are unverified (%s).",
+                getattr(self, "_last_auth_error", "") or "Auth degraded",
+            )
+            self.behavior.record_action(traded=False)
+            return
+
         base_count = self.risk.position_size(signal.confidence, signal.suggested_price)
         trend_mult = float(self.learning.trend.momentum_multiplier)
         trend_count = max(1, int(base_count * trend_mult))
@@ -1058,15 +1084,37 @@ class BotRunner:
             "suggested_price": signal.suggested_price,
         }):
             logger.info(
-                "Pre-screen rejected %s %s on %s (conf=%.1f below archetype floor)"
-                " — skipped research + LLM to save API credits.",
-                signal.action, signal.side, signal.ticker, signal.confidence,
+                "Pre-screen rejected %s %s on %s (conf=%.1f, price=%s¢) — skipped research + LLM.",
+                signal.action, signal.side, signal.ticker, signal.confidence, str(signal.suggested_price),
             )
             self.behavior.record_action(traded=False)
             return
 
-        # Enrich with web research evidence (returns {} gracefully on any failure).
-        research_data = self.research.enrich_trade_request(signal)
+        # Prioritize research already performed by AnalysisEngine during opportunity evaluation
+        sig_quality = getattr(signal, "research_quality", None)
+        sig_rationale = getattr(signal, "research_rationale", "")
+        
+        research_data = {}
+        if sig_quality is not None and float(sig_quality) > 0:
+            ev_quality = float(sig_quality)
+            ev_summary = str(sig_rationale or f"Market research verified with probability {getattr(signal, 'research_probability', 0.5):.2f}")
+            ev_bullets = [ev_summary]
+            ev_num_sources = 5
+            ev_contradictions = []
+        else:
+            # Fall back to standalone research orchestrator if signal was not yet researched
+            research_data = self.research.enrich_trade_request(signal)
+            ev_quality = research_data.get("evidence_quality")
+            ev_summary = research_data.get("research_summary", "")
+            if ev_summary and "LLM extraction failed" in ev_summary:
+                # Discard extraction error text so it doesn't taint decision
+                ev_summary = ""
+                ev_quality = None
+            ev_bullets = research_data.get("evidence_bullets", [])
+            if not ev_bullets and ev_summary:
+                ev_bullets = [ev_summary]
+            ev_num_sources = research_data.get("num_sources", 0)
+            ev_contradictions = research_data.get("evidence_contradictions", [])
 
         approval = self.central_llm.review_trade(
             bot_name=self.bot_name,
@@ -1083,10 +1131,10 @@ class BotRunner:
                 "volume_24h": int(getattr(signal, "volume_24h", 0) or 0),
                 "spread_cents": int(getattr(signal, "spread_cents", 0) or 0),
                 # Research enrichment fields (empty when research is disabled/failed)
-                "research_summary": research_data.get("research_summary", ""),
-                "evidence_quality": research_data.get("evidence_quality", None),
-                "evidence_bullets": research_data.get("evidence_bullets", []),
-                "num_sources": research_data.get("num_sources", 0),
+                "research_summary": ev_summary,
+                "evidence_quality": ev_quality,
+                "evidence_bullets": ev_bullets,
+                "num_sources": ev_num_sources,
                 "evidence_contradictions": research_data.get("evidence_contradictions", []),
             },
         )
@@ -1459,7 +1507,6 @@ class BotRunner:
                 if pos is not None:
                     unrealized = int(pos.get("unrealized_pnl", 0) or 0)
                     position_qty = int(pos.get("position", 0) or 0)
-
                     # Exit if unrealized loss exceeds threshold
                     if unrealized <= exit_threshold_cents and position_qty > 0:
                         logger.info(
@@ -1468,6 +1515,51 @@ class BotRunner:
                             ticker, unrealized, exit_threshold_cents,
                         )
                         self._place_exit_order(ticker, pos)
+
+                # --- Case 2.5: Direct market settlement check (for demo simulation or unlisted settlements) ---
+                if ticker not in settled_tickers and pos is None:
+                    try:
+                        mkt = self.client.get_market(ticker)
+                        mkt_status = str(mkt.get("status") or "").lower()
+                        mkt_result = str(mkt.get("result") or "").lower()
+                        if mkt_status in {"finalized", "closed", "settled"} or mkt_result in {"yes", "no"}:
+                            for db_id, meta in rows:
+                                side = str(meta.get("side", "yes")).lower()
+                                count_val = max(1, int(meta.get("count", 1) or 1))
+                                entry_val = int(meta.get("entry_price", 50) or 50)
+                                if mkt_result == side:
+                                    sim_pnl = count_val * (100 - entry_val)
+                                    sim_outcome = "win"
+                                elif mkt_result in {"yes", "no"}:
+                                    sim_pnl = -(count_val * entry_val)
+                                    sim_outcome = "loss"
+                                else:
+                                    sim_pnl = 0
+                                    sim_outcome = "expired"
+                                
+                                self.learning.update_outcome(
+                                    db_id,
+                                    sim_outcome,
+                                    pnl_cents=sim_pnl,
+                                    pnl_valid=True,
+                                    pnl_validation_reason="market_finalized_direct",
+                                    reconciliation_trace={"ticker": ticker, "result": mkt_result, "status": mkt_status},
+                                )
+                                self._on_trade_resolved(
+                                    sim_outcome,
+                                    sim_pnl,
+                                    ticker=ticker,
+                                    trade_db_id=db_id,
+                                    order_id=str(meta.get("order_id", "") or ""),
+                                )
+                                resolved_ids.append(db_id)
+                            logger.info(
+                                "Resolved finalized market %s (result=%s): %d trade(s).",
+                                ticker, mkt_result, len(rows),
+                            )
+                            continue
+                    except Exception as exc:
+                        logger.debug("Could not fetch market status for %s: %s", ticker, exc)
 
                 # --- Case 3: stale pending rows ---
                 for db_id, meta in rows:
@@ -1943,34 +2035,55 @@ class BotRunner:
         try:
             logger.info(f"[{self.bot_name}] Fetching balance...")
             balance_data = self.client.get_balance()
-            balance = balance_data.get("balance", 0)
-            logger.info(f"[{self.bot_name}] Balance received: {balance}¢")
-            
-            # FIX: Only update if we got a valid balance, otherwise preserve last known
+            raw_balance = balance_data.get("balance", 0)
+
+            demo_bankroll = int(
+                self.cfg.get("trading", {}).get("demo_bankroll_cents", 0)
+                or self.cfg.get("demo_bankroll_cents", 0)
+                or 0
+            )
+            if getattr(self.client, "demo_mode", False) and demo_bankroll > 0:
+                pnl = getattr(self.risk.daily, "gross_pnl_cents", 0) or 0
+                balance = max(100, demo_bankroll + pnl)
+                logger.info(f"[{self.bot_name}] Demo virtual bankroll: {balance}¢ ($100.00 budget)")
+            else:
+                balance = raw_balance
+                logger.info(f"[{self.bot_name}] Balance received: {balance}¢")
+
+            self._exchange_auth_status = "ok"
+            self._sensors_verified = True
+            self._last_auth_error = ""
+            self.risk.set_exchange_verified(True, auth_status="ok")
+
+            # Update balance
             if balance > 0:
                 self._last_known_balance = balance
                 self._last_balance_update = datetime.now(timezone.utc)
-                self.risk.update_balance(balance)
+                self.risk.update_balance(balance, verified=True)
             elif self._last_known_balance > 0:
                 # API returned 0 but we have cached value - use cache
                 logger.warning(f"[{self.bot_name}] API returned 0 balance, using cached {self._last_known_balance}¢")
-                self.risk.update_balance(self._last_known_balance)
+                self.risk.update_balance(self._last_known_balance, verified=True)
             else:
-                # First run and API returned 0, update anyway
-                self.risk.update_balance(balance)
-                
+                self.risk.update_balance(balance, verified=True)
+
         except KalshiAPIError as exc:
+            self._exchange_auth_status = "degraded"
+            self._sensors_verified = False
+            self._last_auth_error = str(exc)
+            self.risk.set_exchange_verified(False, auth_status="degraded")
             logger.error(f"[{self.bot_name}] Failed to fetch balance: {exc}")
-            # FIX: On API error, preserve last known balance
             if self._last_known_balance > 0:
-                logger.info(f"[{self.bot_name}] Using cached balance {self._last_known_balance}¢")
-                self.risk.update_balance(self._last_known_balance)
+                logger.info(f"[{self.bot_name}] Using cached balance {self._last_known_balance}¢ (UNVERIFIED)")
+                self.risk.update_balance(self._last_known_balance, verified=False)
         except Exception as exc:
+            self._exchange_auth_status = "degraded"
+            self._sensors_verified = False
+            self._last_auth_error = str(exc)
+            self.risk.set_exchange_verified(False, auth_status="degraded")
             logger.error(f"[{self.bot_name}] Unexpected error fetching balance: {exc}")
-            # FIX: On any error, preserve last known balance
             if self._last_known_balance > 0:
-                logger.info(f"[{self.bot_name}] Using cached balance {self._last_known_balance}¢")
-                self.risk.update_balance(self._last_known_balance)
+                self.risk.update_balance(self._last_known_balance, verified=False)
 
         try:
             positions = self.client.get_positions(count_filter="position")
@@ -1995,7 +2108,12 @@ class BotRunner:
                 }
                 open_position_count = len(account_open_tickers & bot_open_tickers)
             self.risk.update_open_positions(open_position_count)
+            self._positions_verified = True
         except KalshiAPIError as exc:
+            self._positions_verified = False
+            logger.warning("Failed to fetch positions: %s", exc)
+        except Exception as exc:
+            self._positions_verified = False
             logger.warning("Failed to fetch positions: %s", exc)
 
     def _end_of_session(self) -> None:
@@ -2053,6 +2171,10 @@ class BotRunner:
                     "performance": perf,
                     "risk": risk_status,
                     "pid": os.getpid(),
+                    "exchange_auth_status": getattr(self, "_exchange_auth_status", "ok"),
+                    "balance_verified": getattr(self, "_sensors_verified", True),
+                    "positions_verified": getattr(self, "_positions_verified", True),
+                    "last_auth_error": getattr(self, "_last_auth_error", ""),
                 }
 
                 # FIX: Use atomic write to prevent corruption

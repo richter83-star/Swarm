@@ -76,14 +76,36 @@ class RiskManager:
         self._drawdown_pause_until: Optional[datetime] = None
         self._last_block_key: Optional[str] = None
         self._last_block_log_at: Optional[datetime] = None
+        self._is_verified: bool = True
+        self._exchange_auth_status: str = "ok"
+
+    # ------------------------------------------------------------------
+    # Sensor verification & state
+    # ------------------------------------------------------------------
+
+    def set_exchange_verified(self, verified: bool, auth_status: str = "ok") -> None:
+        """Update exchange verification state and authentication status."""
+        self._is_verified = bool(verified)
+        self._exchange_auth_status = str(auth_status or ("ok" if verified else "degraded"))
+
+    @property
+    def is_verified(self) -> bool:
+        """Whether exchange sensors/balance are verified."""
+        return getattr(self, "_is_verified", True)
+
+    @property
+    def exchange_auth_status(self) -> str:
+        """Authentication status string: 'ok', 'degraded', 'unknown'."""
+        return getattr(self, "_exchange_auth_status", "ok")
 
     # ------------------------------------------------------------------
     # Balance updates
     # ------------------------------------------------------------------
 
-    def update_balance(self, balance_cents: int) -> None:
+    def update_balance(self, balance_cents: int, verified: bool = True) -> None:
         """Call after every balance fetch to track drawdown."""
         self._current_balance_cents = balance_cents
+        self._is_verified = bool(verified)
         if balance_cents > self._peak_balance_cents:
             self._peak_balance_cents = balance_cents
 
@@ -133,15 +155,26 @@ class RiskManager:
             streak_label,
         )
 
+    @property
+    def balance_cents(self) -> int:
+        """Current account balance in cents."""
+        return self._current_balance_cents
+
+    @property
+    def peak_balance_cents(self) -> int:
+        """Peak account balance in cents."""
+        return self._peak_balance_cents
+
     # ------------------------------------------------------------------
     # Pre-trade checks
     # ------------------------------------------------------------------
 
-    def can_trade(self) -> bool:
+    def can_trade(self, require_verified_sensors: Optional[bool] = None) -> bool:
         """
         Return *True* only if all risk conditions allow a new trade.
 
         Checks (in order):
+        0. Sensor integrity / exchange verification check (fail-closed if enabled).
         1. Minimum balance threshold.
         2. Daily loss limit.
         3. Maximum trades per day.
@@ -150,6 +183,21 @@ class RiskManager:
         """
         self.daily.reset_if_new_day()
         now = datetime.now(timezone.utc)
+
+        # Fail-closed check if configured or required in live trading mode
+        if require_verified_sensors is None:
+            require_verified = bool(self.cfg.get("require_verified_sensors", False))
+        else:
+            require_verified = bool(require_verified_sensors)
+
+        if require_verified and not getattr(self, "_is_verified", True):
+            self._log_block(
+                "unverified_sensors",
+                "FAIL-CLOSED: Exchange sensors / balance are unverified (%s). Trading blocked.",
+                getattr(self, "_exchange_auth_status", "degraded"),
+                level="critical",
+            )
+            return False
 
         min_bal = self.cfg.get("min_balance_cents", 500)
         if self._current_balance_cents < min_bal:
@@ -452,9 +500,10 @@ class RiskManager:
     def status(self) -> Dict[str, Any]:
         """Return a snapshot of the current risk state."""
         self.daily.reset_if_new_day()
-        dd = 0.0
+        dd_pct = None
         if self._peak_balance_cents > 0:
             dd = 1.0 - (self._current_balance_cents / self._peak_balance_cents)
+            dd_pct = round(dd * 100, 2)
         now = datetime.now(timezone.utc)
         pause_remaining = 0
         if self._drawdown_pause_until and self._drawdown_pause_until > now:
@@ -462,7 +511,7 @@ class RiskManager:
         return {
             "balance_cents": self._current_balance_cents,
             "peak_balance_cents": self._peak_balance_cents,
-            "drawdown_pct": round(dd * 100, 2),
+            "drawdown_pct": dd_pct,
             "drawdown_pause_until": (
                 self._drawdown_pause_until.isoformat() if self._drawdown_pause_until else None
             ),
@@ -474,6 +523,8 @@ class RiskManager:
             "consecutive_losses": self._consecutive_losses,
             "open_positions": self._open_position_count,
             "can_trade": self.can_trade(),
+            "balance_verified": getattr(self, "_is_verified", True),
+            "exchange_auth_status": getattr(self, "_exchange_auth_status", "ok"),
         }
 
     def export_state(self) -> Dict[str, Any]:
@@ -491,6 +542,8 @@ class RiskManager:
             "peak_balance_cents": int(self._peak_balance_cents),
             "current_balance_cents": int(self._current_balance_cents),
             "open_position_count": int(self._open_position_count),
+            "balance_verified": bool(getattr(self, "_is_verified", True)),
+            "exchange_auth_status": str(getattr(self, "_exchange_auth_status", "ok")),
             "drawdown_pause_until": (
                 self._drawdown_pause_until.isoformat() if self._drawdown_pause_until else None
             ),
@@ -519,6 +572,10 @@ class RiskManager:
         self._peak_balance_cents = int(state.get("peak_balance_cents", 0) or 0)
         self._current_balance_cents = int(state.get("current_balance_cents", 0) or 0)
         self._open_position_count = int(state.get("open_position_count", 0) or 0)
+        if "balance_verified" in state:
+            self._is_verified = bool(state.get("balance_verified", True))
+        if "exchange_auth_status" in state:
+            self._exchange_auth_status = str(state.get("exchange_auth_status", "ok"))
 
         pause_until = state.get("drawdown_pause_until")
         self._drawdown_pause_until = None

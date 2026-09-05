@@ -424,3 +424,36 @@ class TestAnalyse:
         signals = eng.analyse([opp])
         for s in signals:
             assert isinstance(s, TradeSignal)
+
+
+class TestFairValueStoikov:
+    def test_orderbook_depth_imbalance_is_bounded_by_spread(self):
+        """Heavy resting YES bids on an underdog contract must not hallucinate a 50¢ fair value."""
+        eng = make_engine()
+        # 20¢ mid price, 2¢ spread (19 bid / 21 ask).
+        # Orderbook with 1000 YES bids vs 10 NO bids (100:1 asymmetry)
+        opp = make_opp(
+            mid_price=20.0,
+            spread=2,
+            orderbook={
+                "yes": [(19, 1000)],
+                "no": [(79, 10)],
+            },
+        )
+        fv = eng._fair_value(opp)
+        # Stoikov adjustment must be bounded: mid_price + (spread/2)*imbalance = 20 + 1.0*~1.0 = ~21.0
+        assert 19.5 <= fv <= 21.5, f"Fair value {fv} exceeded expected bounded range [19.5, 21.5]"
+
+    def test_symmetric_orderbook_yields_mid_price(self):
+        eng = make_engine()
+        opp = make_opp(
+            mid_price=50.0,
+            spread=2,
+            orderbook={
+                "yes": [(49, 100)],
+                "no": [(49, 100)],
+            },
+        )
+        fv = eng._fair_value(opp)
+        assert abs(fv - 50.0) < 0.1
+

@@ -81,6 +81,27 @@ def find_swarm_processes() -> List[Dict[str, Any]]:
         "bot_runner.py",
     )
 
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == os.getpid():
+                    continue
+                cmdline_list = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline_list)
+                if any(t in cmdline_str for t in target_scripts):
+                    found.append({
+                        "pid": proc.pid,
+                        "cmd": cmdline_str,
+                        "script": next(t for t in target_scripts if t in cmdline_str),
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        if found:
+            return found
+    except Exception:
+        pass
+
     if os.name == "nt":
         # Windows via wmic / powershell
         try:
@@ -331,6 +352,120 @@ def run_radar() -> None:
     subprocess.run([sys.executable, str(PROJECT_ROOT / "watch_demo_learning.py"), "--save-report"])
 
 
+def run_logs(lines: int = 50) -> None:
+    """Print the last N lines of logs/swarm.log."""
+    log_file = LOGS_DIR / "swarm.log"
+    if not log_file.exists():
+        print("[INFO] logs/swarm.log does not exist yet.")
+        return
+    try:
+        content = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = content[-lines:]
+        print(f"\n--- Last {len(tail)} lines of {log_file} ---")
+        for line in tail:
+            print(line)
+        print("--- End of Log ---\n")
+    except Exception as e:
+        print(f"[ERROR] Could not read log file: {e}")
+
+
+def run_vacuum() -> None:
+    """Run SQLite VACUUM on all .db files in data/."""
+    print("\n[VACUUM] Reclaiming SQLite unallocated disk storage...")
+    for db_file in sorted(DATA_DIR.glob("*.db")):
+        try:
+            conn = sqlite3.connect(str(db_file), timeout=10)
+            conn.execute("VACUUM")
+            conn.close()
+            print(f"  • {db_file.name:<30}: VACUUM OK")
+        except Exception as e:
+            print(f"  • {db_file.name:<30}: ERROR: {e}")
+    print("[OK] Vacuum routine completed.\n")
+
+
+def find_dashboard_processes() -> List[Dict[str, Any]]:
+    """Locate all running dashboard server processes."""
+    found = []
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == os.getpid():
+                    continue
+                cmdline_list = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline_list)
+                if "server.py" in cmdline_str and ("dashboard_new" in cmdline_str or "--project-root" in cmdline_str or "8888" in cmdline_str):
+                    found.append({"pid": proc.pid, "cmd": cmdline_str})
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return found
+
+
+def stop_dashboard() -> int:
+    """Stop any running dashboard server processes."""
+    procs = find_dashboard_processes()
+    if not procs:
+        print("[INFO] No active dashboard server found.")
+        return 0
+    print(f"[STOP] Stopping {len(procs)} dashboard process(es)...")
+    for p in procs:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/PID", str(p["pid"])], capture_output=True)
+            else:
+                os.kill(p["pid"], signal.SIGTERM)
+            print(f"  • Terminated dashboard PID {p['pid']}")
+        except Exception as e:
+            print(f"  • Could not stop PID {p['pid']}: {e}")
+    return 0
+
+
+def run_dashboard(port: int = 8888, host: str = "0.0.0.0", background: bool = False) -> None:
+    """Start the dashboard console web server (foreground or background)."""
+    server_script = PROJECT_ROOT / "dashboard_new" / "server.py"
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    running = find_dashboard_processes()
+    if running:
+        print(f"[INFO] Dashboard is ALREADY running on PID(s): {[p['pid'] for p in running]}")
+        print(f"[INFO] Access live console at: http://localhost:{port}\n")
+        return
+
+    if background:
+        python_exe = sys.executable
+        log_file = (LOGS_DIR / "dashboard.log").open("a", encoding="utf-8")
+        if os.name == "nt":
+            CREATE_NO_WINDOW = 0x08000000
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            proc = subprocess.Popen(
+                [python_exe, str(server_script), "--port", str(port), "--host", host],
+                cwd=str(PROJECT_ROOT),
+                stdout=log_file,
+                stderr=log_file,
+                creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            )
+        else:
+            proc = subprocess.Popen(
+                [python_exe, str(server_script), "--port", str(port), "--host", host],
+                cwd=str(PROJECT_ROOT),
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+            )
+        time.sleep(0.5)
+        print(f"\n[OK] Kalshi Swarm Dashboard launched in BACKGROUND (No console window).")
+        print(f"  • Dashboard PID: {proc.pid}")
+        print(f"  • Web Console:   http://localhost:{port}")
+        print(f"  • Server Log:    {LOGS_DIR / 'dashboard.log'}")
+        print(f"  • Stop Command:  python manage_swarm.py dashboard --stop\n")
+    else:
+        print(f"\n[DASHBOARD] Launching Kalshi Swarm Trading Console on http://localhost:{port} (host: {host})...\n")
+        subprocess.run([sys.executable, str(server_script), "--port", str(port), "--host", host])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Kalshi Swarm CLI Management Console")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -341,6 +476,16 @@ def main():
     subparsers.add_parser("status", help="Show live status and process details")
     subparsers.add_parser("health", help="Run 15-point health check")
     subparsers.add_parser("radar", help="Run demo learning and calibration radar")
+    subparsers.add_parser("vacuum", help="Run SQLite VACUUM across all databases")
+
+    logs_parser = subparsers.add_parser("logs", help="Tail recent swarm logs")
+    logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to tail (default: 50)")
+
+    dash_parser = subparsers.add_parser("dashboard", help="Start or stop dashboard console web server")
+    dash_parser.add_argument("--port", type=int, default=8888, help="Port to bind (default: 8888)")
+    dash_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
+    dash_parser.add_argument("-d", "--background", action="store_true", help="Run dashboard silently in background (no console window)")
+    dash_parser.add_argument("--stop", action="store_true", help="Stop running dashboard background process")
 
     mode_parser = subparsers.add_parser("mode", help="View or switch trading mode")
     mode_parser.add_argument("new_mode", nargs="?", choices=["demo", "live"], help="Set mode to 'demo' or 'live'")
@@ -364,7 +509,17 @@ def main():
         run_health()
     elif args.command == "radar":
         run_radar()
+    elif args.command == "logs":
+        run_logs(args.lines)
+    elif args.command == "vacuum":
+        run_vacuum()
+    elif args.command == "dashboard":
+        if getattr(args, "stop", False):
+            stop_dashboard()
+        else:
+            run_dashboard(args.port, args.host, getattr(args, "background", False))
 
 
 if __name__ == "__main__":
     main()
+

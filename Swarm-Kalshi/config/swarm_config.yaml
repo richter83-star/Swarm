@@ -1,8 +1,10 @@
 api:
-  key_id: 7fd77201-97cc-411c-a09c-b6f88cfb78bd
+  key_id: 6f43cd14-8d6e-430a-9bb7-1fef7d39592f
   private_key_path: keys/kalshi-private.key
-  base_url: https://demo-api.kalshi.co/trade-api/v2
+  base_url: https://api.elections.kalshi.com/trade-api/v2
   demo_mode: true
+  rate_limit_per_second: 2.5
+  min_request_interval: 0.35
 swarm:
   unassigned_market_bot: vanguard
   global_daily_loss_limit_cents: 15000
@@ -36,30 +38,32 @@ auto_scale:
   demote_drawdown_above_pct: 10.0
 trading:
   default_order_type: limit
-  min_confidence_threshold: 68
-  min_edge_cents: 10
+  min_confidence_threshold: 60
+  min_edge_cents: 0.4
   min_liquidity_cents: 1500
   min_volume_24h: 100
   min_hours_to_expiry: 2
   max_hours_to_expiry: 240
   max_position_pct: 0.04
+  demo_bankroll_cents: 10000
   max_open_positions: 3
   open_positions_scope: per_bot
   max_trades_per_day: 50
   daily_loss_limit_cents: 2500
-  min_balance_cents: 500
+  min_balance_cents: 100
   max_drawdown_pct: 0.1
   loss_streak_threshold: 4
   loss_streak_size_multiplier: 0.5
   limit_spread_buffer_cents: 1
   max_signals_per_cycle: 10
-  max_entry_price_cents: 60
-  min_entry_price_cents: 22
+  max_entry_price_cents: 80
+  min_entry_price_cents: 15
   market_scan_max_pages: 50
   scan_mode: recent_focus
-  recent_trade_seed_pages: 3
+  recent_trade_seed_pages: 1
   recent_trade_seed_page_size: 200
-  recent_trade_seed_top_tickers: 80
+  recent_trade_seed_top_tickers: 35
+  scanner_inter_ticker_delay_seconds: 0.08
   market_cache_ttl_seconds: 180
   focus_min_liquidity_cents: 1500
   focus_min_volume_24h: 300
@@ -89,7 +93,7 @@ learning:
   min_trades_for_review: 10
   learning_rate: 0.03
   decay_factor: 0.96
-  min_confidence_threshold: 68
+  min_confidence_threshold: 60
 human_behavior:
   action_delay_mean: 8.0
   action_delay_std: 3.0
@@ -97,9 +101,9 @@ human_behavior:
   action_delay_max: 20.0
   session_duration_min: 15
   session_duration_max: 90
-  idle_period_min: 5
-  idle_period_max: 25
-  browse_without_trade_prob: 0.3
+  idle_period_min: 2
+  idle_period_max: 8
+  browse_without_trade_prob: 0.02
   trade_size_min_multiplier: 0.6
   trade_size_max_multiplier: 1.4
 mirofish:
@@ -145,8 +149,8 @@ central_llm:
   anthropic_api_key: ''
   anthropic_model: claude-3-5-haiku-latest
   timeout_seconds: 20
-  min_approved_confidence: 75
-  max_red_flags: 1
+  min_approved_confidence: 60.0
+  max_red_flags: 4
   default_size_multiplier: 1.0
   fail_open: false
   allow_quant_fallback_on_error: false
@@ -170,9 +174,14 @@ central_llm:
   adaptive_prompt_cold_size_cap: 0.7
   adaptive_prompt_hot_size_boost: 1.1
   adaptive_prompt_reject_quant_floor: 70
-  adaptive_bootstrap_min_samples: 15
-  approval_confidence_floor: 78.0
-  low_volume_confidence_floor: 88
+  pre_screen_threshold: 58.0
+  approval_confidence_floor: 60.0
+  low_volume_threshold: 100.0
+  low_volume_confidence_floor: 65.0
+  wide_spread_threshold_cents: 10.0
+  wide_spread_confidence_floor: 65.0
+  longshot_price_threshold_cents: 12.0
+  longshot_confidence_floor: 70.0
   db_path: data/central_llm_controller.db
 autonomous_mode:
   enabled: true
@@ -219,7 +228,7 @@ research:
   max_content_length: 8000
   extraction_provider: gemini
   extraction_model: gemini-2.5-flash
-  llm_max_tokens: 800
+  llm_max_tokens: 2048
   extraction_api_key: ''
   primary_domains: {}
   secondary_domains: []
@@ -258,3 +267,13 @@ dashboard:
     username: admin
     password: ''
   refresh_interval_seconds: 15
+supervisor:
+  enabled: true
+  interval_minutes: 15
+  auto_remediation_enabled: true
+  max_consecutive_losses_trigger: 2
+  min_category_sample_size: 4
+  cold_category_win_rate_threshold: 40.0
+  cold_category_throttle_multiplier: 0.5
+  auto_quarantine_unknown_sports: true
+  stale_trade_max_age_hours: 48.0

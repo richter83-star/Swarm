@@ -8,8 +8,9 @@ ticker, and title keyword matching.
 The router uses a priority system:
 1. Series ticker match (highest priority -- e.g., KXCPI -> Oracle)
 2. Category field match
-3. Title keyword match (fallback)
-4. Default to Vanguard (catch-all)
+3. Partial category match
+4. Title keyword match (fallback)
+5. Default to Vanguard (catch-all)
 """
 
 from __future__ import annotations
@@ -104,26 +105,31 @@ class MarketRouter:
         # 1. Series ticker match (highest priority)
         if series_ticker.upper() in self._series_map:
             bot = self._series_map[series_ticker.upper()]
-            logger.debug("Routed %s to %s (series match)", ticker, bot)
-            return bot
+            if not category or category not in self._excluded_map.get(bot, set()):
+                logger.debug("Routed %s to %s (series match)", ticker, bot)
+                return bot
 
         # 2. Category field match
         if category in self._category_map:
             bot = self._category_map[category]
-            logger.debug("Routed %s to %s (category match: %s)", ticker, bot, category)
-            return bot
+            if category not in self._excluded_map.get(bot, set()):
+                logger.debug("Routed %s to %s (category match: %s)", ticker, bot, category)
+                return bot
 
         # 3. Partial category match
         if category:
             for cat_key, bot_name in self._category_map.items():
                 if cat_key in category or category in cat_key:
-                    logger.debug("Routed %s to %s (partial category: %s)", ticker, bot_name, category)
-                    return bot_name
+                    if category not in self._excluded_map.get(bot_name, set()):
+                        logger.debug("Routed %s to %s (partial category: %s)", ticker, bot_name, category)
+                        return bot_name
 
         # 4. Title keyword match
         best_bot = None
         best_score = 0
         for bot_name, keywords in self._keyword_map.items():
+            if category and category in self._excluded_map.get(bot_name, set()):
+                continue
             score = sum(1 for kw in keywords if kw in title)
             if score > best_score:
                 best_score = score

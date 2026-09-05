@@ -60,9 +60,21 @@
     <button class="btn btn-cmd btn-cmd-stop" id="cmd-btn-stop" title="Stop all swarm processes">⏹ Stop</button>
     <button class="btn btn-cmd btn-cmd-restart" id="cmd-btn-restart" title="Restart swarm">🔄 Restart</button>
     <button class="btn btn-cmd btn-cmd-mode" id="cmd-btn-toggle-mode" title="Toggle Demo / Live mode">⇄ Switch Mode</button>
-    <button class="btn btn-cmd btn-cmd-health" id="cmd-btn-health" title="Run 15-point health check">🩺 Health</button>
+    <button class="btn btn-cmd btn-cmd-health" id="cmd-btn-health" title="Run 16-point health check">🩺 Health</button>
     <button class="btn btn-cmd btn-cmd-radar" id="cmd-btn-radar" title="Run Demo Learning Radar">📡 Radar</button>
   </div>
+</div>
+
+<!-- ── Global Exchange Degradation Banner ──────────────────── -->
+<div id="exchange-auth-banner" class="exchange-degraded-banner" style="display: none;">
+  <div class="banner-icon">⚠️</div>
+  <div class="banner-content">
+    <div class="banner-title">EXCHANGE SENSOR INTEGRITY DEGRADED — KALSHI AUTHENTICATION UNAVAILABLE</div>
+    <div class="banner-subtitle" id="exchange-auth-banner-sub">
+      HTTP 401: Failed to authenticate with Kalshi API. Exchange balance, positions, and live exposure are currently UNVERIFIED. Live trading is locked fail-closed.
+    </div>
+  </div>
+  <div class="banner-badge">SENSORS UNVERIFIED</div>
 </div>
 
 <!-- ── Tab Panels ─────────────────────────────────────────── -->
@@ -113,6 +125,8 @@
           <span class="terminal-title">Kalshi Swarm Interactive Terminal Console</span>
         </div>
         <div class="terminal-quick-links">
+          <button class="term-btn" onclick="sendConsoleCommand('help')">help</button>
+          <button class="term-btn" onclick="sendConsoleCommand('status')">status</button>
           <button class="term-btn" onclick="sendConsoleCommand('start')">start</button>
           <button class="term-btn" onclick="sendConsoleCommand('stop')">stop</button>
           <button class="term-btn" onclick="sendConsoleCommand('restart')">restart</button>
@@ -120,7 +134,8 @@
           <button class="term-btn" onclick="sendConsoleCommand('mode live')">mode live</button>
           <button class="term-btn" onclick="sendConsoleCommand('health')">health</button>
           <button class="term-btn" onclick="sendConsoleCommand('radar')">radar</button>
-          <button class="term-btn" onclick="sendConsoleCommand('status')">status</button>
+          <button class="term-btn" onclick="sendConsoleCommand('logs 25')">logs</button>
+          <button class="term-btn" onclick="sendConsoleCommand('vacuum')">vacuum</button>
           <button class="term-btn" onclick="clearTerminal()">clear</button>
         </div>
       </div>
@@ -315,6 +330,58 @@
       <!-- Rendered by JS -->
     </div>
 
+    <!-- AI Overseer & Self-Auditor Card -->
+    <div class="card section-gap" style="border-left: 4px solid var(--color-sky, #38bdf8);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <div class="card-title" style="display:flex; align-items:center; gap:0.5rem;">
+            <span>🧠 Autonomous AI Overseer & System Supervisor</span>
+            <span id="overseer-grade-badge" class="badge badge-info">AUDITING…</span>
+          </div>
+          <div class="text-muted" style="font-size:0.8rem;" id="overseer-last-audit-time">Continuous background self-auditing active (15m interval)</div>
+        </div>
+        <button class="btn btn-sm btn-blue" id="btn-run-overseer-audit" onclick="runOverseerAuditNow()">⚡ Run Audit Now</button>
+      </div>
+
+      <!-- Overseer Metrics & Synthesis Grid -->
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; margin-bottom:1rem;">
+        <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">System Health Score</div>
+          <div style="font-size:1.8rem; font-weight:700; color:#ffffff;" id="overseer-health-score">--%</div>
+          <div style="font-size:0.8rem; color:#94a3b8;" id="overseer-summary-sub">Evaluating decision quality & runtime</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Autonomous Remediations</div>
+          <div style="font-size:1.8rem; font-weight:700; color:var(--color-emerald, #34d399);" id="overseer-auto-actions-count">0</div>
+          <div style="font-size:0.8rem; color:#94a3b8;" id="overseer-remediations-desc">Auto-throttles & stale trade cleanups</div>
+        </div>
+      </div>
+
+      <!-- AI Synthesis Box -->
+      <div id="overseer-synthesis-box" style="background:rgba(56, 189, 248, 0.05); border:1px solid rgba(56, 189, 248, 0.2); padding:1rem; border-radius:8px; margin-bottom:1rem; display:none;">
+        <div style="font-weight:600; font-size:0.85rem; color:#38bdf8; margin-bottom:0.5rem;">🤖 AI Executive Synthesis & Root Cause Analysis</div>
+        <div style="font-size:0.85rem; line-height:1.5; color:#cbd5e1;" id="overseer-synthesis-text"></div>
+      </div>
+
+      <!-- Overseer Findings Table -->
+      <div class="table-wrap" style="margin-top:0.75rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Category</th>
+              <th>Diagnosis / Title</th>
+              <th>Description</th>
+              <th>Auto-Remediation Status</th>
+            </tr>
+          </thead>
+          <tbody id="overseer-findings-tbody">
+            <tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem">No active supervisor findings.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Progress bars -->
     <div id="llm-progress-bars" class="section-gap">
       <!-- Rendered by JS -->
@@ -347,57 +414,109 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 3: TRADES
+     TAB 3: TRADES BLOTTER
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-trades">
   <div class="content">
 
-    <!-- Filter buttons -->
-    <div class="filter-row">
-      <button class="filter-btn active" data-filter="all">All</button>
-      <button class="filter-btn" data-filter="sentinel">Sentinel</button>
-      <button class="filter-btn" data-filter="oracle">Oracle</button>
-      <button class="filter-btn" data-filter="pulse">Pulse</button>
-      <button class="filter-btn" data-filter="vanguard">Vanguard</button>
+    <!-- Blotter Toolbar -->
+    <div class="blotter-toolbar">
+      <div class="filter-row">
+        <button class="filter-btn active" data-filter="all" id="btn-filter-all">All Executions</button>
+        <button class="filter-btn" data-filter="sentinel" id="btn-filter-sentinel">Sentinel</button>
+        <button class="filter-btn" data-filter="oracle" id="btn-filter-oracle">Oracle</button>
+        <button class="filter-btn" data-filter="pulse" id="btn-filter-pulse">Pulse</button>
+        <button class="filter-btn" data-filter="vanguard" id="btn-filter-vanguard">Vanguard</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:1.25rem; font-family:var(--font-mono); font-size:0.8rem;">
+        <span style="color:var(--text-muted);">Total: <strong id="blotter-total-count" style="color:#ffffff;">0</strong></span>
+        <span style="color:var(--text-muted);">Wins: <strong id="blotter-win-count" style="color:var(--color-emerald);">0</strong></span>
+        <span style="color:var(--text-muted);">Losses: <strong id="blotter-loss-count" style="color:var(--color-rose);">0</strong></span>
+        <span style="color:var(--text-muted);">Net Realized: <strong id="blotter-net-pnl" style="color:#ffffff;">$0.00</strong></span>
+      </div>
     </div>
 
     <!-- Trades table -->
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Bot</th>
-            <th>Ticker</th>
-            <th>Side</th>
-            <th>Confidence</th>
-            <th>Outcome</th>
-            <th>PnL</th>
-          </tr>
-        </thead>
-        <tbody id="trades-tbody">
-          <tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">Loading…</td></tr>
-        </tbody>
-      </table>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Bot Model</th>
+              <th>Market Ticker</th>
+              <th>Order Side</th>
+              <th>Confidence</th>
+              <th>Execution Outcome</th>
+              <th>Realized P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="trades-tbody">
+            <tr><td colspan="7" class="text-muted" style="text-align:center;padding:2rem;">Awaiting trade executions…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
   </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 4: RISK
+     TAB 4: INSTITUTIONAL RISK & DRAWDOWN MATRIX
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-risk">
   <div class="content">
 
-    <div class="section-header">Per-Bot Drawdown</div>
-    <div class="grid-4" id="risk-drawdown">
+    <!-- Global Risk Protocol Banner -->
+    <div class="risk-header-banner">
+      <div>
+        <div class="risk-header-title">Autonomous Risk Protocol &amp; Circuit Breakers</div>
+        <div class="risk-header-val">
+          <span class="badge badge-success" id="risk-global-state-badge">NOMINAL (SAFE)</span>
+          <span style="font-size:1.05rem; color:var(--text); font-weight:600;">Capital Preservation Mode Active</span>
+        </div>
+      </div>
+      <div class="risk-stats-strip">
+        <div class="risk-strip-item">
+          <div class="risk-strip-label">Max Drawdown Limit</div>
+          <div class="risk-strip-value" style="color:var(--color-rose);">20.0%</div>
+        </div>
+        <div class="risk-strip-item">
+          <div class="risk-strip-label">Single Position Cap</div>
+          <div class="risk-strip-value" style="color:var(--color-cyan);">$1.00 <span style="font-size:0.75rem; color:var(--text-muted); font-weight:400;">(Demo)</span></div>
+        </div>
+        <div class="risk-strip-item">
+          <div class="risk-strip-label">Active Leverage</div>
+          <div class="risk-strip-value">1.00x</div>
+        </div>
+        <div class="risk-strip-item">
+          <div class="risk-strip-label">Emergency Protocol</div>
+          <div class="risk-strip-value" style="color:var(--color-emerald);">ARMED</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Per-Bot Drawdown Grid -->
+    <div class="section-header">Per-Bot Capital Allocation &amp; Drawdown Exposure</div>
+    <div class="grid-4 section-gap" id="risk-drawdown">
       <!-- Rendered by JS -->
     </div>
 
-    <div class="card section-gap">
-      <div class="card-title">Guardrail Unlock Progress</div>
-      <div id="risk-guardrail">
+    <!-- Guardrail Unlock Progress -->
+    <div class="guardrail-card section-gap">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <div style="font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em; color:#818cf8; font-weight:700;">Live Gatekeeper Protocol</div>
+          <div style="font-size:1.25rem; font-weight:800; color:#ffffff; margin-top:0.2rem;">Guardrail Unlock &amp; Scaling Milestones</div>
+        </div>
+        <div style="font-size:0.78rem; color:var(--text-muted);">Target: 3/3 Milestones required before increasing position sizes</div>
+      </div>
+
+      <div class="guardrail-milestones-grid" id="risk-guardrail-milestones">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div id="risk-guardrail-banner">
         <!-- Rendered by JS -->
       </div>
     </div>
@@ -406,82 +525,101 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 5: SYSTEM
+     TAB 5: SYSTEM TELEMETRY & AUDIT
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-system">
   <div class="content">
 
-    <div class="grid-2">
-      <!-- Tavily credits -->
-      <div class="card">
-        <div class="card-title">Tavily API Usage</div>
+      <!-- AI Web Search Telemetry -->
+      <div class="card" style="padding:1.2rem;">
+        <div class="card-title">AI Web Search & Verification</div>
         <div id="sys-tavily">
           <!-- Rendered by JS -->
         </div>
       </div>
 
-      <!-- Gemini LLM Brain + Uptime -->
-      <div class="card">
-        <div class="card-title">Gemini AI Brain &amp; Uptime</div>
-        <div id="sys-llm" style="margin-bottom:0.75rem">Gemini Brain: loading…</div>
-        <div id="sys-anthropic" style="display:none"></div>
-        <div class="text-muted" style="font-size:0.75rem;margin-bottom:0.2rem">Uptime</div>
-        <div class="fw-bold text-green" id="sys-uptime">—</div>
+      <!-- Gemini Brain Telemetry -->
+      <div class="card" style="padding:1.2rem;">
+        <div class="card-title">Gemini 2.5 Flash Engine</div>
+        <div id="sys-llm">
+          <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:#ffffff; margin:0.25rem 0;">ONLINE</div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">Search-Grounded Macro Analysis</div>
+        </div>
+      </div>
+
+      <!-- Daemon & Uptime -->
+      <div class="card" style="padding:1.2rem;">
+        <div class="card-title">Swarm Daemon Watchdog</div>
+        <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:var(--color-emerald); margin:0.25rem 0;" id="sys-uptime">—</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">Continuous Session Monitor</div>
+      </div>
+
+      <!-- Automated Health Engine -->
+      <div class="card" style="padding:1.2rem;">
+        <div class="card-title">Health Check Engine</div>
+        <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:var(--color-cyan); margin:0.25rem 0;" id="sys-health-summary">15 Checks Active</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">Automated Verification Routine</div>
       </div>
     </div>
 
-    <!-- Log tail -->
-    <div class="section-gap">
-      <div class="section-header">Live Log Tail (last 20 lines)</div>
-      <div class="log-box" id="sys-log-tail">(loading…)</div>
+    <!-- 15-Point Automated Health Matrix -->
+    <div class="card section-gap">
+      <div class="card-title">15-Point System Health &amp; Integrity Matrix</div>
+      <div class="health-matrix-grid" id="sys-health-grid">
+        <p class="text-muted" style="padding:1rem;">Loading health telemetry…</p>
+      </div>
     </div>
 
-    <!-- Health report -->
+    <!-- Live Stream Terminal Log Tail -->
     <div class="section-gap">
-      <div class="section-header">Health Report</div>
-      <div class="card" id="sys-health">
-        <p class="text-muted">Loading…</p>
-      </div>
+      <div class="section-header">Swarm Execution Log Stream (Live Tail)</div>
+      <div class="log-box" id="sys-log-tail" style="height:260px;">(Connecting to log stream…)</div>
     </div>
 
   </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 6: CONTROLS
+     TAB 6: BOT DISPATCH CONTROLS & EMERGENCY BAY
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-controls">
   <div class="content">
 
-    <div class="section-header">Bot Controls</div>
-    <div style="display:flex;flex-direction:column;gap:0.75rem;" id="controls-bot-list">
+    <div class="section-header">Bot Dispatch &amp; Execution Controllers</div>
+    <div style="display:flex; flex-direction:column; gap:1rem;" class="section-gap" id="controls-bot-list">
       <!-- Rendered by JS -->
     </div>
 
-    <!-- Kill switch -->
+    <!-- High Security Emergency Kill Bay -->
     <div class="section-gap">
-      <div class="section-header" style="color:var(--red)">Kill Switch</div>
+      <div class="section-header" style="color:var(--color-rose);">Emergency Protocol Bay</div>
       <div class="card kill-section">
-        <p class="text-muted mb-1" style="font-size:0.82rem">
-          This will write a kill signal to <code>data/kill_signal.json</code>.
-          The swarm daemon will stop all bot runners.
-        </p>
-        <p class="text-muted" style="font-size:0.8rem;margin-bottom:0.75rem">
-          Type <strong style="color:var(--red)">KILL</strong> in the box and click the button to confirm.
-        </p>
-        <div class="kill-input-wrap">
-          <input
-            type="text"
-            id="kill-confirm-input"
-            class="kill-input"
-            placeholder="type KILL"
-            maxlength="4"
-            autocomplete="off"
-          />
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+          <div>
+            <div style="font-size:1.1rem; font-weight:800; color:#ffffff;">Swarm Master Circuit Breaker</div>
+            <p class="text-muted mt-1" style="font-size:0.82rem; max-width:600px;">
+              Writing a master kill signal immediately halts all 4 bot sub-processes, cancels active pending orders, and stops the swarm runner.
+            </p>
+            <p style="font-size:0.8rem; color:#fca5a5; margin-top:0.5rem;">
+              Safety Interlock: Type <strong style="color:#ffffff;">KILL</strong> in the security input below to disengage safety lock.
+            </p>
+          </div>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.75rem;">
+            <div class="kill-input-wrap">
+              <input
+                type="text"
+                id="kill-confirm-input"
+                class="kill-input"
+                placeholder="type KILL"
+                maxlength="4"
+                autocomplete="off"
+              />
+            </div>
+            <button class="btn-kill" id="kill-btn">
+              ⚡ DISPATCH EMERGENCY KILL SIGNAL
+            </button>
+          </div>
         </div>
-        <button class="btn-kill" id="kill-btn" style="max-width:100%;margin-top:1rem">
-          EMERGENCY STOP — KILL ALL BOTS
-        </button>
       </div>
     </div>
 
@@ -489,56 +627,63 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 7: CONFIG
+     TAB 7: CONFIGURATION CONSOLE
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-config">
   <div class="content">
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-      <div class="section-header" style="margin-bottom:0">swarm_config.yaml</div>
-      <div style="display:flex;gap:0.5rem;">
-        <button class="btn btn-blue" id="config-edit-btn">Edit</button>
-        <button class="btn btn-green" id="config-save-btn" style="display:none">Save</button>
-        <button class="btn btn-ghost" id="config-cancel-btn" style="display:none">Cancel</button>
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <div class="card-title" style="margin-bottom:0.2rem;">swarm_config.yaml</div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">Central configuration manifest for bots, API keys, and risk thresholds.</div>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn btn-blue" id="config-edit-btn">✏️ Edit Config</button>
+          <button class="btn btn-green" id="config-save-btn" style="display:none">💾 Save &amp; Validate</button>
+          <button class="btn btn-ghost" id="config-cancel-btn" style="display:none">Cancel</button>
+        </div>
       </div>
-    </div>
 
-    <pre class="code-block" id="config-viewer">(loading config…)</pre>
-    <textarea
-      class="code-edit"
-      id="config-editor"
-      style="display:none;min-height:400px"
-      spellcheck="false"
-    ></textarea>
+      <pre class="code-block" id="config-viewer">(loading config…)</pre>
+      <textarea
+        class="code-edit"
+        id="config-editor"
+        style="display:none; min-height:450px;"
+        spellcheck="false"
+      ></textarea>
+    </div>
 
   </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     TAB 8: ADMIN
+     TAB 8: ENTERPRISE DATABASE & OPS ADMIN
      ════════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-admin">
   <div class="content">
 
-    <!-- Log viewer -->
-    <div class="card mb-2">
-      <div class="card-title">Log Viewer</div>
-      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">
-        <label style="font-size:0.82rem;color:var(--text-muted)">Lines:</label>
-        <input type="number" id="admin-log-count" value="50" min="1" max="1000" style="width:80px" />
-        <button class="btn btn-blue" id="admin-fetch-logs-btn">Fetch Logs</button>
+    <div class="grid-2 section-gap">
+      <!-- Database Storage & Vacuum -->
+      <div class="card">
+        <div class="card-title">Database Storage &amp; VACUUM Maintenance</div>
+        <p class="text-muted mb-2" style="font-size:0.82rem;">
+          Defragments SQLite B-trees and reclaims unallocated disk storage across all active swarm databases.
+        </p>
+        <button class="btn btn-blue" id="admin-vacuum-btn">⚡ Run Database VACUUM Optimizer</button>
+        <pre class="code-block mt-2" id="admin-vacuum-result" style="display:none; max-height:220px;"></pre>
       </div>
-      <div class="log-box" id="admin-log-display" style="max-height:400px">Click "Fetch Logs" to load.</div>
-    </div>
 
-    <!-- Vacuum -->
-    <div class="card">
-      <div class="card-title">Database Maintenance</div>
-      <p class="text-muted mb-1" style="font-size:0.82rem">
-        Run VACUUM on all SQLite databases in the data/ directory to reclaim disk space.
-      </p>
-      <button class="btn btn-ghost" id="admin-vacuum-btn">Vacuum All Databases</button>
-      <pre class="code-block mt-2" id="admin-vacuum-result" style="max-height:200px"></pre>
+      <!-- Log Inspector -->
+      <div class="card">
+        <div class="card-title">Log File Inspector</div>
+        <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:1rem;">
+          <label style="font-size:0.82rem; color:var(--text-muted);">Fetch Lines:</label>
+          <input type="number" id="admin-log-count" value="100" min="10" max="1000" style="width:90px; background:#06090e; border:1px solid var(--border-subtle); color:#fff; padding:0.35rem 0.6rem; border-radius:4px;" />
+          <button class="btn btn-ghost" id="admin-fetch-logs-btn">🔄 Fetch Recent Logs</button>
+        </div>
+        <div class="log-box" id="admin-log-display" style="max-height:220px;">Click "Fetch Recent Logs" to inspect disk log records.</div>
+      </div>
     </div>
 
   </div>

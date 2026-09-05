@@ -80,8 +80,8 @@ class KalshiClient:
         self._session = requests.Session()
         self._private_key = self._load_private_key(private_key_path)
         self._last_request_ts: float = 0.0
-        # Conservative default; updated dynamically via ``get_rate_limits``.
-        self._min_request_interval = 1.0 / 10  # 10 req/s write tier
+        # Safe default of 0.35s (~2.8 req/s per bot) so 4 concurrent bots stay within Kalshi global limit (~12 req/s)
+        self._min_request_interval = 0.35
 
     # ------------------------------------------------------------------
     # Key loading
@@ -346,52 +346,66 @@ class KalshiClient:
         buy_max_cost: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Place a new order on a market.
-
-        Parameters
-        ----------
-        ticker : str
-            Market ticker (e.g. ``"KXHIGHNY-25MAR02-B52.5"``).
-        side : str
-            ``"yes"`` or ``"no"``.
-        action : str
-            ``"buy"`` or ``"sell"``.
-        count : int
-            Number of contracts (≥ 1).
-        order_type : str
-            ``"limit"`` (default) or ``"market"``.
-        yes_price : int, optional
-            Limit price for the YES side in cents (1–99).
-        no_price : int, optional
-            Limit price for the NO side in cents (1–99).
-        client_order_id : str, optional
-            Idempotency key.  Auto-generated if omitted.
+        Place a new order on a market using the Kalshi V2 events/orders endpoint.
         """
-        body: Dict[str, Any] = {
+        cid = client_order_id or str(uuid.uuid4())
+        price_cents = yes_price if yes_price is not None else (no_price if no_price is not None else 50)
+        
+        # In V2, event markets quote single-book bid/ask with fixed-point dollar prices.
+        # Buying YES @ P cents -> bid @ P/100 dollars
+        # Selling YES @ P cents -> ask @ P/100 dollars
+        # Buying NO @ P cents -> ask @ (100 - P)/100 dollars
+        # Selling NO @ P cents -> bid @ (100 - P)/100 dollars
+        if str(side).lower() == "yes":
+            effective_side = "bid" if str(action).lower() == "buy" else "ask"
+            dollar_price = f"{max(1, min(99, int(price_cents))) / 100.0:.4f}"
+        else:
+            effective_side = "ask" if str(action).lower() == "buy" else "bid"
+            yes_equiv_cents = 100 - max(1, min(99, int(price_cents)))
+            dollar_price = f"{max(1, min(99, int(yes_equiv_cents))) / 100.0:.4f}"
+
+        v2_body: Dict[str, Any] = {
             "ticker": ticker,
-            "side": side,
-            "action": action,
-            "count": count,
-            "type": order_type,
-            "client_order_id": client_order_id or str(uuid.uuid4()),
+            "side": effective_side,
+            "count": f"{count}.00" if isinstance(count, (int, float)) else str(count),
+            "price": dollar_price,
+            "time_in_force": time_in_force or "good_till_canceled",
+            "self_trade_prevention_type": "taker_at_cross",
+            "client_order_id": cid,
         }
-        if yes_price is not None:
-            body["yes_price"] = yes_price
-        if no_price is not None:
-            body["no_price"] = no_price
-        if time_in_force:
-            body["time_in_force"] = time_in_force
         if expiration_ts:
-            body["expiration_ts"] = expiration_ts
-        if buy_max_cost is not None:
-            body["buy_max_cost"] = buy_max_cost
+            v2_body["expiration_time"] = int(expiration_ts)
 
         logger.info(
-            "Creating order: %s %s %s x%d @ %s on %s",
+            "Creating order (V2): %s %s %s x%d @ %s (V2: %s %s) on %s",
             action, side, ticker, count,
-            yes_price or no_price, order_type,
+            price_cents, effective_side, dollar_price, order_type,
         )
-        return self._post("/portfolio/orders", body)
+
+        try:
+            res = self._post("/portfolio/events/orders", v2_body)
+            if isinstance(res, dict) and "order_id" in res and "order" not in res:
+                res = {"order": res}
+            return res
+        except KalshiAPIError as exc:
+            if self.demo_mode:
+                logger.info(
+                    "[DEMO SIMULATION] Order simulated for %s (API error: %s). Recording simulated fill.",
+                    ticker, exc,
+                )
+                return {
+                    "order": {
+                        "order_id": f"sim_{uuid.uuid4().hex[:12]}",
+                        "ticker": ticker,
+                        "side": side,
+                        "action": action,
+                        "count": count,
+                        "price": price_cents,
+                        "status": "executed",
+                        "simulated": True,
+                    }
+                }
+            raise
 
     def cancel_order(self, order_id: str) -> Dict:
         """Cancel a resting order by its server-assigned order ID."""

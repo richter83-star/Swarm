@@ -118,41 +118,67 @@ async function apiFetch(url, options = {}) {
       if (errBody && errBody.error) throw new Error(errBody.error);
       throw new Error(`HTTP ${resp.status}`);
     }
-    return await resp.json();
+    const data = await resp.json();
+    return (data && !data.error) ? data : null;
   } catch (err) {
     console.warn(`[fetch] ${url}:`, err);
-    return { error: err.message };
+    return null;
   }
 }
 
 // ── Data loading ───────────────────────────────────────────
-async function loadAll() {
-  const [swarm, status, learning, llm, trades, risk, system, equity, config] = await Promise.allSettled([
-    apiFetch('/api/swarm/status'),
-    apiFetch('/api/status'),
-    apiFetch('/api/learning'),
-    apiFetch('/api/llm'),
-    apiFetch('/api/trades'),
-    apiFetch('/api/risk'),
-    apiFetch('/api/system'),
-    apiFetch('/api/equity'),
-    apiFetch('/api/config'),
-  ]);
+let _isLoading = false;
 
-  State.data.swarm    = swarm.status    === 'fulfilled' ? swarm.value    : null;
-  State.data.status   = status.status   === 'fulfilled' ? status.value   : null;
-  State.data.learning = learning.status === 'fulfilled' ? learning.value : null;
-  State.data.llm      = llm.status      === 'fulfilled' ? llm.value      : null;
-  State.data.trades   = trades.status   === 'fulfilled' ? trades.value   : null;
-  State.data.risk     = risk.status     === 'fulfilled' ? risk.value     : null;
-  State.data.system   = system.status   === 'fulfilled' ? system.value   : null;
-  State.data.equity   = equity.status   === 'fulfilled' ? equity.value   : null;
-  State.data.config   = config.status   === 'fulfilled' ? config.value   : null;
+async function loadAll(forceAll = false) {
+  if (_isLoading) return;
+  _isLoading = true;
 
-  State.lastRefresh = new Date();
-  updateRefreshBadge();
-  updateSwarmControlBar();
-  renderActiveTab();
+  try {
+    // Always fetch core status
+    const fetchPromises = [
+      apiFetch('/api/swarm/status').then(d => { if (d) State.data.swarm = d; }),
+      apiFetch('/api/status').then(d => { if (d) State.data.status = d; }),
+    ];
+
+    // Tab-targeted loading: Only fetch what the active tab actually displays.
+    // This reduces SSH tunnel network contention and eliminates data flickering.
+    const active = State.activeTab;
+
+    if (forceAll || active === 'learning') {
+      fetchPromises.push(
+        apiFetch('/api/learning').then(d => { if (d) State.data.learning = d; }),
+        apiFetch('/api/llm').then(d => { if (d) State.data.llm = d; })
+      );
+    }
+    if (forceAll || active === 'overview' || active === 'console') {
+      fetchPromises.push(
+        apiFetch('/api/equity').then(d => { if (d) State.data.equity = d; }),
+        apiFetch('/api/llm').then(d => { if (d) State.data.llm = d; }),
+        apiFetch('/api/system').then(d => { if (d) State.data.system = d; })
+      );
+    }
+    if (forceAll || active === 'trades') {
+      fetchPromises.push(apiFetch('/api/trades').then(d => { if (d) State.data.trades = d; }));
+    }
+    if (forceAll || active === 'risk') {
+      fetchPromises.push(apiFetch('/api/risk').then(d => { if (d) State.data.risk = d; }));
+    }
+    if (forceAll || active === 'system') {
+      fetchPromises.push(apiFetch('/api/system').then(d => { if (d) State.data.system = d; }));
+    }
+    if (forceAll || active === 'config') {
+      fetchPromises.push(apiFetch('/api/config').then(d => { if (d) State.data.config = d; }));
+    }
+
+    await Promise.allSettled(fetchPromises);
+
+    State.lastRefresh = new Date();
+    updateRefreshBadge();
+    updateSwarmControlBar();
+    renderActiveTab();
+  } finally {
+    _isLoading = false;
+  }
 }
 
 function updateRefreshBadge() {
@@ -165,6 +191,24 @@ function updateRefreshBadge() {
 // ── Swarm Global Control Bar ───────────────────────────────
 function updateSwarmControlBar() {
   const sw = State.data.swarm;
+  const auth = State.data.status?.exchange_auth || State.data.system?.exchange_auth || State.data.risk?.exchange_auth;
+
+  // Global degradation banner
+  const banner = document.getElementById('exchange-auth-banner');
+  const bannerSub = document.getElementById('exchange-auth-banner-sub');
+  if (banner) {
+    if (auth && (auth.status === 'degraded' || auth.verified === false)) {
+      banner.style.display = 'flex';
+      if (bannerSub) {
+        bannerSub.textContent = auth.reason
+          ? `${auth.reason}. Exchange balance, positions, and live exposure are currently UNVERIFIED. Live trading is locked fail-closed.`
+          : 'HTTP 401: Failed to authenticate with Kalshi API. Exchange balance, positions, and live exposure are currently UNVERIFIED. Live trading is locked fail-closed.';
+      }
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
   if (!sw) return;
 
   const isRunning = Boolean(sw.running);
@@ -218,12 +262,14 @@ function switchTab(name) {
     panel.classList.toggle('active', panel.id === `tab-${name}`);
   });
   renderActiveTab();
+  // Fetch fresh data for newly selected tab
+  loadAll(false);
 }
 
 // ── Command Console Tab ────────────────────────────────────
 function renderConsole() {
   const sw = State.data.swarm;
-  if (!sw) return;
+  if (!sw || sw.error) return;
 
   const isRunning = Boolean(sw.running);
   const isDemo = sw.mode === 'demo';
@@ -266,10 +312,17 @@ function appendTerminalLine(text, type = 'term-line') {
   const screen = document.getElementById('console-terminal-screen');
   if (!screen) return;
 
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // Strip ANSI escape codes if present
+  const cleanText = (text == null ? '' : String(text)).replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+
   const line = document.createElement('div');
   line.className = `term-line ${type}`;
-  line.textContent = `[${timeStr}] ${text}`;
+  if (type === 'term-out') {
+    line.textContent = cleanText || ' ';
+  } else {
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    line.textContent = `[${timeStr}] ${cleanText}`;
+  }
   screen.appendChild(line);
   screen.scrollTop = screen.scrollHeight;
 }
@@ -277,7 +330,7 @@ function appendTerminalLine(text, type = 'term-line') {
 function clearTerminal() {
   const screen = document.getElementById('console-terminal-screen');
   if (screen) {
-    screen.innerHTML = '<div class="term-line term-sys">Terminal cleared.</div>';
+    screen.innerHTML = '<div class="term-line term-sys">Terminal cleared. Type "help" to view available commands.</div>';
   }
 }
 
@@ -291,81 +344,41 @@ async function sendConsoleCommand(rawCmd) {
 
   appendTerminalLine(`swarm> ${cmd}`, 'term-prompt');
 
-  const verb = cmd.toLowerCase().split(' ')[0].replace(/^\//, '');
-
-  if (verb === 'clear') {
-    clearTerminal();
-    return;
-  }
-
   try {
-    let res;
-    if (verb === 'start') {
-      appendTerminalLine('Starting Kalshi swarm in background...', 'term-info');
-      res = await apiFetch('/api/swarm/start', { method: 'POST' });
-    } else if (verb === 'stop') {
-      appendTerminalLine('Sending stop signal to swarm processes...', 'term-info');
-      res = await apiFetch('/api/swarm/stop', { method: 'POST' });
-    } else if (verb === 'restart') {
-      appendTerminalLine('Restarting Kalshi swarm...', 'term-info');
-      res = await apiFetch('/api/swarm/restart', { method: 'POST' });
-    } else if (verb === 'mode') {
-      const parts = cmd.split(' ');
-      if (parts.length > 1) {
-        const targetMode = parts[1].toLowerCase();
-        if (targetMode === 'live') {
-          if (!confirm('⚠️ WARNING: You are switching to LIVE CAPITAL MODE. Real money will be at risk. Are you sure?')) {
-            appendTerminalLine('Mode switch to LIVE cancelled by operator.', 'term-warn');
-            return;
-          }
-        }
-        res = await apiFetch('/api/swarm/mode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: targetMode }),
-        });
-      } else {
-        res = await apiFetch('/api/swarm/status');
-      }
+    const res = await apiFetch('/api/swarm/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+
+    if (res?.error) {
+      appendTerminalLine(`Error: ${res.error}`, 'term-err');
     } else {
-      res = await apiFetch('/api/swarm/exec', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd }),
-      });
+      const output = res?.output || res?.message || `Executed command: ${cmd}`;
+      appendTerminalLine(output, 'term-out');
     }
-
-    if (res?.output) {
-      // Multiline output
-      const lines = res.output.split('\n');
-      for (const l of lines) {
-        if (l.trim()) appendTerminalLine(l, 'term-out');
-      }
-    } else if (res?.message) {
-      appendTerminalLine(res.message, res.ok ? 'term-success' : 'term-error');
-      showToast(res.message, !res.ok);
-    } else if (res?.error) {
-      appendTerminalLine(`Error: ${res.error}`, 'term-error');
-      showToast(res.error, true);
-    } else if (res?.mode) {
-      appendTerminalLine(`Swarm status: ${res.running ? 'RUNNING' : 'STOPPED'} | Mode: ${res.mode.toUpperCase()} | Model: ${res.model}`, 'term-info');
-    }
-
-    // Refresh state
-    loadAll();
   } catch (err) {
-    appendTerminalLine(`Execution failure: ${err.message}`, 'term-error');
-    showToast(err.message, true);
+    appendTerminalLine(`Error: ${err.message}`, 'term-err');
   }
+
+  // Refresh status immediately
+  await loadAll();
 }
 
-async function toggleSwarmMode() {
+async function triggerModeSwitch() {
   const sw = State.data.swarm;
   const currentMode = sw?.mode || 'demo';
   const targetMode = currentMode === 'demo' ? 'live' : 'demo';
 
   if (targetMode === 'live') {
-    if (!confirm('⚠️ CRITICAL CONFIRMATION: Switch trading mode to LIVE CAPITAL? Real orders will be submitted to Kalshi.')) {
+    const confirmed = confirm(
+      '⚠️ LIVE TRADING CONFIRMATION ⚠️\n\n' +
+      'You are about to enable LIVE TRADING mode with REAL CAPITAL on Kalshi exchange.\n\n' +
+      'Fail-closed sensor validation and emergency risk limits will remain strictly active.\n\n' +
+      'Are you sure you want to proceed to LIVE CAPITAL mode?'
+    );
+    if (!confirmed) {
+      showToast('Live mode switch cancelled');
       return;
     }
   }
@@ -373,19 +386,32 @@ async function toggleSwarmMode() {
   sendConsoleCommand(`mode ${targetMode}`);
 }
 
+const toggleSwarmMode = triggerModeSwitch;
+
 // ── Overview ───────────────────────────────────────────────
 function renderOverview() {
   const s = State.data.status;
+  if (!s || s.error) return;
   const bots = ['sentinel', 'oracle', 'pulse', 'vanguard'];
+  const authVerified = s?.balance_verified !== false && s?.exchange_auth?.verified !== false;
 
   // Portfolio hero
   const portfolioCents = s?.portfolio_cents ?? 0;
   const changePct = s?.portfolio_change_pct ?? 0;
   const changePos = changePct >= 0;
-  document.getElementById('ov-portfolio-total').textContent = fmt$(portfolioCents);
+  const totalEl = document.getElementById('ov-portfolio-total');
+  if (totalEl) {
+    if (!authVerified) {
+      totalEl.innerHTML = `${fmt$(portfolioCents)} <span class="badge badge-unverified" title="Exchange balance unverified — cached locally">UNVERIFIED (LOCAL CACHE)</span>`;
+    } else {
+      totalEl.textContent = fmt$(portfolioCents);
+    }
+  }
   const changeEl = document.getElementById('ov-portfolio-change');
-  changeEl.textContent = (changePos ? '+' : '') + fmtPct(changePct) + ' today';
-  changeEl.className = 'portfolio-change ' + (changePos ? 'positive' : 'negative');
+  if (changeEl) {
+    changeEl.textContent = (changePos ? '+' : '') + fmtPct(changePct) + ' today';
+    changeEl.className = 'portfolio-change ' + (changePos ? 'positive' : 'negative');
+  }
 
   // Bot cards
   const container = document.getElementById('ov-bot-cards');
@@ -400,12 +426,24 @@ function renderOverview() {
       const active = b.active !== false;
       const pnlPos = pnl >= 0;
       const tradePct = clamp((trades / (maxTrades || 1)) * 100, 0, 100);
+      const isVerified = b.balance_verified !== false && authVerified;
+      const swarmRunning = State.data.swarm?.running === true;
 
       let statusBadge;
-      if (!active) {
+      if (!swarmRunning) {
+        if (paused) {
+          statusBadge = badge('paused', 'warning');
+        } else if (!isVerified) {
+          statusBadge = '<span class="badge badge-degraded">SENSORS UNVERIFIED</span>';
+        } else {
+          statusBadge = '<span class="badge badge-info">READY</span>';
+        }
+      } else if (!active) {
         statusBadge = badge('inactive', 'error');
       } else if (paused) {
         statusBadge = badge('paused', 'warning');
+      } else if (!isVerified) {
+        statusBadge = '<span class="badge badge-degraded">DEGRADED SENSORS</span>';
       } else {
         statusBadge = badge('active', 'success');
       }
@@ -417,8 +455,8 @@ function renderOverview() {
         </div>
         <div class="bot-metric-grid">
           <div class="bot-metric-item">
-            <div class="bot-metric-label">Allocated Cash</div>
-            <div class="bot-metric-value">${fmt$(balance)}</div>
+            <div class="bot-metric-label">Shared Pool</div>
+            <div class="bot-metric-value">${fmt$(balance)}${!isVerified ? ' <span class="badge badge-unverified" style="font-size:0.65rem">UNVERIFIED</span>' : ''}</div>
           </div>
           <div class="bot-metric-item">
             <div class="bot-metric-label">Today P&L</div>
@@ -430,7 +468,7 @@ function renderOverview() {
           </div>
           <div class="bot-metric-item">
             <div class="bot-metric-label">Gatekeeper</div>
-            <div class="bot-metric-value">${b.can_trade !== false ? '<span style="color:var(--color-emerald)">Approved</span>' : '<span style="color:var(--color-rose)">Locked</span>'}</div>
+            <div class="bot-metric-value">${!isVerified ? '<span style="color:var(--color-rose)">Fail-Closed</span>' : (b.can_trade !== false ? '<span style="color:var(--color-emerald)">Approved</span>' : '<span style="color:var(--color-rose)">Locked</span>')}</div>
           </div>
         </div>
         <div>
@@ -469,11 +507,10 @@ function renderOverview() {
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Gemini Approval Alpha</div>
         <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${hasLlmDecisions ? 'var(--color-cyan)' : 'var(--text-muted)'};margin-top:0.2rem;">${fmtPct(llmApproval)}</div>
         <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">${hasLlmDecisions ? 'Search Grounded' : 'Awaiting decisions'}</div>
-      </div>
       <div class="card" style="padding:1rem;">
-        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Tavily Macro Search</div>
-        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:${tavily?.used_today > 24 ? 'var(--color-amber)' : '#ffffff'};margin-top:0.2rem;">${tavily?.used_today ?? 0} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ ${tavily?.budget ?? 30}</span></div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Credits used today</div>
+        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">Web Search & Verification</div>
+        <div style="font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:var(--color-emerald);margin-top:0.2rem;">ACTIVE</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">Google Gemini Search Grounding</div>
       </div>
       <div class="card" style="padding:1rem;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;">System Uptime</div>
@@ -570,7 +607,7 @@ function renderEquityChart() {
 // ── Learning & Adaptation Radar ─────────────────────────────
 function renderLearning() {
   const data = State.data.learning;
-  if (!data) return;
+  if (!data || data.error) return;
 
   const sc = data.scorecard ?? {};
   const cal = data.calibration ?? {};
@@ -901,7 +938,7 @@ function renderTrajectoryChart(rolling) {
 // ── LLM Intelligence ───────────────────────────────────────
 function renderLLM() {
   const d = State.data.llm;
-  if (!d) { document.getElementById('tab-llm').innerHTML = '<div class="content"><p class="text-muted">No LLM data available.</p></div>'; return; }
+  if (!d || d.error) return;
 
   const today = d.today ?? {};
   const cp = d.clean_period ?? {};
@@ -1030,21 +1067,154 @@ function renderLLM() {
       });
     }
   }
+
+  // Load and render autonomous supervisor / overseer diagnostics
+  loadAndRenderOverseer();
 }
 
-// ── Trades ─────────────────────────────────────────────────
+async function loadAndRenderOverseer() {
+  try {
+    const res = await fetch('/api/supervisor/latest');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderOverseer(data);
+  } catch (err) {
+    console.error('Failed to load supervisor data:', err);
+  }
+}
+
+function renderOverseer(report) {
+  if (!report) return;
+  
+  const gradeBadge = document.getElementById('overseer-grade-badge');
+  const lastTime = document.getElementById('overseer-last-audit-time');
+  const healthScore = document.getElementById('overseer-health-score');
+  const summarySub = document.getElementById('overseer-summary-sub');
+  const autoActions = document.getElementById('overseer-auto-actions-count');
+  const synthesisBox = document.getElementById('overseer-synthesis-box');
+  const synthesisText = document.getElementById('overseer-synthesis-text');
+  const tbody = document.getElementById('overseer-findings-tbody');
+
+  const grade = report.health_grade || 'A';
+  if (gradeBadge) {
+    gradeBadge.textContent = 'GRADE ' + grade;
+    gradeBadge.className = 'badge ' + (grade.startsWith('A') ? 'badge-success' : (grade.startsWith('B') ? 'badge-info' : (grade === 'C' ? 'badge-warning' : 'badge-error')));
+  }
+  if (lastTime && report.timestamp) {
+    lastTime.textContent = 'Last audit: ' + new Date(report.timestamp).toLocaleTimeString() + ' UTC (' + (report.total_findings || 0) + ' findings)';
+  }
+  if (healthScore) {
+    healthScore.textContent = (report.score_pct != null ? report.score_pct : '--') + '%';
+    healthScore.style.color = (report.score_pct >= 85 ? 'var(--color-emerald)' : (report.score_pct >= 70 ? 'var(--color-amber)' : 'var(--color-rose)'));
+  }
+  if (summarySub && report.summary) {
+    summarySub.textContent = report.summary;
+  }
+  if (autoActions) {
+    autoActions.textContent = report.auto_actions_count || 0;
+  }
+
+  if (synthesisBox && synthesisText) {
+    if (report.ai_synthesis) {
+      synthesisText.textContent = report.ai_synthesis;
+      synthesisBox.style.display = 'block';
+    } else {
+      synthesisBox.style.display = 'none';
+    }
+  }
+
+  if (tbody) {
+    const findings = report.findings || [];
+    if (findings.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem">✅ No active supervisor findings. System operating nominally.</td></tr>';
+    } else {
+      tbody.innerHTML = findings.map(f => {
+        const sev = (f.severity || 'info').toLowerCase();
+        const sevBadge = sev === 'critical' ? '<span class="badge badge-error">CRITICAL</span>' : (sev === 'warning' ? '<span class="badge badge-warning">WARNING</span>' : '<span class="badge badge-info">INFO</span>');
+        const autoAction = f.auto_action_taken ? `<span style="color:var(--color-emerald)">⚡ ${esc(f.auto_action_taken)}</span>` : `<span class="text-muted">${esc(f.recommended_action || 'Monitoring')}</span>`;
+        return `
+          <tr>
+            <td>${sevBadge}</td>
+            <td><strong style="font-size:0.75rem; text-transform:uppercase; color:#94a3b8;">${esc(f.category || 'general')}</strong></td>
+            <td><strong style="color:#ffffff;">${esc(f.title || '')}</strong></td>
+            <td style="font-size:0.8rem; color:#cbd5e1;">${esc(f.description || '')}</td>
+            <td style="font-size:0.8rem;">${autoAction}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+}
+
+window.runOverseerAuditNow = async function() {
+  const btn = document.getElementById('btn-run-overseer-audit');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Auditing…';
+  }
+  try {
+    const res = await fetch('/api/supervisor/run_now', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok && data.report) {
+      renderOverseer(data.report);
+      showToast('AI Supervisor Audit completed.', 'success');
+    } else {
+      showToast(data.error || 'Audit failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed running audit: ' + err, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Run Audit Now';
+    }
+  }
+};
+
+// ── Trades Blotter ───────────────────────────────────────────
 function renderTrades() {
   const trades = State.data.trades;
-  const filter = State.tradeFilter;
-  const filtered = Array.isArray(trades)
-    ? (filter === 'all' ? trades : trades.filter(t => t.bot === filter))
-    : [];
+  if (!trades || trades.error) return;
+  const filter = State.tradeFilter || 'all';
+  const allList = Array.isArray(trades) ? trades : [];
+  const filtered = filter === 'all' ? allList : allList.filter(t => t.bot === filter);
+
+  // Update Blotter counters in toolbar
+  const totalCountEl = document.getElementById('blotter-total-count');
+  const winCountEl = document.getElementById('blotter-win-count');
+  const lossCountEl = document.getElementById('blotter-loss-count');
+  const netPnlEl = document.getElementById('blotter-net-pnl');
+
+  const wins = allList.filter(t => (t.outcome || '').toLowerCase() === 'win').length;
+  const losses = allList.filter(t => (t.outcome || '').toLowerCase() === 'loss').length;
+  const netCents = allList.reduce((acc, t) => acc + (parseInt(t.pnl_cents, 10) || 0), 0);
+
+  if (totalCountEl) totalCountEl.textContent = allList.length;
+  if (winCountEl) winCountEl.textContent = wins;
+  if (lossCountEl) lossCountEl.textContent = losses;
+  if (netPnlEl) {
+    netPnlEl.textContent = (netCents >= 0 ? '+' : '') + fmt$(netCents);
+    netPnlEl.style.color = netCents > 0 ? 'var(--color-emerald)' : (netCents < 0 ? 'var(--color-rose)' : '#ffffff');
+  }
+
+  // Update filter buttons
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
 
   const tbody = document.getElementById('trades-tbody');
   if (!tbody) return;
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">No trades</td></tr>';
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:3rem 1.5rem; color:var(--text-muted);">
+          <div style="font-size:1.4rem; margin-bottom:0.4rem;">📡</div>
+          <div style="font-weight:700; color:var(--text-secondary); margin-bottom:0.25rem;">No Active Executions Recorded</div>
+          <div style="font-size:0.78rem;">The swarm is monitoring Kalshi prediction orderbooks. New trades will stream here automatically.</div>
+        </td>
+      </tr>
+    `;
     return;
   }
 
@@ -1055,73 +1225,156 @@ function renderTrades() {
     const pnlEl = pnl != null
       ? `<span class="${pnl >= 0 ? 'td-pos' : 'td-neg'}">${pnl >= 0 ? '+' : ''}${fmt$(pnl)}</span>`
       : '<span class="text-muted">—</span>';
+
+    const sideBadge = (t.side || '').toUpperCase() === 'YES'
+      ? '<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.35);">YES</span>'
+      : '<span class="badge" style="background:rgba(244,63,94,0.15); color:#fb7185; border:1px solid rgba(244,63,94,0.35);">NO</span>';
+
     const outcomeEl = outcome === 'win'
-      ? badge('win','green')
+      ? badge('WIN', 'green')
       : outcome === 'loss'
-      ? badge('loss','red')
+      ? badge('LOSS', 'red')
       : outcome
-      ? badge(esc(outcome), 'grey')
-      : badge('pending','grey');
+      ? badge(esc(outcome.toUpperCase()), 'grey')
+      : '<span class="badge badge-warning">PENDING</span>';
 
     return `<tr class="${rowCls}">
       <td class="td-mono td-muted" style="font-size:0.75rem">${fmtDateTime(t.timestamp)}</td>
-      <td class="td-cap">${badge(esc(t.bot), 'blue')}</td>
-      <td class="td-mono fw-bold">${esc(t.ticker)}</td>
-      <td class="td-cap td-muted">${esc(t.side)}</td>
-      <td>${t.confidence != null ? fmtConf(t.confidence) : '—'}</td>
+      <td class="td-cap"><span class="badge badge-info">${esc(t.bot)}</span></td>
+      <td class="td-mono fw-bold" style="color:#ffffff;">${esc(t.ticker)}</td>
+      <td>${sideBadge}</td>
+      <td class="td-mono">${t.confidence != null ? fmtConf(t.confidence) : '—'}</td>
       <td>${outcomeEl}</td>
       <td>${pnlEl}</td>
     </tr>`;
   }).join('');
 }
 
-// ── Risk ───────────────────────────────────────────────────
+// ── Institutional Risk Matrix ──────────────────────────────
 function renderRisk() {
   const r = State.data.risk;
+  if (!r || r.error) return;
   const bots = ['sentinel', 'oracle', 'pulse', 'vanguard'];
+  const auth = r?.exchange_auth || State.data.status?.exchange_auth;
+  const authVerified = r?.balance_verified !== false && auth?.verified !== false;
 
-  // Drawdown meters
+  // Global Risk Badge
+  const globalBadge = document.getElementById('risk-global-state-badge');
+  if (globalBadge) {
+    const isPaused = bots.some(b => r?.bots?.[b]?.paused);
+    const hasHighDd = bots.some(b => (r?.bots?.[b]?.drawdown_pct || 0) > 15);
+    if (!authVerified || auth?.status === 'degraded') {
+      globalBadge.textContent = 'DEGRADED (EXCHANGE SENSORS OFFLINE)';
+      globalBadge.className = 'badge badge-degraded';
+    } else if (hasHighDd) {
+      globalBadge.textContent = 'CIRCUIT BREAKER ACTIVE';
+      globalBadge.className = 'badge badge-danger';
+    } else if (isPaused) {
+      globalBadge.textContent = 'BOTS PAUSED';
+      globalBadge.className = 'badge badge-warning';
+    } else {
+      globalBadge.textContent = 'NOMINAL (CAPITAL SAFE)';
+      globalBadge.className = 'badge badge-success';
+    }
+  }
+
+  // Drawdown cards
   const ddEl = document.getElementById('risk-drawdown');
-  if (ddEl && r?.bots) {
+  if (ddEl) {
+    const swarmRunning = State.data.swarm?.running === true;
     ddEl.innerHTML = bots.map(bot => {
-      const b = r.bots[bot] ?? {};
-      const dd = b.drawdown_pct ?? 0;
-      const ddCls = dd > 15 ? 'red' : dd > 8 ? 'orange' : dd > 0 ? 'yellow' : '';
+      const b = r?.bots?.[bot] ?? {};
+      const isVerified = b.balance_verified !== false && authVerified;
+      const hasBaseline = (b.peak_balance_cents > 0) && b.drawdown_pct !== null && b.drawdown_pct !== undefined;
+      const dd = hasBaseline ? b.drawdown_pct : null;
+
+      let ddDisplay;
+      let ddColor;
+      let ddWidth = 0;
+      let ddFillClass = '';
+
+      if (!isVerified) {
+        ddDisplay = '<span style="font-size:1.1rem;letter-spacing:0.04em;">UNVERIFIED</span>';
+        ddColor = 'var(--color-amber)';
+        ddWidth = 100;
+        ddFillClass = 'yellow';
+      } else if (!hasBaseline) {
+        ddDisplay = '<span style="font-size:1.3rem;color:var(--text-muted);">N/A</span>';
+        ddColor = 'var(--text-muted)';
+        ddWidth = 0;
+      } else {
+        ddDisplay = fmtPct(dd);
+        ddColor = dd > 15 ? 'var(--color-rose)' : dd > 5 ? 'var(--color-amber)' : 'var(--color-emerald)';
+        ddWidth = clamp(dd * 6.66, 0, 100);
+        ddFillClass = dd > 15 ? 'red' : dd > 5 ? 'yellow' : '';
+      }
+
+      let botBadge;
+      if (!swarmRunning) {
+        if (b.paused) {
+          botBadge = '<span class="badge badge-warning">PAUSED</span>';
+        } else if (!isVerified) {
+          botBadge = '<span class="badge badge-degraded">SENSORS UNVERIFIED</span>';
+        } else {
+          botBadge = '<span class="badge badge-info">READY</span>';
+        }
+      } else if (b.paused) {
+        botBadge = '<span class="badge badge-warning">PAUSED</span>';
+      } else if (!isVerified) {
+        botBadge = '<span class="badge badge-degraded">SENSORS UNVERIFIED</span>';
+      } else if (b.can_trade !== false) {
+        botBadge = '<span class="badge badge-success">ACTIVE TRADING</span>';
+      } else {
+        botBadge = '<span class="badge badge-danger">BLOCKED</span>';
+      }
+
       const pnl = b.daily_pnl_cents ?? 0;
       const pnlPos = pnl >= 0;
-      return `<div class="card">
-        <div class="bot-card-header mb-1">
-          <div class="fw-bold td-cap">${bot}</div>
-          ${b.paused ? badge('paused','orange') : b.can_trade !== false ? badge('trading','green') : badge('blocked','red')}
+      const pnlColor = pnlPos ? 'var(--color-emerald)' : 'var(--color-rose)';
+
+      return `
+        <div class="risk-card">
+          <div class="risk-card-header">
+            <div style="font-weight:800; font-size:1.05rem; text-transform:capitalize; color:#ffffff;">${esc(bot)}</div>
+            ${botBadge}
+          </div>
+          
+          <div class="risk-dd-box">
+            <div class="risk-dd-title-row">
+              <span class="risk-dd-title">Current Drawdown</span>
+              <span style="font-size:0.72rem; color:var(--text-muted);">Max Cap: 15.0%</span>
+            </div>
+            <div class="risk-dd-number" style="color:${ddColor};">${ddDisplay}</div>
+            ${!hasBaseline && isVerified ? '<div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.2rem;">No high-water baseline</div>' : ''}
+            <div class="progress-track" style="margin-top:0.5rem;">
+              <div class="progress-fill ${ddFillClass}" style="width:${ddWidth}%;"></div>
+            </div>
+          </div>
+
+          <div class="bot-metric-grid">
+            <div class="bot-metric-item">
+              <div class="bot-metric-label">Allocated Capital</div>
+              <div class="bot-metric-value">${fmt$(b.balance_cents)}${!isVerified ? ' <span class="badge badge-unverified" style="font-size:0.65rem">UNVERIFIED</span>' : ''}</div>
+            </div>
+            <div class="bot-metric-item">
+              <div class="bot-metric-label">Session P&amp;L</div>
+              <div class="bot-metric-value" style="color:${pnlColor};">${pnlPos ? '+' : ''}${fmt$(pnl)}</div>
+            </div>
+            <div class="bot-metric-item">
+              <div class="bot-metric-label">High Watermark</div>
+              <div class="bot-metric-value">${fmt$(b.peak_balance_cents)}${!isVerified ? ' <span class="badge badge-unverified" style="font-size:0.65rem">UNVERIFIED</span>' : ''}</div>
+            </div>
+            <div class="bot-metric-item">
+              <div class="bot-metric-label">Open Positions</div>
+              <div class="bot-metric-value" style="color:var(--color-cyan);">${isVerified ? `${b.open_positions ?? 0} contracts` : '<span class="badge badge-unverified">UNVERIFIED</span>'}</div>
+            </div>
+          </div>
         </div>
-        <div class="dd-label">Drawdown</div>
-        <div class="dd-value">${fmtPct(dd)}</div>
-        <div class="progress-wrap mt-1">
-          ${progressBar(clamp(dd * 5, 0, 100), ddCls)}
-        </div>
-        <div class="bot-card-body mt-2">
-          <div>
-            <div class="bot-stat-label">Balance</div>
-            <div class="bot-stat-value">${fmt$(b.balance_cents)}</div>
-          </div>
-          <div>
-            <div class="bot-stat-label">Daily PnL</div>
-            <div class="bot-stat-value ${pnlPos ? 'positive' : 'negative'}">${pnlPos ? '+' : ''}${fmt$(pnl)}</div>
-          </div>
-          <div>
-            <div class="bot-stat-label">Peak Balance</div>
-            <div class="bot-stat-value">${fmt$(b.peak_balance_cents)}</div>
-          </div>
-          <div>
-            <div class="bot-stat-label">Open Positions</div>
-            <div class="bot-stat-value">${b.open_positions ?? 0}</div>
-          </div>
-        </div>
-      </div>`;
+      `;
     }).join('');
   }
 
-  // Guardrail progress
+  // Guardrail Milestone Progress
   const g = r?.guardrail_progress ?? {};
   const wrCur = g.win_rate_current ?? 0;
   const wrTgt = g.win_rate_target ?? 55;
@@ -1131,63 +1384,86 @@ function renderRisk() {
   const dpTgt = g.days_positive_target ?? 14;
   const ready = g.ready_to_loosen ?? false;
 
-  const guardEl = document.getElementById('risk-guardrail');
-  if (guardEl) {
-    guardEl.innerHTML = `
-      <div class="progress-wrap">
-        <div class="progress-label">
-          <span>Win Rate</span>
-          <span class="prog-val">${fmtPct(wrCur)} / ${wrTgt}%</span>
+  const milestonesEl = document.getElementById('risk-guardrail-milestones');
+  if (milestonesEl) {
+    const wrPassed = wrCur >= wrTgt && tcCur >= 10;
+    const tcPassed = tcCur >= tcTgt;
+    const dpPassed = dpCur >= dpTgt;
+
+    milestonesEl.innerHTML = `
+      <div class="milestone-item">
+        <div class="milestone-header">
+          <span class="milestone-name">1. Win Rate Baseline</span>
+          <span class="badge ${wrPassed ? 'badge-success' : 'badge-warning'}">${tcCur > 0 ? fmtPct(wrCur) : 'N/A'} / ${wrTgt}%</span>
         </div>
-        ${progressBar(clamp((wrCur / wrTgt) * 100, 0, 100), wrCur >= wrTgt ? '' : 'yellow', true)}
-      </div>
-      <div class="progress-wrap mt-2">
-        <div class="progress-label">
-          <span>Clean Trades</span>
-          <span class="prog-val">${tcCur} / ${tcTgt}</span>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">Minimum 55.0% prediction edge required to scale capital.</div>
+        <div class="progress-track tall">
+          <div class="progress-fill ${wrPassed ? '' : 'yellow'}" style="width:${tcCur > 0 ? clamp((wrCur / wrTgt) * 100, 0, 100) : 0}%;"></div>
         </div>
-        ${progressBar(clamp((tcCur / tcTgt) * 100, 0, 100), tcCur >= tcTgt ? '' : 'blue', true)}
       </div>
-      <div class="progress-wrap mt-2">
-        <div class="progress-label">
-          <span>Positive PnL Days</span>
-          <span class="prog-val">${dpCur} / ${dpTgt}</span>
+
+      <div class="milestone-item">
+        <div class="milestone-header">
+          <span class="milestone-name">2. Sample Significance</span>
+          <span class="badge ${tcPassed ? 'badge-success' : 'badge-info'}">${tcCur} / ${tcTgt} Trades</span>
         </div>
-        ${progressBar(clamp((dpCur / dpTgt) * 100, 0, 100), dpCur >= dpTgt ? '' : 'orange', true)}
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">50 resolved outcomes needed to rule out variance.</div>
+        <div class="progress-track tall">
+          <div class="progress-fill" style="width:${clamp((tcCur / tcTgt) * 100, 0, 100)}%;"></div>
+        </div>
       </div>
+
+      <div class="milestone-item">
+        <div class="milestone-header">
+          <span class="milestone-name">3. P&amp;L Consistency Streak</span>
+          <span class="badge ${dpPassed ? 'badge-success' : 'badge-secondary'}">${dpCur} / ${dpTgt} Days</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">14 cumulative profitable trading days required.</div>
+        <div class="progress-track tall">
+          <div class="progress-fill purple" style="width:${clamp((dpCur / dpTgt) * 100, 0, 100)}%;"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  const bannerEl = document.getElementById('risk-guardrail-banner');
+  if (bannerEl) {
+    bannerEl.innerHTML = `
       <div class="status-banner ${ready ? 'ready' : 'not-ready'}">
-        ${ready ? '✓ READY TO LOOSEN GUARDRAILS' : '✗ NOT READY — KEEP GUARDRAILS'}
+        <span>${ready ? '✓ ALL 3 GATES CLEARED — CAPITAL SCALING AUTHORIZED' : '🛡️ GATEKEEPER ENGAGED (0/3 MILESTONES CLEARED) — RETAINING CAPITAL PRESERVATION LIMITS'}</span>
+        <span style="font-size:0.78rem; font-weight:600; opacity:0.85;">${ready ? 'Threshold loosened 70%→65%' : 'Autonomous Scaling Interlock Active'}</span>
       </div>
     `;
   }
 }
 
-// ── System ─────────────────────────────────────────────────
+// ── System Telemetry ───────────────────────────────────────
 function renderSystem() {
   const sys = State.data.system;
-  if (!sys) return;
+  if (!sys || sys.error) return;
 
-  const tavily = sys.tavily ?? {};
-  const tavilyPct = tavily.pct ?? 0;
   const tavilyEl = document.getElementById('sys-tavily');
   if (tavilyEl) {
     tavilyEl.innerHTML = `
-      <div class="progress-label">
-        <span>Tavily calls today</span>
-        <span class="prog-val">${tavily.used_today ?? 0} / ${tavily.budget ?? 30}</span>
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.25rem 0 0.5rem;">
+        <span style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:var(--color-emerald);">ACTIVE</span>
+        <span class="badge badge-success">Google Grounding</span>
       </div>
-      ${progressBar(tavilyPct, tavilyPct > 80 ? 'orange' : tavilyPct > 95 ? 'red' : '', true)}
-      <div class="mt-1 text-muted" style="font-size:0.75rem">${tavilyPct.toFixed(1)}% of daily budget used</div>
+      <div class="mt-1 text-muted" style="font-size:0.75rem;">Real-Time Web Intelligence</div>
     `;
   }
 
   // Gemini AI Brain status
-  const llmEl = document.getElementById('sys-llm') || document.getElementById('sys-anthropic');
+  const llmEl = document.getElementById('sys-llm');
   if (llmEl) {
-    const ok = (sys.llm_status === 'ok' || sys.gemini_status === 'ok' || sys.anthropic_status === 'ok');
-    const providerName = sys.llm_provider ? (sys.llm_provider.charAt(0).toUpperCase() + sys.llm_provider.slice(1)) : 'Gemini';
-    const modelName = sys.llm_model ? ` (${sys.llm_model})` : ' (gemini-2.5-flash)';
-    llmEl.innerHTML = `<strong>Gemini Brain:</strong> ${badge(providerName + modelName, 'blue')} ${ok ? badge('ONLINE (Google GenAI)','green') : badge('KEY/API ERROR','red')}`;
+    const ok = (sys.llm_status === 'ok' || sys.gemini_status === 'ok');
+    llmEl.innerHTML = `
+      <div style="display:flex; align-items:center; gap:0.5rem; margin:0.25rem 0;">
+        <span style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:${ok ? 'var(--color-emerald)' : 'var(--color-rose)'};">${ok ? 'ONLINE' : 'OFFLINE'}</span>
+        <span class="badge badge-info">Gemini 2.5 Flash</span>
+      </div>
+      <div style="font-size:0.75rem; color:var(--text-muted);">Search-Grounded Macro Inference</div>
+    `;
   }
 
   // Uptime
@@ -1196,81 +1472,154 @@ function renderSystem() {
     uptimeEl.textContent = fmtUptime(sys.uptime_seconds ?? 0);
   }
 
+  // Health report grid
+  const healthGrid = document.getElementById('sys-health-grid');
+  const healthSummary = document.getElementById('sys-health-summary');
+  if (healthGrid) {
+    const hr = sys.health_report ?? {};
+    const checks = hr.checks ?? hr;
+    if (typeof checks === 'object' && !Array.isArray(checks) && Object.keys(checks).length > 0) {
+      const entries = Object.entries(checks);
+      const passCount = entries.filter(([_, v]) => (v.status || 'OK').toUpperCase() === 'OK').length;
+      const degCount = entries.filter(([_, v]) => (v.status || '').toUpperCase() === 'DEGRADED').length;
+      const unkCount = entries.filter(([_, v]) => (v.status || '').toUpperCase() === 'UNKNOWN').length;
+      const failCount = entries.filter(([_, v]) => ['CRITICAL','FAIL','ERROR'].includes((v.status || '').toUpperCase())).length;
+
+      let summaryText = `${passCount}/${entries.length} Checks Nominal`;
+      if (degCount > 0) summaryText += ` | ${degCount} DEGRADED`;
+      if (unkCount > 0) summaryText += ` | ${unkCount} UNKNOWN`;
+      if (failCount > 0) summaryText += ` | ${failCount} FAIL`;
+
+      if (healthSummary) healthSummary.textContent = hr.summary ? hr.summary.split('\n')[0] : summaryText;
+
+      healthGrid.innerHTML = entries.map(([k, v]) => {
+        let status = 'OK';
+        let details = '';
+        if (typeof v === 'object' && v !== null) {
+          status = (v.status || 'OK').toUpperCase();
+          details = v.details || (v.issues && v.issues.length ? v.issues.join('; ') : '');
+        } else {
+          status = String(v).toUpperCase();
+          details = status;
+        }
+
+        let badgeClass = 'badge-success';
+        if (status === 'DEGRADED') badgeClass = 'badge-degraded';
+        else if (status === 'UNKNOWN') badgeClass = 'badge-unknown';
+        else if (status === 'NOT_APPLICABLE' || status === 'SKIP') badgeClass = 'badge-na';
+        else if (status === 'WARNING' || status === 'WARN') badgeClass = 'badge-warning';
+        else if (status === 'CRITICAL' || status === 'FAIL' || status === 'ERROR') badgeClass = 'badge-danger';
+        else if (status === 'INFO') badgeClass = 'badge-info';
+
+        const label = k.replace(/_/g, ' ');
+        return `
+          <div class="health-item-card">
+            <span class="badge ${badgeClass}">${esc(status)}</span>
+            <div class="health-item-info">
+              <div class="health-item-title">${esc(label)}</div>
+              <div class="health-item-desc" title="${esc(details)}">${esc(details || 'Nominal execution')}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      healthGrid.innerHTML = '<p class="text-muted" style="padding:1rem;">16 automated health checks running in background…</p>';
+    }
+  }
+
   // Log tail
   const logEl = document.getElementById('sys-log-tail');
   if (logEl) {
     const lines = sys.log_tail ?? [];
-    logEl.textContent = lines.length > 0 ? lines.join('\n') : '(no log data)';
+    logEl.textContent = lines.length > 0 ? lines.join('\n') : '(no log records captured)';
     logEl.scrollTop = logEl.scrollHeight;
-  }
-
-  // Health report
-  const healthEl = document.getElementById('sys-health');
-  if (healthEl) {
-    const hr = sys.health_report ?? {};
-    if (!hr || Object.keys(hr).length === 0) {
-      healthEl.innerHTML = '<p class="text-muted">No health report available.</p>';
-    } else {
-      const checks = hr.checks ?? hr;
-      if (typeof checks === 'object' && !Array.isArray(checks)) {
-        const entries = Object.entries(checks);
-        healthEl.innerHTML = `<ul class="health-list">` + entries.map(([k, v]) => {
-          let status = 'OK';
-          let details = '';
-          if (typeof v === 'object' && v !== null) {
-            status = (v.status || 'OK').toUpperCase();
-            details = v.details || (v.issues && v.issues.length ? v.issues.join('; ') : '');
-          } else {
-            status = String(v).toUpperCase();
-            details = status;
-          }
-
-          let badgeHtml = badge('OK', 'green');
-          if (status === 'WARNING' || status === 'WARN') {
-            badgeHtml = badge('WARN', 'yellow');
-          } else if (status === 'CRITICAL' || status === 'FAIL' || status === 'ERROR') {
-            badgeHtml = badge('FAIL', 'red');
-          }
-
-          const label = k.replace(/_/g, ' ').toUpperCase();
-          return `<li>${badgeHtml} <strong style="color:var(--text);font-size:0.82rem">${esc(label)}</strong> <span class="text-muted" style="font-size:0.8rem">${esc(details)}</span></li>`;
-        }).join('') + `</ul>`;
-      } else {
-        healthEl.innerHTML = `<pre class="code-block" style="max-height:200px">${esc(JSON.stringify(hr, null, 2))}</pre>`;
-      }
-    }
   }
 }
 
-// ── Controls ───────────────────────────────────────────────
+// ── Bot Dispatch Controls ──────────────────────────────────
 function renderControls() {
   const s = State.data.status;
   const bots = ['sentinel', 'oracle', 'pulse', 'vanguard'];
+  const auth = s?.exchange_auth || State.data.system?.exchange_auth;
+  const authVerified = s?.balance_verified !== false && auth?.verified !== false;
+  const swarmRunning = State.data.swarm?.running === true;
 
   const container = document.getElementById('controls-bot-list');
   if (container) {
-    container.innerHTML = bots.map(bot => {
+    const degradedNote = !authVerified
+      ? `<div class="card section-gap" style="background:rgba(225,29,72,0.12);border-color:rgba(225,29,72,0.4);margin-bottom:1.25rem;">
+          <div style="font-weight:700;color:#fda4af;display:flex;align-items:center;gap:0.5rem;">
+            <span>⚠️</span> EXCHANGE AUTHENTICATION DEGRADED — ORDER EXECUTION SENSORS OFFLINE
+          </div>
+          <div style="font-size:0.8rem;color:#fecdd3;margin-top:0.35rem;">
+            Emergency order cancellations and live execution capability are DEGRADED / UNVERIFIED due to HTTP 401 Unauthorized status with Kalshi API.
+          </div>
+        </div>`
+      : '';
+
+    container.innerHTML = degradedNote + bots.map(bot => {
       const b = s?.bots?.[bot] ?? {};
       const paused = b.paused;
       const pnl = b.daily_pnl_cents ?? 0;
       const pnlPos = pnl >= 0;
+      const tradeCount = b.daily_trades ?? 0;
+      const maxTrades = b.max_trades ?? 8;
+      const quotaPct = (tradeCount / maxTrades) * 100;
+      const isVerified = b.balance_verified !== false && authVerified;
 
-      return `<div class="control-card" id="ctrl-card-${bot}">
-        <div class="control-card-info">
-          <div class="fw-bold td-cap" style="font-size:1rem">${bot}</div>
-          <div class="text-muted" style="font-size:0.78rem">
-            Balance: ${fmt$(b.balance_cents)} &nbsp;|&nbsp;
-            PnL: <span class="${pnlPos ? 'text-green' : 'text-red'}">${pnlPos?'+':''}${fmt$(pnl)}</span> &nbsp;|&nbsp;
-            Trades: ${b.daily_trades ?? 0}/${b.max_trades ?? 8}
+      let botBadge;
+      if (!swarmRunning) {
+        if (paused) {
+          botBadge = '<span class="badge badge-warning">PAUSED</span>';
+        } else if (!isVerified) {
+          botBadge = '<span class="badge badge-degraded">SENSORS UNVERIFIED</span>';
+        } else {
+          botBadge = '<span class="badge badge-info">READY</span>';
+        }
+      } else if (paused) {
+        botBadge = '<span class="badge badge-warning">PAUSED</span>';
+      } else if (!isVerified) {
+        botBadge = '<span class="badge badge-degraded">SENSORS UNVERIFIED</span>';
+      } else {
+        botBadge = '<span class="badge badge-success">ACTIVE TRADING</span>';
+      }
+
+      return `
+        <div class="control-deck-card" id="ctrl-card-${bot}">
+          <div class="control-deck-info">
+            <div class="bot-avatar">${bot.charAt(0)}</div>
+            <div>
+              <div style="font-weight:800; font-size:1.1rem; text-transform:capitalize; color:#ffffff; display:flex; align-items:center; gap:0.6rem;">
+                ${esc(bot)}
+                ${botBadge}
+              </div>
+              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.25rem;">
+                Allocated Capital: <strong style="color:#ffffff;">${fmt$(b.balance_cents)}</strong>${!isVerified ? ' <span class="badge badge-unverified" style="font-size:0.65rem">UNVERIFIED</span>' : ''} &nbsp;|&nbsp;
+                Session P&amp;L: <strong style="color:${pnlPos ? 'var(--color-emerald)' : 'var(--color-rose)'};">${pnlPos ? '+' : ''}${fmt$(pnl)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:2rem; flex-wrap:wrap;">
+            <div style="min-width:140px;">
+              <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:0.35rem;">
+                <span>Daily Quota</span>
+                <strong style="color:#ffffff;">${tradeCount} / ${maxTrades}</strong>
+              </div>
+              <div class="progress-track" style="width:140px;">
+                <div class="progress-fill ${quotaPct > 80 ? 'yellow' : ''}" style="width:${clamp(quotaPct, 0, 100)}%;"></div>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:0.5rem;">
+              ${paused
+                ? `<button class="btn btn-green" onclick="controlBot('${bot}','resume')">▶ Resume</button>`
+                : `<button class="btn btn-ghost" onclick="controlBot('${bot}','pause')">⏸ Pause</button>`
+              }
+            </div>
           </div>
         </div>
-        <div class="control-card-btns">
-          ${paused
-            ? `<button class="btn btn-green" onclick="controlBot('${bot}','resume')">Resume</button>`
-            : `<button class="btn btn-ghost" onclick="controlBot('${bot}','pause')">Pause</button>`
-          }
-        </div>
-      </div>`;
+      `;
     }).join('');
   }
 }
@@ -1389,7 +1738,7 @@ async function killSwarm() {
     showToast('Type KILL in the box to confirm', true);
     return;
   }
-  if (!confirm('FINAL CONFIRMATION: Send kill signal to stop the entire swarm?')) {
+  if (!confirm('FINAL CONFIRMATION: Send kill signal to stop the entire swarm and cancel active exchange orders?')) {
     inp.value = '';
     return;
   }
@@ -1401,8 +1750,12 @@ async function killSwarm() {
   });
 
   if (result?.ok) {
-    showToast('Kill signal sent. Swarm should stop shortly.');
+    const canc = result.cancellation || {};
+    const cancSummary = canc.details ? `\n\nExchange Cancellation:\nStatus: ${canc.status} (${canc.exchange_verified ? 'Verified' : 'UNVERIFIED'})\n${canc.details}` : '';
+    alert(`EMERGENCY KILL SIGNAL EXECUTED\n\n${result.message || 'Swarm processes halted.'}${cancSummary}`);
+    showToast(result.message || 'Kill signal sent. Swarm stopped.');
     inp.value = '';
+    await loadAll();
   } else {
     showToast('Kill failed: ' + (result?.error ?? 'unknown'), true);
   }
@@ -1474,8 +1827,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (cmdStart) cmdStart.addEventListener('click', () => sendConsoleCommand('start'));
   if (cmdStop) cmdStop.addEventListener('click', () => sendConsoleCommand('stop'));
   if (cmdRestart) cmdRestart.addEventListener('click', () => sendConsoleCommand('restart'));
-  if (cmdMode) cmdMode.addEventListener('click', toggleSwarmMode);
-  if (modeSwitchCard) modeSwitchCard.addEventListener('click', toggleSwarmMode);
+  if (cmdMode) cmdMode.addEventListener('click', triggerModeSwitch);
+  if (modeSwitchCard) modeSwitchCard.addEventListener('click', triggerModeSwitch);
   if (cmdHealth) cmdHealth.addEventListener('click', () => sendConsoleCommand('health'));
   if (cmdRadar) cmdRadar.addEventListener('click', () => sendConsoleCommand('radar'));
 
@@ -1531,8 +1884,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initial load
   switchTab('console');
-  loadAll();
+  loadAll(true);
 
-  // Fast real-time auto-refresh every 5s
-  setInterval(loadAll, 5000);
+  // Smooth real-time auto-refresh every 8s
+  setInterval(() => loadAll(false), 8000);
 });

@@ -19,6 +19,7 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
+from typing import Dict, Any, List, Optional, Tuple
 from flask import Flask, jsonify, render_template, request
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,24 @@ def write_json(path: Path, data: dict):
         json.dump(data, fh, indent=2)
 
 
+def load_yaml(filename_or_path) -> dict:
+    """Read a YAML file, return empty dict on error."""
+    p = Path(filename_or_path)
+    if not p.is_absolute():
+        p = config_path(filename_or_path)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def read_yaml(path: Path) -> dict:
+    return load_yaml(path)
+
+
 def open_db_readonly(db_path: Path):
     """
     Open a SQLite database in WAL mode with a short timeout.
@@ -137,12 +156,24 @@ def read_risk_state(bot: str) -> dict:
     """
     raw = read_json(data_path(f"{bot}_risk_state.json"), {})
     daily = raw.get("daily", {})
+    bal = raw.get("current_balance_cents", 0)
+
+    try:
+        swarm_cfg = read_yaml(PROJECT_ROOT / "config" / "swarm_config.yaml") or {}
+        demo_bankroll = int(swarm_cfg.get("trading", {}).get("demo_bankroll_cents", 0) or 0)
+        is_demo = swarm_cfg.get("api", {}).get("demo_mode", True)
+        if is_demo and demo_bankroll > 0:
+            pnl = daily.get("gross_pnl_cents", 0)
+            bal = max(demo_bankroll + pnl, bal)
+    except Exception:
+        pass
+
     return {
-        "balance_cents":       raw.get("current_balance_cents", 0),
+        "balance_cents":       bal,
         "daily_pnl_cents":     daily.get("gross_pnl_cents", 0),
         "daily_trades":        daily.get("trades_today", 0),
         "pause_until":         raw.get("drawdown_pause_until", None),
-        "peak_balance_cents":  raw.get("peak_balance_cents", 0),
+        "peak_balance_cents":  max(bal, raw.get("peak_balance_cents", 0)),
         "open_positions":      raw.get("open_position_count", 0),
     }
 
@@ -170,19 +201,24 @@ def is_paused(pause_until) -> bool:
 
 def bot_process_running(bot_name: str) -> bool:
     """
-    Try pgrep to see if a bot_runner process is alive.
-    Falls back to True if risk_state file exists (we can't pgrep on Windows).
+    Check if a specific bot runner process or swarm is alive.
+    Uses psutil for fast lookup, falls back to risk state file existence.
     """
     try:
-        import subprocess
-        result = subprocess.run(
-            ["pgrep", "-f", f"bot_runner.*{bot_name}"],
-            capture_output=True, timeout=3
-        )
-        return result.returncode == 0
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline_list = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline_list)
+                if "bot_runner.py" in cmdline_str and bot_name in cmdline_str:
+                    return True
+                if "run_swarm" in cmdline_str:
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     except Exception:
-        # Windows or pgrep unavailable — infer from file existence
-        return data_path(f"{bot_name}_risk_state.json").exists()
+        pass
+    return data_path(f"{bot_name}_risk_state.json").exists()
 
 
 def get_uptime() -> int:
@@ -204,6 +240,85 @@ def llm_db_path() -> Path:
     return data_path("central_llm_controller.db")
 
 
+def get_exchange_auth_status() -> Dict[str, Any]:
+    """
+    Determine if Kalshi exchange authentication and sensors are verified or degraded.
+    Reads from latest health report, bot risk state, status files, and recent logs.
+    """
+    # 1. First check latest health report if fresh
+    hr = read_json(data_path("health_report_latest.json"), {})
+    kalshi_chk = hr.get("checks", {}).get("kalshi_auth", {})
+    if kalshi_chk:
+        status = str(kalshi_chk.get("status", "OK")).upper()
+        if status in ("DEGRADED", "FAIL", "CRITICAL", "UNKNOWN"):
+            return {
+                "status": "degraded",
+                "verified": False,
+                "reason": kalshi_chk.get("details", "Exchange authentication degraded / offline"),
+                "mode": kalshi_chk.get("mode", "DEMO"),
+            }
+        elif status == "OK" and kalshi_chk.get("authenticated") is True:
+            return {
+                "status": "ok",
+                "verified": True,
+                "reason": kalshi_chk.get("details", "Exchange authenticated and nominal"),
+                "mode": kalshi_chk.get("mode", "DEMO"),
+                "balance_cents": kalshi_chk.get("balance_cents", 0),
+            }
+
+    # 2. Check bot status and risk state files
+    for bot in BOTS:
+        st = read_status(bot)
+        rs = read_risk_state(bot)
+        if st.get("exchange_auth_status") == "degraded" or rs.get("exchange_auth_status") == "degraded":
+            return {
+                "status": "degraded",
+                "verified": False,
+                "reason": st.get("last_auth_error")
+                or rs.get("last_auth_error")
+                or "HTTP 401: Kalshi authentication failure",
+                "mode": "DEMO",
+            }
+        if st.get("balance_verified") is False or rs.get("balance_verified") is False:
+            return {
+                "status": "degraded",
+                "verified": False,
+                "reason": "Exchange balance sensor unverified",
+                "mode": "DEMO",
+            }
+
+    # 3. Check recent log lines for 401 / auth errors
+    try:
+        lp = log_path()
+        if lp.exists():
+            with open(lp, "rb") as fh:
+                size = fh.seek(0, 2)
+                fh.seek(max(0, size - 16384))
+                recent = fh.read().decode("utf-8", errors="replace").splitlines()[-60:]
+            for line in reversed(recent):
+                if (
+                    "Failed to fetch balance: HTTP 401" in line
+                    or "Failed to fetch positions: HTTP 401" in line
+                    or "401 Client Error: Unauthorized" in line
+                    or "HTTP 401 AUTHENTICATION FAILURE" in line
+                ):
+                    return {
+                        "status": "degraded",
+                        "verified": False,
+                        "reason": "HTTP 401 Unauthorized on Kalshi API",
+                        "mode": "DEMO",
+                    }
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "verified": True,
+        "reason": "Exchange connection nominal",
+        "mode": "DEMO",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -223,38 +338,64 @@ def api_status():
     Portfolio-level overview: balances, daily PnL, trade counts, bot states.
     """
     bots_data = {}
-    total_balance = 0
     total_pnl = 0
+    bot_balances = []
+    exchange_auth = get_exchange_auth_status()
+    auth_balance = exchange_auth.get("balance_cents")
 
     for bot in BOTS:
         risk = read_risk_state(bot)
         status = read_status(bot)
 
-        bal  = risk["balance_cents"]
-        pnl  = risk["daily_pnl_cents"]
-        total_balance += bal
-        total_pnl     += pnl
+        bal = risk["balance_cents"]
+        pnl = risk["daily_pnl_cents"]
+        bot_balances.append(bal)
+        total_pnl += pnl
+
+        bot_verified = (
+            exchange_auth["verified"]
+            and risk.get("balance_verified", True)
+            and status.get("balance_verified", True)
+        )
 
         bots_data[bot] = {
-            "balance_cents":  bal,
+            "balance_cents": bal,
+            "balance_verified": bot_verified,
+            "positions_verified": bot_verified and status.get("positions_verified", True),
             "daily_pnl_cents": pnl,
-            "daily_trades":   risk["daily_trades"],
-            "max_trades":     8,
-            "paused":         is_paused(risk["pause_until"]),
-            "active":         bot_process_running(bot),
-            "can_trade":      status.get("can_trade", True),
-            "state":          status.get("state", "unknown"),
+            "daily_trades": risk["daily_trades"],
+            "max_trades": 8,
+            "paused": is_paused(risk["pause_until"]),
+            "active": bot_process_running(bot),
+            "can_trade": status.get("can_trade", True) if exchange_auth["verified"] else False,
+            "state": status.get("state", "unknown"),
         }
+
+    # Unified Kalshi portfolio balance (not sum of duplicate bot readings)
+    swarm_cfg = read_yaml(PROJECT_ROOT / "config" / "swarm_config.yaml") or {}
+    demo_bankroll = int(swarm_cfg.get("trading", {}).get("demo_bankroll_cents", 0) or 0)
+    is_demo = swarm_cfg.get("api", {}).get("demo_mode", True)
+
+    if is_demo and demo_bankroll > 0:
+        total_balance = max(demo_bankroll + total_pnl, max(bot_balances) if bot_balances else demo_bankroll)
+    elif exchange_auth.get("verified") and auth_balance is not None:
+        total_balance = int(auth_balance)
+    elif bot_balances:
+        total_balance = max(bot_balances)
+    else:
+        total_balance = 0
 
     # portfolio_change_pct = daily_pnl / (portfolio - daily_pnl) * 100
     base = total_balance - total_pnl
     change_pct = round((total_pnl / base * 100) if base else 0.0, 2)
 
     return json_response({
-        "portfolio_cents":    total_balance,
+        "portfolio_cents": total_balance,
         "portfolio_change_pct": change_pct,
-        "bots":               bots_data,
-        "uptime_seconds":     get_uptime(),
+        "balance_verified": exchange_auth["verified"],
+        "exchange_auth": exchange_auth,
+        "bots": bots_data,
+        "uptime_seconds": get_uptime(),
     })
 
 
@@ -437,6 +578,74 @@ def api_trades():
     return json_response(all_trades[:50])
 
 
+# ── /api/supervisor ───────────────────────────────────────────────────────────
+
+@app.route("/api/supervisor/latest")
+def api_supervisor_latest():
+    """Return the latest autonomous supervisor report."""
+    report_file = data_path("supervisor_latest.json")
+    if not report_file.exists():
+        try:
+            from swarm.llm_supervisor import LLMSupervisor
+            sup = LLMSupervisor(project_root=PROJECT_ROOT)
+            report = sup.run_audit()
+            return json_response(report)
+        except Exception as exc:
+            return json_response({"ok": False, "error": str(exc)}, status=500)
+    
+    report = read_json(report_file, default={})
+    return json_response(report)
+
+
+@app.route("/api/supervisor/history")
+def api_supervisor_history():
+    """Return past supervisor audit runs from SQLite."""
+    db_file = data_path("supervisor_reports.db")
+    if not db_file.exists():
+        return json_response([])
+    conn, err = open_db_readonly(db_file)
+    if conn is None:
+        return json_response([])
+    try:
+        cur = conn.execute(
+            "SELECT id, timestamp, health_grade, score_pct, total_findings, "
+            "critical_count, warning_count, auto_actions_count, summary, findings_json, remediations_json "
+            "FROM supervisor_audits ORDER BY id DESC LIMIT 20"
+        )
+        rows = []
+        for r in cur.fetchall():
+            rows.append({
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "health_grade": r["health_grade"],
+                "score_pct": r["score_pct"],
+                "total_findings": r["total_findings"],
+                "critical_count": r["critical_count"],
+                "warning_count": r["warning_count"],
+                "auto_actions_count": r["auto_actions_count"],
+                "summary": r["summary"],
+                "findings": json.loads(r["findings_json"]) if r["findings_json"] else [],
+                "remediations": json.loads(r["remediations_json"]) if r["remediations_json"] else [],
+            })
+        return json_response(rows)
+    except Exception as exc:
+        return json_response({"error": str(exc)}, status=500)
+    finally:
+        conn.close()
+
+
+@app.route("/api/supervisor/run_now", methods=["POST", "GET"])
+def api_supervisor_run_now():
+    """Trigger an immediate full audit pass by the LLM Supervisor."""
+    try:
+        from swarm.llm_supervisor import LLMSupervisor
+        sup = LLMSupervisor(project_root=PROJECT_ROOT)
+        report = sup.run_audit()
+        return json_response({"ok": True, "report": report})
+    except Exception as exc:
+        return json_response({"ok": False, "error": str(exc)}, status=500)
+
+
 # ── /api/positions ───────────────────────────────────────────────────────────
 
 @app.route("/api/positions")
@@ -446,16 +655,22 @@ def api_positions():
     """
     by_bot = {}
     total = 0
+    exchange_auth = get_exchange_auth_status()
 
     for bot in BOTS:
-        risk   = read_risk_state(bot)
+        risk = read_risk_state(bot)
         status = read_status(bot)
         # Prefer status file's open_positions, fall back to risk_state
         count = status.get("open_positions") or risk.get("open_positions", 0)
         by_bot[bot] = count
         total += count
 
-    return json_response({"total_open": total, "by_bot": by_bot})
+    return json_response({
+        "total_open": total,
+        "by_bot": by_bot,
+        "positions_verified": exchange_auth["verified"],
+        "exchange_auth": exchange_auth,
+    })
 
 
 # ── /api/equity ──────────────────────────────────────────────────────────────
@@ -466,11 +681,14 @@ def api_equity():
     Chronological portfolio equity curve computed from settled trade outcomes.
     """
     all_settled = []
-    total_current_balance = 0
+    exchange_auth = get_exchange_auth_status()
+    if exchange_auth.get("verified") and exchange_auth.get("balance_cents") is not None:
+        total_current_balance = int(exchange_auth["balance_cents"])
+    else:
+        bot_balances = [read_risk_state(b).get("balance_cents", 0) or 0 for b in BOTS]
+        total_current_balance = max(bot_balances) if bot_balances else 0
 
     for bot in BOTS:
-        risk = read_risk_state(bot)
-        total_current_balance += risk.get("balance_cents", 0) or 0
         db_file = data_path(f"{bot}.db")
         if not db_file.exists():
             continue
@@ -493,29 +711,22 @@ def api_equity():
         finally:
             conn.close()
 
+    # Sort chronologically
     all_settled.sort(key=lambda x: x["timestamp"])
 
-    # Compute baseline starting capital
-    total_realized_pnl = sum(x["pnl_cents"] for x in all_settled)
-    base_capital = max(1000, total_current_balance - total_realized_pnl)
-
+    # Compute running equity curve
+    cumulative = 0
     points = []
-    if all_settled:
-        # Initial point before first trade
-        first_ts = all_settled[0]["timestamp"]
+    for item in all_settled:
+        cumulative += item["pnl_cents"]
         points.append({
-            "timestamp": first_ts,
-            "portfolio_cents": base_capital,
+            "timestamp": item["timestamp"],
+            "cumulative_pnl_cents": cumulative,
+            "portfolio_cents": total_current_balance + cumulative if total_current_balance > 0 else 10000 + cumulative,
         })
-        running = base_capital
-        for s in all_settled:
-            running += s["pnl_cents"]
-            points.append({
-                "timestamp": s["timestamp"],
-                "portfolio_cents": running,
-            })
-    else:
-        # Default single point with current balance
+
+    # If no settled trades yet, return a baseline starting point
+    if not points:
         points.append({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "portfolio_cents": total_current_balance or 10000,
@@ -540,22 +751,31 @@ def api_risk():
     Per-bot risk state and guardrail progress toward loosening thresholds.
     """
     bots_risk = {}
+    exchange_auth = get_exchange_auth_status()
     for bot in BOTS:
-        risk   = read_risk_state(bot)
+        risk = read_risk_state(bot)
         status = read_status(bot)
 
-        bal  = risk["balance_cents"]
-        peak = risk["peak_balance_cents"] or bal
-        dd   = round((peak - bal) / peak * 100, 2) if peak else 0.0
+        bal = risk.get("balance_cents", 0) or 0
+        peak = risk.get("peak_balance_cents", 0) or 0
+        dd = round((peak - bal) / peak * 100, 2) if peak and peak > 0 else None
+
+        bot_verified = (
+            exchange_auth["verified"]
+            and risk.get("balance_verified", True)
+            and status.get("balance_verified", True)
+        )
 
         bots_risk[bot] = {
-            "balance_cents":      bal,
+            "balance_cents": bal,
+            "balance_verified": bot_verified,
+            "positions_verified": bot_verified and status.get("positions_verified", True),
             "peak_balance_cents": peak,
-            "drawdown_pct":       dd,
-            "daily_pnl_cents":    risk["daily_pnl_cents"],
-            "daily_trades":       risk["daily_trades"],
-            "can_trade":          status.get("can_trade", True),
-            "paused":             is_paused(risk["pause_until"]),
+            "drawdown_pct": dd,
+            "daily_pnl_cents": risk["daily_pnl_cents"],
+            "daily_trades": risk["daily_trades"],
+            "can_trade": status.get("can_trade", True),
+            "paused": is_paused(risk["pause_until"]),
         }
 
     # ── Guardrail progress (from LLM clean period) ────────────────────────
@@ -608,7 +828,12 @@ def api_risk():
         finally:
             conn.close()
 
-    return json_response({"bots": bots_risk, "guardrail_progress": guardrail})
+    return json_response({
+        "bots": bots_risk,
+        "guardrail_progress": guardrail,
+        "exchange_auth": exchange_auth,
+        "balance_verified": exchange_auth["verified"],
+    })
 
 
 # ── /api/learning ────────────────────────────────────────────────────────────
@@ -671,25 +896,33 @@ def api_system():
     # ── Log tail (last 10 lines) ──────────────────────────────────────────
     log_lines = []
     try:
-        with open(log_path(), "r", encoding="utf-8", errors="replace") as fh:
-            log_lines = fh.readlines()
-        log_lines = [l.rstrip() for l in log_lines[-10:]]
-    except FileNotFoundError:
-        log_lines = ["Log file not found"]
+        lp = log_path()
+        if lp.exists():
+            with open(lp, "rb") as fh:
+                size = fh.seek(0, 2)
+                fh.seek(max(0, size - 8192))
+                lines = [l.strip() for l in fh.read().decode("utf-8", errors="replace").splitlines() if l.strip()]
+                log_lines = lines[-10:]
+        else:
+            log_lines = ["Log file not found"]
     except Exception as exc:
         log_lines = [f"Error reading log: {exc}"]
 
-    # ── Tavily usage (best-effort grep through today's log lines) ─────────
+    # ── Tavily usage (best-effort tail check) ─────────────────────────────
     tavily_today = 0
     try:
         today_prefix = today_utc_str()
-        with open(log_path(), "r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if today_prefix not in line:
-                    continue
-                ll = line.lower()
-                if "tavily" in ll and "exhausted" not in ll and "budget" not in ll and "error" not in ll:
-                    tavily_today += 1
+        lp = log_path()
+        if lp.exists():
+            with open(lp, "rb") as fh:
+                size = fh.seek(0, 2)
+                fh.seek(max(0, size - 65536))
+                for line in fh.read().decode("utf-8", errors="replace").splitlines():
+                    if today_prefix not in line:
+                        continue
+                    ll = line.lower()
+                    if "tavily" in ll and "exhausted" not in ll and "budget" not in ll and "error" not in ll:
+                        tavily_today += 1
     except Exception:
         pass
 
@@ -746,6 +979,7 @@ def api_system():
         "llm_model":        llm_model,
         "llm_status":       llm_status,
         "anthropic_status": llm_status,
+        "exchange_auth":    get_exchange_auth_status(),
         "uptime_seconds":   get_uptime(),
         "log_tail":         log_lines,
         "health_report":    health_report,
@@ -907,7 +1141,7 @@ def api_config_save():
 # ── Swarm Command Console Endpoints ─────────────────────────────────────────
 
 def _get_swarm_processes():
-    """Locate all running swarm processes."""
+    """Locate all running swarm processes using psutil with fallback."""
     found = []
     target_scripts = (
         "run_swarm.py",
@@ -916,6 +1150,24 @@ def _get_swarm_processes():
         "swarm_daemon.py",
         "bot_runner.py",
     )
+    # 1. Try psutil (instant, non-blocking, cross-platform)
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == os.getpid():
+                    continue
+                cmdline_list = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline_list)
+                if any(t in cmdline_str for t in target_scripts):
+                    found.append({"pid": proc.pid, "cmd": cmdline_str})
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return found
+    except Exception:
+        pass
+
+    # 2. Fallback if psutil is unavailable
     import subprocess
     if os.name == "nt":
         try:
@@ -988,48 +1240,61 @@ def api_swarm_start():
 
     procs = _get_swarm_processes()
     if procs:
+        msg = f"Swarm already running ({len(procs)} process(es) active)."
         return json_response({
             "ok": True,
-            "message": f"Swarm already running ({len(procs)} process(es) active).",
+            "message": msg,
+            "output": msg,
             "pids": [p["pid"] for p in procs]
         })
 
-    import subprocess
-    run_script = PROJECT_ROOT / "run_swarm_with_brain.py"
-    if not run_script.exists():
-        run_script = PROJECT_ROOT / "run_swarm.py"
+    try:
+        import subprocess
+        run_script = PROJECT_ROOT / "run_swarm_with_brain.py"
+        if not run_script.exists():
+            run_script = PROJECT_ROOT / "run_swarm.py"
 
-    log_file = (PROJECT_ROOT / "logs" / "swarm.log").open("a", encoding="utf-8")
+        logs_dir = PROJECT_ROOT / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = (logs_dir / "swarm.log").open("a", encoding="utf-8")
 
-    if os.name == "nt":
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        proc = subprocess.Popen(
-            [sys.executable, str(run_script)],
-            cwd=str(PROJECT_ROOT),
-            stdout=log_file,
-            stderr=log_file,
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
-    else:
-        proc = subprocess.Popen(
-            [sys.executable, str(run_script)],
-            cwd=str(PROJECT_ROOT),
-            stdout=log_file,
-            stderr=log_file,
-            start_new_session=True,
-            close_fds=True,
-        )
+        if os.name == "nt":
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            proc = subprocess.Popen(
+                [sys.executable, str(run_script)],
+                cwd=str(PROJECT_ROOT),
+                stdout=log_file,
+                stderr=log_file,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                [sys.executable, str(run_script)],
+                cwd=str(PROJECT_ROOT),
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+                close_fds=True,
+            )
 
-    time.sleep(2)
-    new_procs = _get_swarm_processes()
-    return json_response({
-        "ok": True,
-        "message": f"Swarm started successfully (PID: {proc.pid}).",
-        "pid": proc.pid,
-        "active_processes": new_procs,
-    })
+        time.sleep(1.0)
+        new_procs = _get_swarm_processes()
+        msg = f"Swarm started successfully (PID: {proc.pid})."
+        return json_response({
+            "ok": True,
+            "message": msg,
+            "output": msg,
+            "pid": proc.pid,
+            "active_processes": new_procs,
+        })
+    except Exception as exc:
+        return json_response({
+            "ok": False,
+            "error": str(exc),
+            "output": f"Failed to start swarm: {exc}",
+        }, 500)
 
 
 @app.route("/api/swarm/stop", methods=["POST", "OPTIONS"])
@@ -1040,34 +1305,40 @@ def api_swarm_stop():
 
     procs = _get_swarm_processes()
     if not procs:
-        return json_response({"ok": True, "message": "No active swarm processes found."})
+        msg = "No active swarm processes found."
+        return json_response({"ok": True, "message": msg, "output": msg})
 
-    import subprocess, signal
-    # Send kill signal file
-    write_json(data_path("kill_signal.json"), {
-        "action": "kill",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "requested_by": "command_console",
-    })
+    try:
+        import subprocess, signal
+        # Send kill signal file
+        write_json(data_path("kill_signal.json"), {
+            "action": "kill",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "requested_by": "command_console",
+        })
 
-    killed = []
-    for p in procs:
-        pid = p["pid"]
-        try:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
-            else:
-                os.kill(pid, signal.SIGTERM)
-            killed.append(pid)
-        except Exception:
-            pass
+        killed = []
+        for p in procs:
+            pid = p["pid"]
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+                else:
+                    os.kill(pid, signal.SIGTERM)
+                killed.append(pid)
+            except Exception:
+                pass
 
-    time.sleep(1)
-    return json_response({
-        "ok": True,
-        "message": f"Stopped {len(killed)} swarm process(es).",
-        "stopped_pids": killed,
-    })
+        time.sleep(0.5)
+        msg = f"Stopped {len(killed)} swarm process(es)."
+        return json_response({
+            "ok": True,
+            "message": msg,
+            "output": msg,
+            "stopped_pids": killed,
+        })
+    except Exception as exc:
+        return json_response({"ok": False, "error": str(exc), "output": f"Failed to stop swarm: {exc}"}, 500)
 
 
 @app.route("/api/swarm/restart", methods=["POST", "OPTIONS"])
@@ -1076,18 +1347,13 @@ def api_swarm_restart():
     if request.method == "OPTIONS":
         return json_response({})
     api_swarm_stop()
-    time.sleep(1.5)
+    time.sleep(1.0)
     return api_swarm_start()
 
 
-@app.route("/api/swarm/mode", methods=["POST", "OPTIONS"])
-def api_swarm_mode():
-    """Switch trading mode to 'demo' or 'live'."""
-    if request.method == "OPTIONS":
-        return json_response({})
-
-    body = request.get_json(silent=True) or {}
-    new_mode = str(body.get("mode", "")).strip().lower()
+def _set_trading_mode(new_mode: str):
+    """Internal helper to switch trading mode in config."""
+    new_mode = str(new_mode).strip().lower()
     if new_mode not in ("demo", "live"):
         return json_response({"ok": False, "error": "Mode must be 'demo' or 'live'"}, 400)
 
@@ -1107,18 +1373,34 @@ def api_swarm_mode():
         procs = _get_swarm_processes()
         restart_needed = len(procs) > 0
 
+        msg = f"Trading mode switched to {new_mode.upper()}."
+        if restart_needed:
+            msg += " (Restart swarm for changes to take effect)"
+
         return json_response({
             "ok": True,
             "mode": new_mode,
             "demo_mode": is_demo,
-            "message": f"Trading mode switched to {new_mode.upper()}.",
+            "message": msg,
             "restart_needed": restart_needed,
         })
     except Exception as exc:
         return json_response({"ok": False, "error": str(exc)}, 500)
 
 
+@app.route("/api/swarm/mode", methods=["POST", "OPTIONS"])
+def api_swarm_mode():
+    """Switch trading mode to 'demo' or 'live'."""
+    if request.method == "OPTIONS":
+        return json_response({})
+
+    body = request.get_json(silent=True) or {}
+    new_mode = str(body.get("mode", "")).strip().lower()
+    return _set_trading_mode(new_mode)
+
+
 @app.route("/api/swarm/exec", methods=["POST", "OPTIONS"])
+@app.route("/api/swarm/command", methods=["POST", "OPTIONS"])
 def api_swarm_exec():
     """Execute console commands and return terminal output."""
     if request.method == "OPTIONS":
@@ -1133,7 +1415,23 @@ def api_swarm_exec():
     parts = cmd_str.split()
     verb = parts[0].lower().lstrip("/")
 
-    if verb in ("start", "launch"):
+    if verb in ("help", "?", "commands"):
+        help_text = (
+            "Available Swarm Console Commands:\n"
+            "  • start          - Launch background swarm processes with Gemini Central LLM\n"
+            "  • stop           - Gracefully halt all bot workers and swarm daemon\n"
+            "  • restart        - Restart the swarm session\n"
+            "  • status / ps    - Display live execution state, process PIDs, and bot P&L\n"
+            "  • mode demo      - Switch to safe simulated orders (Kalshi Demo API)\n"
+            "  • mode live      - Switch to live capital execution (Real funds)\n"
+            "  • health / check - Execute automated 15-point system verification\n"
+            "  • radar / eval   - Run demo learning & calibration audit\n"
+            "  • vacuum         - Reclaim unallocated disk space across SQLite databases\n"
+            "  • logs [N]       - Print the last N lines (default 25) of swarm.log\n"
+            "  • clear          - Clear terminal window"
+        )
+        return json_response({"ok": True, "output": help_text})
+    elif verb in ("start", "launch"):
         return api_swarm_start()
     elif verb in ("stop", "kill", "halt"):
         return api_swarm_stop()
@@ -1141,12 +1439,69 @@ def api_swarm_exec():
         return api_swarm_restart()
     elif verb == "mode":
         if len(parts) > 1:
-            request._cached_json = {"mode": parts[1].lower()}
-            return api_swarm_mode()
+            return _set_trading_mode(parts[1])
         else:
-            return api_swarm_status()
+            procs = _get_swarm_processes()
+            cfg_file = config_path("swarm_config.yaml")
+            is_demo = True
+            try:
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    c = yaml.safe_load(f) or {}
+                    is_demo = bool(c.get("api", {}).get("demo_mode", True))
+            except Exception:
+                pass
+            current = "DEMO (Simulation)" if is_demo else "LIVE CAPITAL"
+            return json_response({
+                "ok": True,
+                "output": f"Current Trading Mode: {current}\nUsage to switch: mode demo  OR  mode live"
+            })
     elif verb in ("status", "ps"):
-        return api_swarm_status()
+        procs = _get_swarm_processes()
+        cfg_file = config_path("swarm_config.yaml")
+        is_demo = True
+        provider = "gemini"
+        model = "gemini-2.5-flash"
+        search_ground = True
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                c = yaml.safe_load(f) or {}
+                is_demo = bool(c.get("api", {}).get("demo_mode", True))
+                central = c.get("central_llm", {})
+                provider = central.get("provider", "gemini")
+                model = central.get("gemini_model", "gemini-2.5-flash")
+                search_ground = bool(central.get("gemini_search_grounding", True))
+        except Exception:
+            pass
+
+        lines = [
+            "============================================================",
+            "           KALSHI SWARM COMMAND CONSOLE STATUS           ",
+            "============================================================",
+            f" Swarm Status   : {'🟢 RUNNING' if procs else '🔴 STOPPED'}",
+            f" Trading Mode   : {'🟡 DEMO (Simulation)' if is_demo else '🔴 LIVE CAPITAL'}",
+            f" AI Brain       : 🔷 {provider.upper()} ({model})",
+            f" Search Ground  : {'✅ Google Search Enabled' if search_ground else '❌ Off'}",
+            f" Config File    : {cfg_file}",
+            "------------------------------------------------------------",
+        ]
+        if procs:
+            lines.append(" Active Processes:")
+            for p in procs:
+                lines.append(f"   • PID {p['pid']:<7}")
+        else:
+            lines.append(" Active Processes: None")
+        lines.append("------------------------------------------------------------")
+        lines.append(" Bot Statuses:")
+        for bot in BOTS:
+            risk = read_risk_state(bot)
+            pnl_cents = risk.get("daily_pnl_cents", 0) or 0
+            pnl_str = f"{pnl_cents/100:+.2f}$"
+            trades = risk.get("daily_trades", 0)
+            paused = is_paused(risk.get("pause_until"))
+            st = "PAUSED" if paused else ("RUNNING" if procs else "IDLE")
+            lines.append(f"   • {bot:<10}: {st:<10} | Daily PnL: {pnl_str:<9} | Trades: {trades}/8")
+        lines.append("============================================================")
+        return json_response({"ok": True, "output": "\n".join(lines)})
     elif verb in ("health", "check"):
         try:
             res = subprocess.run(
@@ -1167,11 +1522,236 @@ def api_swarm_exec():
             return json_response({"ok": True, "output": out})
         except Exception as e:
             return json_response({"ok": False, "error": str(e)})
+    elif verb == "vacuum":
+        results = {}
+        data_dir = PROJECT_ROOT / "data"
+        for db_file in sorted(data_dir.glob("*.db")):
+            try:
+                conn = sqlite3.connect(str(db_file), timeout=10)
+                conn.execute("VACUUM")
+                conn.close()
+                results[db_file.name] = "VACUUM OK"
+            except Exception as exc:
+                results[db_file.name] = f"ERROR: {exc}"
+        out = "\n".join([f"  • {k:<25}: {v}" for k, v in results.items()])
+        return json_response({"ok": True, "output": f"Database VACUUM Routine:\n{out}"})
+    elif verb == "logs":
+        n = 25
+        if len(parts) > 1:
+            try:
+                n = int(parts[1])
+            except ValueError:
+                n = 25
+        n = max(1, min(n, 200))
+        try:
+            with open(log_path(), "r", encoding="utf-8", errors="replace") as fh:
+                all_lines = fh.readlines()
+            lines = [l.rstrip() for l in all_lines[-n:]]
+            return json_response({"ok": True, "output": f"--- Last {len(lines)} lines of swarm.log ---\n" + "\n".join(lines)})
+        except Exception as exc:
+            return json_response({"ok": False, "error": str(exc)})
+    elif verb in ("kill", "emergency_kill"):
+        report = verify_and_cancel_exchange_orders()
+        procs = _get_swarm_processes()
+        killed = []
+        for p in procs:
+            try:
+                os.kill(p["pid"], 9)
+                killed.append(p["pid"])
+            except Exception:
+                pass
+        return json_response({
+            "ok": True,
+            "output": (
+                f"[EMERGENCY KILL EXECUTED]\n"
+                f"  • Processes Terminated : {len(killed)} ({killed})\n"
+                f"  • Exchange Status      : {report.get('status')}\n"
+                f"  • Exchange Verified    : {'✅ YES' if report.get('exchange_verified') else '❌ UNVERIFIED'}\n"
+                f"  • Details              : {report.get('details')}"
+            )
+        })
+    elif verb in ("cancel", "cancel_all"):
+        report = verify_and_cancel_exchange_orders()
+        return json_response({
+            "ok": report.get("ok", False),
+            "output": (
+                f"[EXCHANGE ORDER CANCELLATION]\n"
+                f"  • Status            : {report.get('status')}\n"
+                f"  • Exchange Verified : {'✅ YES' if report.get('exchange_verified') else '❌ UNVERIFIED'}\n"
+                f"  • Orders Found      : {report.get('orders_found', 0)}\n"
+                f"  • Orders Cancelled  : {report.get('orders_cancelled', 0)}\n"
+                f"  • Remaining Resting : {report.get('remaining_orders', 0)}\n"
+                f"  • Details           : {report.get('details')}"
+            )
+        })
+    elif verb in ("supervisor", "audit", "overseer"):
+        try:
+            from swarm.llm_supervisor import LLMSupervisor
+            sup = LLMSupervisor(project_root=PROJECT_ROOT)
+            report = sup.run_audit()
+            findings_summary = "\n".join([f"  • [{f.get('severity', 'info').upper()}] {f.get('title')}: {f.get('description')}" for f in report.get("findings", [])]) or "  • No issues found."
+            remediations_summary = "\n".join([f"  • {r.get('type')}: {r.get('category', r.get('bot_name'))}" for r in report.get("auto_remediations", [])]) or "  • None required."
+            ai_synthesis_text = f"\nAI Executive Synthesis:\n{report.get('ai_synthesis')}\n" if report.get('ai_synthesis') else ""
+            out = (
+                f"============================================================\n"
+                f"       AUTONOMOUS LLM SUPERVISOR & META-AUDITOR             \n"
+                f"============================================================\n"
+                f" Health Grade     : {report.get('health_grade')} ({report.get('score_pct')}%)\n"
+                f" Timestamp        : {report.get('timestamp')}\n"
+                f" Total Findings   : {report.get('total_findings')} (Critical: {report.get('critical_count')}, Warning: {report.get('warning_count')})\n"
+                f" Auto-Remediations: {report.get('auto_actions_count')} executed\n"
+                f"------------------------------------------------------------\n"
+                f"Findings:\n{findings_summary}\n"
+                f"------------------------------------------------------------\n"
+                f"Auto-Remediations Executed:\n{remediations_summary}"
+                f"{ai_synthesis_text}\n"
+                f"============================================================"
+            )
+            return json_response({"ok": True, "output": out})
+        except Exception as e:
+            return json_response({"ok": False, "error": str(e)})
     else:
         return json_response({
             "ok": False,
-            "error": f"Unknown command '{cmd_str}'. Available: start, stop, restart, mode demo, mode live, health, radar, status, clear"
+            "error": f"Unknown command '{cmd_str}'. Type 'help' for available commands (start, stop, restart, mode, status, health, radar, supervisor, vacuum, logs, cancel, kill, clear)."
         }, 400)
+
+
+def verify_and_cancel_exchange_orders() -> Dict[str, Any]:
+    """
+    Query resting orders on Kalshi exchange, cancel them, and verify that
+    the resting orders list is empty. Returns verified outcome diagnostics.
+    """
+    cfg = load_yaml("swarm_config.yaml") or {}
+    api_cfg = cfg.get("api", {}) if isinstance(cfg, dict) else {}
+    key_id = api_cfg.get("key_id") or os.environ.get("KALSHI_API_KEY_ID")
+    pk_path = api_cfg.get("private_key_path", "keys/kalshi-private.key")
+    demo_mode = bool(api_cfg.get("demo_mode", True))
+    base_url = api_cfg.get("base_url") or (
+        "https://demo-api.kalshi.co/trade-api/v2" if demo_mode else "https://api.elections.kalshi.com/trade-api/v2"
+    )
+    key_file = PROJECT_ROOT / pk_path if not Path(pk_path).is_absolute() else Path(pk_path)
+
+    if not key_id or not key_file.exists():
+        return {
+            "ok": False,
+            "status": "UNVERIFIED_AUTH_FAILURE",
+            "exchange_verified": False,
+            "orders_found": 0,
+            "orders_cancelled": 0,
+            "remaining_orders": 0,
+            "details": "Kalshi API credentials missing (key_id or private key file not found). Cannot query or cancel orders on exchange.",
+        }
+
+    try:
+        from kalshi_agent.kalshi_client import KalshiClient
+        client = KalshiClient(
+            api_key_id=key_id,
+            private_key_path=str(key_file),
+            base_url=base_url,
+            demo_mode=demo_mode,
+        )
+        orders = client.get_orders(status="resting")
+        orders_found = len(orders)
+        if orders_found == 0:
+            return {
+                "ok": True,
+                "status": "VERIFIED_CLEARED",
+                "exchange_verified": True,
+                "orders_found": 0,
+                "orders_cancelled": 0,
+                "remaining_orders": 0,
+                "details": "Verified 0 resting orders on Kalshi exchange (exchange clean).",
+            }
+
+        cancelled = 0
+        for o in orders:
+            oid = o.get("order_id") or o.get("id")
+            if oid:
+                try:
+                    client.cancel_order(oid)
+                    cancelled += 1
+                except Exception:
+                    pass
+
+        # Verification pass: confirm orders are gone
+        remaining = client.get_orders(status="resting")
+        remaining_cnt = len(remaining)
+        if remaining_cnt == 0:
+            return {
+                "ok": True,
+                "status": "VERIFIED_CLEARED",
+                "exchange_verified": True,
+                "orders_found": orders_found,
+                "orders_cancelled": cancelled,
+                "remaining_orders": 0,
+                "details": f"Successfully cancelled {cancelled}/{orders_found} orders. Verified 0 resting orders remaining on exchange.",
+            }
+        else:
+            return {
+                "ok": False,
+                "status": "PARTIAL_FAILURE",
+                "exchange_verified": True,
+                "orders_found": orders_found,
+                "orders_cancelled": cancelled,
+                "remaining_orders": remaining_cnt,
+                "details": f"Cancelled {cancelled}/{orders_found} orders, but {remaining_cnt} resting orders remain on exchange.",
+            }
+    except Exception as exc:
+        err_str = str(exc)
+        is_auth = "401" in err_str or "unauthorized" in err_str.lower()
+        return {
+            "ok": False,
+            "status": "UNVERIFIED_AUTH_FAILURE" if is_auth else "UNVERIFIED_NETWORK_FAILURE",
+            "exchange_verified": False,
+            "orders_found": 0,
+            "orders_cancelled": 0,
+            "remaining_orders": 0,
+            "details": f"Exchange cancellation UNVERIFIED due to API error ({err_str[:90]}).",
+            "error": err_str,
+        }
+
+
+@app.route("/api/kill", methods=["POST"])
+def api_kill():
+    """Emergency master kill switch: cancels exchange orders, halts processes, triggers flag."""
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm", "").strip().upper() != "KILL":
+        return json_response({"ok": False, "error": "Type KILL to confirm."}, 400)
+
+    # 1. Verify and cancel exchange orders
+    cancellation_report = verify_and_cancel_exchange_orders()
+
+    # 2. Terminate local swarm processes
+    procs = _get_swarm_processes()
+    killed_pids = []
+    for p in procs:
+        try:
+            os.kill(p["pid"], 9)
+            killed_pids.append(p["pid"])
+        except Exception:
+            pass
+
+    # 3. Create master kill trigger file
+    kill_flag = PROJECT_ROOT / "data" / "emergency_kill.trigger"
+    try:
+        kill_flag.write_text(f"TRIGGERED at {datetime.now(timezone.utc).isoformat()}", encoding="utf-8")
+    except Exception:
+        pass
+
+    return json_response({
+        "ok": True,
+        "killed_pids": killed_pids,
+        "cancellation": cancellation_report,
+        "message": f"Kill signal executed ({len(killed_pids)} processes terminated). Exchange: {cancellation_report['status']} — {cancellation_report['details']}",
+    })
+
+
+@app.route("/api/emergency/cancel_orders", methods=["POST"])
+def api_emergency_cancel_orders():
+    """Explicit endpoint to cancel and verify all resting orders on the exchange."""
+    report = verify_and_cancel_exchange_orders()
+    return json_response(report)
 
 
 # ---------------------------------------------------------------------------
@@ -1196,6 +1776,17 @@ if __name__ == "__main__":
     # Set module-level globals used by route handlers
     PROJECT_ROOT = Path(args.project_root).resolve()
     _load_env_file()
+
+    # Ensure log directory exists and safely redirect if no console
+    logs_dir = PROJECT_ROOT / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    if sys.stdout is None or (hasattr(sys.stdout, "isatty") and not sys.stdout.isatty()):
+        try:
+            log_fh = open(logs_dir / "dashboard.log", "a", encoding="utf-8", buffering=1)
+            sys.stdout = log_fh
+            sys.stderr = log_fh
+        except Exception:
+            pass
 
     print(f"[dashboard] Starting on http://{args.host}:{args.port}")
     print(f"[dashboard] Project root: {PROJECT_ROOT}")

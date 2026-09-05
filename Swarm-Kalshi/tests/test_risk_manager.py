@@ -368,6 +368,11 @@ class TestStatus:
         s = rm.status()
         assert s["consecutive_losses"] == 1
 
+    def test_status_drawdown_pct_none_when_no_peak(self):
+        rm = RiskManager(config={})
+        s = rm.status()
+        assert s["drawdown_pct"] is None
+
     def test_status_drawdown_pct_zero_when_at_peak(self):
         rm = make_rm()
         rm.update_balance(10000)

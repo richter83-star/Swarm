@@ -175,6 +175,14 @@ class SwarmCoordinator:
             config=meta_learning_cfg,
         )
 
+        # Autonomous LLM System Supervisor
+        from swarm.llm_supervisor import LLMSupervisor
+        supervisor_cfg = self.cfg.get("supervisor", {}) or {}
+        self.supervisor = LLMSupervisor(
+            config=supervisor_cfg,
+            project_root=self.project_root,
+        )
+
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -461,14 +469,21 @@ class SwarmCoordinator:
         return health
 
     def _read_bot_status(self, bot_name: str) -> Optional[Dict]:
-        """Read a bot's status file."""
+        """Read a bot's status file with retry for transient Windows file locks."""
         status_file = self.project_root / "data" / f"{bot_name}_status.json"
-        try:
-            if status_file.exists():
-                with open(status_file) as fh:
-                    return json.load(fh)
-        except Exception as exc:
-            logger.warning("Failed to read status file for %s: %s", bot_name, exc)
+        for attempt in range(3):
+            try:
+                if status_file.exists():
+                    with open(status_file, "r", encoding="utf-8") as fh:
+                        return json.load(fh)
+                return None
+            except (PermissionError, OSError):
+                if attempt < 2:
+                    time.sleep(0.05)
+                    continue
+            except Exception as exc:
+                logger.debug("Failed to read status file for %s: %s", bot_name, exc)
+                break
         return None
 
     @staticmethod
@@ -596,23 +611,34 @@ class SwarmCoordinator:
         balance_cents = self._last_known_balance_cents
         valid = True
         reason = "ok"
-        client = self._get_portfolio_client()
-        if client is not None:
-            try:
-                bal = client.get_balance()
-                fetched = int(bal.get("balance", 0) or 0)
-                if fetched > 0:
-                    balance_cents = fetched
-                    self._last_known_balance_cents = fetched
-            except Exception as exc:
-                if balance_cents <= 0:
-                    valid = False
-                    reason = f"balance_unavailable:{exc}"
-                else:
-                    reason = f"balance_stale:{exc}"
-        elif balance_cents <= 0:
-            valid = False
-            reason = "portfolio_client_unavailable"
+
+        is_demo = bool(self.cfg.get("api", {}).get("demo_mode", True))
+        demo_bankroll = int(self.cfg.get("trading", {}).get("demo_bankroll_cents", 0) or 0)
+
+        if is_demo and demo_bankroll > 0:
+            balance_cents = demo_bankroll
+            self._last_known_balance_cents = demo_bankroll
+        else:
+            client = self._get_portfolio_client()
+            if client is not None:
+                try:
+                    bal = client.get_balance()
+                    fetched = int(bal.get("balance", 0) or 0)
+                    if fetched > 0:
+                        balance_cents = fetched
+                        self._last_known_balance_cents = fetched
+                except Exception as exc:
+                    if balance_cents <= 0:
+                        valid = False
+                        reason = f"balance_unavailable:{exc}"
+                    else:
+                        reason = f"balance_stale:{exc}"
+            elif balance_cents <= 0:
+                valid = False
+                reason = "portfolio_client_unavailable"
+
+        if self.balance_manager is not None and balance_cents > 0:
+            self.balance_manager.update_total_balance(balance_cents)
 
         bot_metrics: Dict[str, Dict[str, int]] = {}
         total_exposure = 0
@@ -1133,6 +1159,10 @@ class SwarmCoordinator:
         self._write_trade_guard_snapshot()
         self.start_all()
         self._write_trade_guard_snapshot()
+        try:
+            self.supervisor.start()
+        except Exception as exc:
+            logger.warning("Failed to start supervisor: %s", exc)
 
         check_interval = self.swarm_cfg.get(
             "health_check_interval_seconds",
@@ -1173,6 +1203,10 @@ class SwarmCoordinator:
     def _shutdown(self) -> None:
         """Graceful shutdown of the entire swarm."""
         logger.info("Shutting down swarm...")
+        try:
+            self.supervisor.stop()
+        except Exception as exc:
+            logger.warning("Error stopping supervisor: %s", exc)
         self.stop_all()
         logger.info("Swarm coordinator stopped.")
 

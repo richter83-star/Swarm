@@ -545,21 +545,36 @@ class AnalysisEngine:
         """
         Estimate fair value using multi-level orderbook depth asymmetry when
         available, with a mean-reversion fallback.
+        Calculates edge based on limit-order execution (market-maker entry price).
         """
         fair_value = self._fair_value(opp)
 
-        yes_edge = fair_value - (opp.yes_ask if opp.yes_ask else opp.mid_price)
-        no_ask_effective = opp.no_ask if opp.no_ask else (100 - opp.mid_price)
-        no_edge = (100.0 - fair_value) - no_ask_effective
+        buffer = int(self.cfg.get("limit_spread_buffer_cents", 1) or 1)
+        order_type = str(self.cfg.get("default_order_type", "limit") or "limit").lower()
 
-        buffer = self.cfg.get("limit_spread_buffer_cents", 1)
+        if order_type == "limit":
+            # For limit orders, entry price is at best bid + buffer (inside spread)
+            if opp.yes_bid:
+                yes_price = min(opp.yes_ask - 1 if opp.yes_ask else 99, int(opp.yes_bid) + buffer)
+            else:
+                yes_price = int(opp.mid_price)
+            yes_edge = fair_value - yes_price
+
+            if opp.no_bid:
+                no_price = min(opp.no_ask - 1 if opp.no_ask else 99, int(opp.no_bid) + buffer)
+            else:
+                no_price = int(100.0 - opp.mid_price)
+            no_edge = (100.0 - fair_value) - no_price
+        else:
+            yes_price = opp.yes_ask if opp.yes_ask else int(opp.mid_price)
+            yes_edge = fair_value - yes_price
+            no_price = opp.no_ask if opp.no_ask else int(100.0 - opp.mid_price)
+            no_edge = (100.0 - fair_value) - no_price
 
         if yes_edge > no_edge and yes_edge > 0:
-            price = min(99, max(1, int(opp.yes_ask) + buffer)) if opp.yes_ask else int(fair_value)
-            return "yes", yes_edge, price
+            return "yes", yes_edge, max(1, min(99, int(yes_price)))
         elif no_edge > 0:
-            price = min(99, max(1, int(no_ask_effective) + buffer)) if opp.no_ask else int(100 - fair_value)
-            return "no", no_edge, price
+            return "no", no_edge, max(1, min(99, int(no_price)))
 
         # Both sides have negative edge — no profitable trade exists
         return None, 0, 0
@@ -583,16 +598,23 @@ class AnalysisEngine:
                 no_depth = sum(q / (i + 1) for i, (_, q) in enumerate(no_levels))
                 total = yes_depth + no_depth
                 if total > 0:
-                    imbalance = yes_depth / total
-                    base_fv = opp.mid_price * 0.55 + (imbalance * 100) * 0.45
+                    # Stoikov micro-price: bounded by half the spread
+                    # Imbalance in [-1.0, +1.0]
+                    imbalance = (yes_depth - no_depth) / total
+                    spread_val = max(1.0, float(opp.spread or 1.0))
+                    # Micro-price adjustment is bounded by at most half the spread (e.g. 0.5¢ to 2.0¢)
+                    micro_tilt = (spread_val * 0.5) * imbalance
+                    # Dampen momentum tilt so it doesn't over-extrapolate
+                    momentum_tilt = self._price_velocity(opp) * 0.25
+                    base_fv = opp.mid_price + micro_tilt + momentum_tilt
                 else:
-                    momentum_tilt = self._price_velocity(opp) * 0.5
+                    momentum_tilt = self._price_velocity(opp) * 0.25
                     base_fv = opp.mid_price + momentum_tilt
             else:
-                momentum_tilt = self._price_velocity(opp) * 0.5
+                momentum_tilt = self._price_velocity(opp) * 0.25
                 base_fv = opp.mid_price + momentum_tilt
         else:
-            momentum_tilt = self._price_velocity(opp) * 0.5
+            momentum_tilt = self._price_velocity(opp) * 0.25
             base_fv = opp.mid_price + momentum_tilt
 
         # --- External signals tilt ---

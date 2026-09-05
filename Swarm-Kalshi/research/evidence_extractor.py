@@ -362,20 +362,32 @@ async def _call_gemini(prompt: str, config: dict[str, Any]) -> str:
         or os.environ.get("GOOGLE_GENAI_API_KEY")
         or None
     )
+    if not api_key:
+        try:
+            from kalshi_agent.research.web_search import _load_env_file
+            _load_env_file()
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENAI_API_KEY")
+        except Exception:
+            pass
+
     model = config.get("extraction_model", "gemini-2.5-flash")
-    max_tokens = int(config.get("llm_max_tokens", 1500))
+    max_tokens = max(4096, int(config.get("llm_max_tokens", 4096)))
 
     try:
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=api_key)
-        gen_cfg = types.GenerateContentConfig(
-            system_instruction="You are a precise research analyst. Return only valid JSON. Never fabricate data.",
-            temperature=0.1,
-            max_output_tokens=max_tokens,
-            response_mime_type="application/json",
-        )
+        kwargs = {
+            "system_instruction": "You are a precise research analyst. Return only valid JSON. Never fabricate data.",
+            "temperature": 0.1,
+            "max_output_tokens": max_tokens,
+            "response_mime_type": "application/json",
+        }
+        if hasattr(types, "ThinkingConfig"):
+            kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        gen_cfg = types.GenerateContentConfig(**kwargs)
+
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(
             None,
@@ -475,7 +487,21 @@ class EvidenceExtractor:
                 raw_text = raw_text[:-3]
             raw_text = raw_text.strip()
 
-            parsed = json.loads(raw_text)
+            try:
+                parsed = json.loads(raw_text)
+            except Exception as j_exc:
+                log.warning("evidence_extractor: JSON parse failed: %s, attempting regex recovery...", j_exc)
+                facts = re.findall(r'"([^"]{10,})"', raw_text)
+                if facts:
+                    parsed = {
+                        "summary": facts[0] if facts else "Research recovered from extracted facts",
+                        "bullets": [{"text": f, "relevance": 0.8, "confidence": 0.8} for f in facts[:6]],
+                        "quality_score": 0.55,
+                        "contradictions": [],
+                    }
+                    log.info("evidence_extractor: Recovered %d facts from truncated output", len(facts))
+                else:
+                    raise j_exc
         except Exception as e:
             log.error("evidence_extractor: LLM failed market_id=%s error=%s", market_id, str(e))
             return EvidencePackage(

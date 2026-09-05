@@ -537,3 +537,46 @@ class TestExtractTradeCategory:
     def test_returns_unknown_when_empty(self, tmp_path):
         ctrl = make_ctrl(tmp_path)
         assert ctrl._extract_trade_category({}) == "unknown"
+
+
+class TestUnresearchedUnderdogGuardrail:
+    def test_unresearched_cheap_underdog_auto_rejected(self, tmp_path):
+        ctrl = make_ctrl(tmp_path)
+        trade = make_trade(
+            suggested_price=24.0,
+            evidence_quality=0.0,
+            quant_confidence=81.0,
+        )
+        res = ctrl._normalize_result(
+            {
+                "decision": "approve",
+                "confidence": 78.0,
+                "size_multiplier": 1.0,
+                "rationale": "Looks good",
+                "red_flags": [],
+            },
+            trade_request=trade,
+        )
+        assert res.decision == "reject"
+        assert "unresearched_underdog" in res.red_flags
+        assert "auto-rejected by approval floor" in res.rationale.lower() or "unresearched" in res.rationale.lower()
+
+    def test_researched_cheap_contract_passes(self, tmp_path):
+        ctrl = make_ctrl(tmp_path)
+        trade = make_trade(
+            suggested_price=24.0,
+            evidence_quality=0.85,
+            quant_confidence=81.0,
+        )
+        res = ctrl._normalize_result(
+            {
+                "decision": "approve",
+                "confidence": 88.0,
+                "size_multiplier": 1.0,
+                "rationale": "Looks good",
+                "red_flags": [],
+            },
+            trade_request=trade,
+        )
+        assert res.decision == "approve"
+

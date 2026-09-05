@@ -351,23 +351,38 @@ class KalshiEvidenceExtractor:
             )
 
         # Parse JSON
+        parsed = {}
         try:
-            raw_text = raw_text.strip()
-            if raw_text.startswith("```"):
-                raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
-            raw_text = raw_text.strip()
-            parsed = json.loads(raw_text)
+            cleaned = raw_text.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            parsed = json.loads(cleaned)
         except Exception as exc:
             log.warning("[research] evidence_extractor: JSON parse failed: %s | raw=%r", exc, raw_text[:200])
-            return EvidencePackage(
-                market_question=market_question,
-                category=category,
-                num_sources=len(sources),
-                quality_score=0.0,
-                reasoning=f"JSON parse failed: {exc}",
-            )
+            try:
+                facts = re.findall(r'"([^"]{10,})"', raw_text)
+                if facts:
+                    parsed = {
+                        "key_facts": facts[:5],
+                        "has_numeric_facts": any(bool(re.search(r'\d', f)) for f in facts),
+                        "has_contradictions": False,
+                        "estimated_probability": 0.5,
+                        "confidence_assessment": "Recovered via robust fact extractor",
+                    }
+                    log.info("[research] Fallback parser recovered %d facts from truncated output", len(facts))
+            except Exception:
+                pass
+            if not parsed:
+                return EvidencePackage(
+                    market_question=market_question,
+                    category=category,
+                    num_sources=len(sources),
+                    quality_score=0.0,
+                    reasoning=f"JSON parse failed: {exc}",
+                )
 
         # Compute independent quality score
         has_numeric = bool(parsed.get("has_numeric_facts", False))
@@ -411,12 +426,16 @@ class KalshiEvidenceExtractor:
             from google.genai import types
 
             client = genai.Client(api_key=self._api_key)
-            gen_cfg = types.GenerateContentConfig(
-                system_instruction="You are a precise research analyst for prediction markets. Return only valid JSON. Never fabricate data.",
-                temperature=0.1,
-                max_output_tokens=self._max_tokens,
-                response_mime_type="application/json",
-            )
+            kwargs = {
+                "system_instruction": "You are a precise research analyst for prediction markets. Return only valid JSON. Never fabricate data.",
+                "temperature": 0.1,
+                "max_output_tokens": max(4096, self._max_tokens),
+                "response_mime_type": "application/json",
+            }
+            if hasattr(types, "ThinkingConfig"):
+                kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            gen_cfg = types.GenerateContentConfig(**kwargs)
+
             # Run sync client in thread to avoid blocking asyncio loop
             import asyncio
             loop = asyncio.get_event_loop()

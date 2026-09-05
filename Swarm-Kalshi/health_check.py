@@ -318,12 +318,107 @@ def check_pnl_anomalies() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# CHECK 4 — Balance & drawdown check
+# CHECK 4 — Kalshi API authentication & connectivity sensor
 # ---------------------------------------------------------------------------
 
-def check_balance_drawdown(actions: List[str]) -> dict:
+def check_kalshi_auth_connectivity(cfg: dict) -> dict:
+    """
+    Check Kalshi API connectivity and authentication status.
+    Returns:
+      OK: Valid credentials, exchange balance reachable.
+      DEGRADED: HTTP 401 Unauthorized, key missing, or auth signature rejection.
+      UNKNOWN: Network timeout or exchange 500 error.
+      NOT_APPLICABLE: Explicitly unconfigured or disabled in offline test.
+    """
+    api_cfg = cfg.get("api", {}) if isinstance(cfg, dict) else {}
+    key_id = api_cfg.get("key_id") or os.environ.get("KALSHI_API_KEY_ID")
+    pk_path = api_cfg.get("private_key_path", "keys/kalshi-private.key")
+    demo_mode = bool(api_cfg.get("demo_mode", True))
+    base_url = api_cfg.get("base_url") or (
+        "https://demo-api.kalshi.co/trade-api/v2" if demo_mode else "https://api.elections.kalshi.com/trade-api/v2"
+    )
+
+    key_file = PROJECT_ROOT / pk_path if not Path(pk_path).is_absolute() else Path(pk_path)
+
+    if not key_id or not key_file.exists():
+        missing_parts = []
+        if not key_id:
+            missing_parts.append("key_id missing")
+        if not key_file.exists():
+            missing_parts.append(f"private key file missing at {key_file.name}")
+        return {
+            "status": "DEGRADED",
+            "details": f"DEGRADED — Kalshi credentials missing ({', '.join(missing_parts)})",
+            "authenticated": False,
+            "mode": "DEMO" if demo_mode else "LIVE",
+        }
+
+    try:
+        from kalshi_agent.kalshi_client import KalshiClient
+        client = KalshiClient(
+            api_key_id=key_id,
+            private_key_path=str(key_file),
+            base_url=base_url,
+            demo_mode=demo_mode,
+        )
+        bal_data = client.get_balance()
+        raw_balance = int(bal_data.get("balance", 0) or 0)
+        demo_bankroll = int(cfg.get("trading", {}).get("demo_bankroll_cents", 0) or 0)
+        balance_cents = demo_bankroll if (demo_mode and demo_bankroll > 0) else raw_balance
+        return {
+            "status": "OK",
+            "details": f"Kalshi {'DEMO' if demo_mode else 'LIVE'} API authenticated | Balance: ${balance_cents/100:.2f}",
+            "authenticated": True,
+            "balance_cents": balance_cents,
+            "mode": "DEMO" if demo_mode else "LIVE",
+        }
+    except Exception as exc:
+        err_str = str(exc)
+        if (
+            "401" in err_str
+            or "Unauthorized" in err_str
+            or "unauthorized" in err_str
+            or "forbidden" in err_str
+            or "403" in err_str
+        ):
+            return {
+                "status": "DEGRADED",
+                "details": f"DEGRADED — HTTP 401 AUTHENTICATION FAILURE on Kalshi {'DEMO' if demo_mode else 'LIVE'} API ({err_str[:80]})",
+                "authenticated": False,
+                "mode": "DEMO" if demo_mode else "LIVE",
+                "error": err_str,
+            }
+        else:
+            return {
+                "status": "UNKNOWN",
+                "details": f"UNKNOWN — Exchange API connection error ({err_str[:80]})",
+                "authenticated": False,
+                "mode": "DEMO" if demo_mode else "LIVE",
+                "error": err_str,
+            }
+
+
+# ---------------------------------------------------------------------------
+# CHECK 5 — Balance & drawdown check (Propagates UNKNOWN when sensor offline)
+# ---------------------------------------------------------------------------
+
+def check_balance_drawdown(actions: List[str], kalshi_auth_res: Optional[dict] = None) -> dict:
+    # If Kalshi auth is degraded/failed/unknown, balance cannot be verified against live exchange!
+    if kalshi_auth_res and kalshi_auth_res.get("status") in ("DEGRADED", "UNKNOWN", "FAIL", "CRITICAL"):
+        auth_status = kalshi_auth_res.get("status")
+        auth_det = kalshi_auth_res.get("details", "Exchange auth offline")
+        return {
+            "status": "UNKNOWN",
+            "details": f"UNKNOWN — EXTERNAL DATA UNAVAILABLE ({auth_status}: {auth_det})",
+            "verified": False,
+            "issues": [f"Exchange authentication unavailable: {auth_det}"],
+        }
+
     issues = []
     info_parts = []
+    unverified_bots = []
+    kalshi_ok = bool(kalshi_auth_res and kalshi_auth_res.get("status") == "OK" and kalshi_auth_res.get("authenticated"))
+    live_bal = kalshi_auth_res.get("balance_cents") if kalshi_ok else None
 
     for bot in BOT_NAMES:
         risk_path = _risk_state_path(bot)
@@ -332,6 +427,16 @@ def check_balance_drawdown(actions: List[str]) -> dict:
             continue
         try:
             state = _load_json(risk_path)
+            if kalshi_ok:
+                state["exchange_auth_status"] = "ok"
+                state["balance_verified"] = True
+                if live_bal is not None and (state.get("current_balance_cents", 0) == 0):
+                    state["current_balance_cents"] = live_bal
+                _save_json(risk_path, state)
+            elif state.get("exchange_auth_status") in ("degraded", "unknown") or state.get("balance_verified") is False:
+                unverified_bots.append(bot)
+                continue
+
             balance = state.get("current_balance_cents", 0)
             peak = state.get("peak_balance_cents", 0)
 
@@ -355,6 +460,14 @@ def check_balance_drawdown(actions: List[str]) -> dict:
         except Exception as exc:
             info_parts.append(f"{bot} error: {exc}")
 
+    if unverified_bots:
+        return {
+            "status": "UNKNOWN",
+            "details": f"UNKNOWN — EXTERNAL DATA UNAVAILABLE (Unverified sensors on {', '.join(unverified_bots)})",
+            "verified": False,
+            "issues": [f"Unverified sensors for {b}" for b in unverified_bots],
+        }
+
     if issues:
         status = "WARNING"
         details = "Drawdown issues: " + "; ".join(issues)
@@ -364,7 +477,7 @@ def check_balance_drawdown(actions: List[str]) -> dict:
         status = "OK"
         details = "; ".join(info_parts) if info_parts else "All drawdowns within limits"
 
-    return {"status": status, "details": details, "issues": issues}
+    return {"status": status, "details": details, "issues": issues, "verified": True}
 
 
 # ---------------------------------------------------------------------------
@@ -512,11 +625,14 @@ def check_log_size(actions: List[str]) -> dict:
 def check_dead_bots() -> dict:
     issues = []
     ok_parts = []
+    running_bots = 0
+    stopped_bots = 0
 
     for bot in BOT_NAMES:
         st_path = _status_path(bot)
         if not st_path.exists():
             ok_parts.append(f"{bot}: no status file")
+            stopped_bots += 1
             continue
         try:
             status_data = _load_json(st_path)
@@ -525,36 +641,58 @@ def check_dead_bots() -> dict:
 
             if pid is None:
                 ok_parts.append(f"{bot}: no PID in status")
+                stopped_bots += 1
                 continue
 
             pid = int(pid)
             alive = False
             try:
-                os.kill(pid, 0)
-                alive = True
-            except (ProcessLookupError, OSError):
-                alive = False
-            except PermissionError:
-                alive = True  # exists but we can't signal it
+                import psutil
+                alive = psutil.pid_exists(pid)
+            except Exception:
+                try:
+                    os.kill(pid, 0)
+                    alive = True
+                except (ProcessLookupError, OSError):
+                    alive = False
+                except PermissionError:
+                    alive = True
 
             if reported_state == "running" and not alive:
                 issues.append(
                     f"{bot} PID {pid} is dead but status shows 'running'"
                 )
             elif alive:
+                running_bots += 1
                 ok_parts.append(f"{bot} PID {pid} alive")
             else:
+                stopped_bots += 1
                 ok_parts.append(f"{bot} PID {pid} not running (state={reported_state})")
 
         except Exception as exc:
             ok_parts.append(f"{bot} status check error: {exc}")
 
-    if issues:
+    if running_bots > 0 and issues:
         status = "CRITICAL"
         details = "Dead bots: " + "; ".join(issues)
-    else:
+    elif running_bots > 0:
         status = "OK"
-        details = "; ".join(ok_parts) if ok_parts else "All bots status OK"
+        details = f"{running_bots}/{len(BOT_NAMES)} bots running (" + "; ".join(ok_parts) + ")"
+    else:
+        # All bots are stopped; clean up any stale 'running' states in status files
+        for bot in BOT_NAMES:
+            st_p = _status_path(bot)
+            if st_p.exists():
+                try:
+                    s_data = _load_json(st_p)
+                    if s_data.get("state") == "running":
+                        s_data["state"] = "stopped"
+                        _write_json(st_p, s_data)
+                except Exception:
+                    pass
+        status = "NOT_APPLICABLE"
+        details = "NOT_APPLICABLE — Swarm is stopped (no active bot processes)"
+        issues = []
 
     return {"status": status, "details": details, "issues": issues}
 
@@ -656,6 +794,9 @@ def check_win_rates(recommendations: List[str]) -> Tuple[dict, Dict[str, dict]]:
     if warnings:
         status = "WARNING"
         details = "; ".join(warnings)
+    elif all(e.get("trades", 0) == 0 for e in bot_summary.values()):
+        status = "NOT_APPLICABLE"
+        details = "NOT_APPLICABLE — No closed trades yet"
     else:
         status = "OK"
         details = "; ".join(info_parts) if info_parts else "All win rates within normal range"
@@ -703,9 +844,10 @@ def check_memory_usage() -> dict:
             max_usage = max(usage.values())
             max_proc = max(usage, key=usage.get)
             details = f"Max usage: {max_proc} {max_usage:.0f}MB"
+            status = "OK"
         else:
-            details = "No target processes found to measure"
-        status = "OK"
+            details = "NOT_APPLICABLE — No active swarm processes"
+            status = "NOT_APPLICABLE"
 
     return {"status": status, "details": details, "usage_mb": usage}
 
@@ -872,6 +1014,26 @@ def check_bot_db_freshness() -> dict:
     Also verifies the bot DB file itself exists and is readable.
     """
     import time
+
+    # Check if swarm processes are running first
+    swarm_running = False
+    if _PSUTIL:
+        targets = ["swarm_daemon.py", "run_swarm.py", "bot_runner"]
+        for proc in psutil.process_iter(["cmdline"]):
+            try:
+                cmdline = " ".join(proc.info["cmdline"] or [])
+                if any(t in cmdline for t in targets):
+                    swarm_running = True
+                    break
+            except Exception:
+                pass
+
+    if not swarm_running:
+        return {
+            "status": "NOT_APPLICABLE",
+            "details": "NOT_APPLICABLE — Swarm is stopped (bots inactive)",
+            "stale_bots": [],
+        }
 
     stale_threshold_secs = 3 * 3600  # 3 hours — bot should cycle at least once
     now_ts = time.time()
@@ -1121,10 +1283,24 @@ def check_learning_adaptation(recommendations: List[str]) -> dict:
 
 
 def _aggregate_status(checks: dict) -> str:
-    order = {"CRITICAL": 3, "WARNING": 2, "FIXED": 1, "INFO": 1, "OK": 0, "SKIP": 0}
+    order = {
+        "CRITICAL": 5,
+        "FAIL": 5,
+        "ERROR": 5,
+        "DEGRADED": 4,
+        "WARNING": 3,
+        "WARN": 3,
+        "UNKNOWN": 2,
+        "FIXED": 1,
+        "INFO": 1,
+        "OK": 0,
+        "PASS": 0,
+        "SKIP": 0,
+        "NOT_APPLICABLE": 0,
+    }
     worst = "OK"
     for check in checks.values():
-        s = check.get("status", "OK")
+        s = str(check.get("status", "OK") or "OK").upper()
         if order.get(s, 0) > order.get(worst, 0):
             worst = s
     if worst in ("FIXED", "INFO"):
@@ -1133,7 +1309,30 @@ def _aggregate_status(checks: dict) -> str:
 
 
 def _build_summary(checks: dict, actions: List[str], recommendations: List[str]) -> str:
-    parts = []
+    total = len(checks)
+    pass_cnt = sum(1 for c in checks.values() if str(c.get("status") or "").upper() in ("OK", "PASS", "FIXED"))
+    deg_cnt = sum(1 for c in checks.values() if str(c.get("status") or "").upper() in ("DEGRADED",))
+    unk_cnt = sum(1 for c in checks.values() if str(c.get("status") or "").upper() in ("UNKNOWN", "UNVERIFIED"))
+    na_cnt = sum(1 for c in checks.values() if str(c.get("status") or "").upper() in ("NOT_APPLICABLE", "SKIP"))
+    fail_cnt = sum(
+        1
+        for c in checks.values()
+        if str(c.get("status") or "").upper() in ("CRITICAL", "FAIL", "ERROR", "WARNING", "WARN")
+    )
+
+    status_parts = [f"{pass_cnt}/{total} Checks Nominal"]
+    if deg_cnt:
+        status_parts.append(f"{deg_cnt} DEGRADED")
+    if unk_cnt:
+        status_parts.append(f"{unk_cnt} UNKNOWN")
+    if na_cnt:
+        status_parts.append(f"{na_cnt} STANDBY/N/A")
+    if fail_cnt:
+        status_parts.append(f"{fail_cnt} ISSUES")
+
+    summary_headline = " | ".join(status_parts)
+
+    parts = [summary_headline]
     if actions:
         parts.append(f"{len(actions)} fix(es) applied")
     if recommendations:
@@ -1147,8 +1346,6 @@ def _build_summary(checks: dict, actions: List[str], recommendations: List[str])
     if win_warnings:
         parts.append(f"Win rate issues: {len(win_warnings)} bot(s)")
 
-    if not parts:
-        return "All systems healthy, no issues detected"
     return ", ".join(parts)
 
 
@@ -1169,7 +1366,7 @@ def run_health_check() -> dict:
     checks: Dict[str, dict] = {}
 
     # --- Check 1: Stale trades ---
-    print("[health_check] Check 1/12: Stale trades...")
+    print("[health_check] Check 1/16: Stale trades...")
     try:
         checks["stale_trades"] = check_stale_trades(actions)
     except Exception as exc:
@@ -1181,7 +1378,7 @@ def run_health_check() -> dict:
         traceback.print_exc()
 
     # --- Check 2: Duplicate processes ---
-    print("[health_check] Check 2/12: Duplicate processes...")
+    print("[health_check] Check 2/16: Duplicate processes...")
     try:
         checks["duplicate_processes"] = check_duplicate_processes()
     except Exception as exc:
@@ -1191,7 +1388,7 @@ def run_health_check() -> dict:
         }
 
     # --- Check 3: P&L anomalies ---
-    print("[health_check] Check 3/12: P&L anomalies...")
+    print("[health_check] Check 3/16: P&L anomalies...")
     try:
         checks["pnl_anomalies"] = check_pnl_anomalies()
     except Exception as exc:
@@ -1200,18 +1397,31 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 4: Balance & drawdown ---
-    print("[health_check] Check 4/12: Balance & drawdown...")
+    # --- Check 4: Kalshi API authentication & connectivity sensor ---
+    print("[health_check] Check 4/16: Kalshi auth & connectivity...")
     try:
-        checks["balance_drawdown"] = check_balance_drawdown(actions)
+        checks["kalshi_auth"] = check_kalshi_auth_connectivity(cfg)
+        if checks["kalshi_auth"]["status"] == "DEGRADED":
+            recommendations.append("Kalshi Auth: " + checks["kalshi_auth"]["details"])
+    except Exception as exc:
+        checks["kalshi_auth"] = {
+            "status": "DEGRADED",
+            "details": f"Kalshi auth check error: {exc}",
+            "authenticated": False,
+        }
+
+    # --- Check 5: Balance & drawdown (depends on external sensor) ---
+    print("[health_check] Check 5/16: Balance & drawdown...")
+    try:
+        checks["balance_drawdown"] = check_balance_drawdown(actions, kalshi_auth_res=checks.get("kalshi_auth"))
     except Exception as exc:
         checks["balance_drawdown"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 5: Config consistency ---
-    print("[health_check] Check 5/12: Config consistency...")
+    # --- Check 6: Config consistency ---
+    print("[health_check] Check 6/16: Config consistency...")
     try:
         checks["config_consistency"] = check_config_consistency(cfg)
     except Exception as exc:
@@ -1220,8 +1430,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 6: DB integrity ---
-    print("[health_check] Check 6/12: Database integrity...")
+    # --- Check 7: DB integrity ---
+    print("[health_check] Check 7/16: Database integrity...")
     try:
         checks["db_integrity"] = check_db_integrity()
     except Exception as exc:
@@ -1230,8 +1440,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 7: Log size ---
-    print("[health_check] Check 7/12: Log sizes...")
+    # --- Check 8: Log size ---
+    print("[health_check] Check 8/16: Log sizes...")
     try:
         checks["log_size"] = check_log_size(actions)
     except Exception as exc:
@@ -1240,8 +1450,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 8: Dead bots ---
-    print("[health_check] Check 8/12: Dead bot detection...")
+    # --- Check 9: Dead bots ---
+    print("[health_check] Check 9/16: Dead bot detection...")
     try:
         checks["dead_bots"] = check_dead_bots()
     except Exception as exc:
@@ -1250,8 +1460,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 9: Win rates (also builds bot_summary) ---
-    print("[health_check] Check 9/12: Win rates...")
+    # --- Check 10: Win rates (also builds bot_summary) ---
+    print("[health_check] Check 10/16: Win rates...")
     bot_summary: Dict[str, dict] = {}
     try:
         win_check, bot_summary = check_win_rates(recommendations)
@@ -1263,8 +1473,8 @@ def run_health_check() -> dict:
         }
         traceback.print_exc()
 
-    # --- Check 10: Memory usage ---
-    print("[health_check] Check 10/12: Memory usage...")
+    # --- Check 11: Memory usage ---
+    print("[health_check] Check 11/16: Memory usage...")
     try:
         checks["memory"] = check_memory_usage()
     except Exception as exc:
@@ -1273,8 +1483,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 11: Dashboard alive ---
-    print("[health_check] Check 11/12: Dashboard alive...")
+    # --- Check 12: Dashboard alive ---
+    print("[health_check] Check 12/16: Dashboard alive...")
     try:
         checks["dashboard_alive"] = check_dashboard_alive()
     except Exception as exc:
@@ -1283,8 +1493,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 12: Bot DB freshness ---
-    print("[health_check] Check 12/13: Bot DB freshness...")
+    # --- Check 13: Bot DB freshness ---
+    print("[health_check] Check 13/16: Bot DB freshness...")
     try:
         checks["bot_db_freshness"] = check_bot_db_freshness()
     except Exception as exc:
@@ -1293,8 +1503,8 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 13: Central LLM health & guardrail progress ---
-    print("[health_check] Check 13/14: Central LLM health...")
+    # --- Check 14: Central LLM health & guardrail progress ---
+    print("[health_check] Check 14/16: Central LLM health...")
     try:
         checks["llm_health"] = check_llm_health(recommendations)
     except Exception as exc:
@@ -1303,22 +1513,20 @@ def run_health_check() -> dict:
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 14: Error storm detection ---
-    print("[health_check] Check 14/15: Error storm detection...")
+    # --- Check 15: Error storm detection ---
+    print("[health_check] Check 15/16: Error storm detection...")
     try:
         checks["error_storm"] = check_error_storm()
         if checks["error_storm"]["status"] == "CRITICAL":
-            recommendations.append(
-                "ERROR STORM: " + checks["error_storm"]["details"]
-            )
+            recommendations.append("ERROR STORM: " + checks["error_storm"]["details"])
     except Exception as exc:
         checks["error_storm"] = {
             "status": "WARNING",
             "details": f"Check failed: {exc}",
         }
 
-    # --- Check 15: Demo trading learning & calibration ---
-    print("[health_check] Check 15/15: Demo learning & calibration radar...")
+    # --- Check 16: Demo trading learning & calibration ---
+    print("[health_check] Check 16/16: Demo learning & calibration radar...")
     try:
         checks["demo_learning"] = check_learning_adaptation(recommendations)
     except Exception as exc:

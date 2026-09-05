@@ -326,18 +326,19 @@ def calculate_central_llm_learning(data_dir: Path = DATA_DIR) -> Dict[str, Any]:
     approved = sum(1 for r in rows if str(r.get("decision", "")).lower() in ("approve", "approved"))
     rejected = total - approved
 
-    # Check red flags
+    # Check red flags on rejected decisions (true rejection drivers)
     red_flag_counts = defaultdict(int)
     for r in rows:
-        flags_raw = r.get("red_flags")
-        if flags_raw:
-            try:
-                flags = json.loads(flags_raw) if isinstance(flags_raw, str) else flags_raw
-                if isinstance(flags, list):
-                    for f in flags:
-                        red_flag_counts[str(f)] += 1
-            except Exception:
-                pass
+        if str(r.get("decision", "")).lower() not in ("approve", "approved"):
+            flags_raw = r.get("red_flags")
+            if flags_raw:
+                try:
+                    flags = json.loads(flags_raw) if isinstance(flags_raw, str) else flags_raw
+                    if isinstance(flags, list):
+                        for f in flags:
+                            red_flag_counts[str(f)] += 1
+                except Exception:
+                    pass
 
     sorted_flags = sorted(
         [{"flag": k, "count": v} for k, v in red_flag_counts.items()],

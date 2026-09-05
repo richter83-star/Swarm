@@ -223,11 +223,13 @@ class CentralLLMController:
                 return False
 
         quant_conf = float(trade_request.get("quant_confidence", 0.0))
-        floor = self._approval_confidence_floor(trade_request)
-        if quant_conf < floor:
+        # Pre-screen floor: allow viable quant signals to proceed to research + LLM review.
+        # Do not apply post-research archetype/evidence quality checks here before research runs.
+        pre_screen_min = float(self.cfg.get("pre_screen_threshold", 58.0))
+        if quant_conf < pre_screen_min:
             logger.debug(
                 "pre_screen: %s rejected before research+LLM (conf=%.1f < floor=%.1f)",
-                trade_request.get("ticker", "?"), quant_conf, floor,
+                trade_request.get("ticker", "?"), quant_conf, pre_screen_min,
             )
             return False
         return True
@@ -389,24 +391,24 @@ class CentralLLMController:
 
         prompt = self._build_prompt(bot_name, trade_request)
         system_prompt = (
-            "You are the risk gatekeeper for a Kalshi prediction market trading swarm. "
-            "Your job is to catch genuinely bad trades — not to block every trade out of caution.\n\n"
+            "You are the risk and probability gatekeeper for a Kalshi prediction market trading swarm. "
+            "Your job is to evaluate market contracts, check real-world facts, and ensure trades have genuine positive expected value.\n\n"
             "KALSHI MECHANICS:\n"
             "- A YES contract pays 100¢ if the event happens, 0¢ if not.\n"
             "- A NO contract pays 100¢ if the event does NOT happen, 0¢ if it does.\n"
             "- When buying NO at price X cents: you risk X cents to gain (100-X) cents.\n"
-            "- The quant engine has already computed orderbook-derived edge and confidence scores.\n\n"
+            "- Quant confidence measures microstructure and model-estimated edge.\n\n"
             "APPROVAL CRITERIA — approve when ALL of these hold:\n"
-            "1. Quant confidence >= 65% (the model found real orderbook edge)\n"
-            "2. No critical red flags (no data corruption, no API errors, no impossible prices)\n"
-            "3. Entry price in reasonable range (20-85¢)\n"
-            "4. Absence of research is NOT a rejection reason — the quant signal alone is sufficient edge.\n\n"
-            "REJECT only when:\n"
-            "- Entry price is outside 10-90¢ range\n"
-            "- Spread is so wide the fill price would eliminate all edge\n"
-            "- Clear data corruption or impossibly large confidence delta\n"
-            "- Market is already resolved or near-instant expiry\n\n"
-            "When in doubt with quant_confidence >= 65%, APPROVE with reduced size_multiplier (0.5-0.8).\n\n"
+            "1. Quant confidence >= 65% (the model found plausible statistical/orderbook edge)\n"
+            "2. No critical red flags (no data corruption, no API errors, no stale or impossible prices)\n"
+            "3. Entry price in reasonable range (15-85¢)\n"
+            "4. Plausibility check: The trade direction makes fundamental sense relative to real-world likelihood.\n"
+            "5. If research evidence is present, it must support or not contradict the trade direction.\n\n"
+            "REJECT when:\n"
+            "- The trade is buying a cheap underdog (<35¢) on an unresearched sports/entertainment market with zero evidence\n"
+            "- Entry price is outside 10-90¢ range or spread eliminates all edge\n"
+            "- High quant confidence is contradicted by known real-world facts or zero supporting rationale\n"
+            "- Market is already resolved, expired, or data is corrupt\n\n"
             "Return ONLY valid JSON: "
             "{\"decision\": \"approve\"|\"reject\", \"confidence\": 0-100, "
             "\"size_multiplier\": 0.0-1.5, \"rationale\": \"...\", \"red_flags\": [\"...\"]}"
@@ -481,21 +483,23 @@ class CentralLLMController:
         prompt = self._build_prompt(bot_name, trade_request)
         system_prompt = (
             "You are the risk and probability gatekeeper for a Kalshi prediction market trading swarm. "
-            "Your job is to evaluate market contracts, check real-world facts, and decide whether a trade has positive edge.\n\n"
+            "Your job is to evaluate market contracts, check real-world facts, and decide whether a trade has positive expected value.\n\n"
             "KALSHI MECHANICS:\n"
             "- A YES contract pays 100¢ if the event happens, 0¢ if not.\n"
             "- A NO contract pays 100¢ if the event does NOT happen, 0¢ if it does.\n"
-            "- When buying NO at price X cents: you risk X cents to gain (100-X) cents.\n\n"
+            "- When buying NO at price X cents: you risk X cents to gain (100-X) cents.\n"
+            "- Quant confidence measures microstructure and model-estimated edge.\n\n"
             "APPROVAL CRITERIA — approve when ALL of these hold:\n"
-            "1. Quant confidence >= 65% (the model found real orderbook edge)\n"
-            "2. No critical red flags (no data corruption, no API errors, no impossible prices)\n"
-            "3. Entry price in reasonable range (20-85¢)\n"
-            "4. Absence of research is NOT a rejection reason — the quant signal alone is sufficient edge.\n\n"
-            "REJECT only when:\n"
-            "- Entry price is outside 10-90¢ range\n"
-            "- Spread is so wide the fill price would eliminate all edge\n"
-            "- Clear data corruption or impossibly large confidence delta\n"
-            "- Market is already resolved or near-instant expiry\n\n"
+            "1. Quant confidence >= 65% (the model found plausible statistical/orderbook edge)\n"
+            "2. No critical red flags (no data corruption, no API errors, no stale or impossible prices)\n"
+            "3. Entry price in reasonable range (15-85¢)\n"
+            "4. Plausibility check: The trade direction makes fundamental sense relative to real-world likelihood.\n"
+            "5. If research evidence is present, it must support or not contradict the trade direction.\n\n"
+            "REJECT when:\n"
+            "- The trade is buying a cheap underdog (<35¢) on an unresearched sports/entertainment market with zero evidence\n"
+            "- Entry price is outside 10-90¢ range or spread eliminates all edge\n"
+            "- High quant confidence is contradicted by known real-world facts or zero supporting rationale\n"
+            "- Market is already resolved, expired, or data is corrupt\n\n"
             "Return ONLY valid JSON matching this schema:\n"
             "{\"decision\": \"approve\"|\"reject\", \"confidence\": 0-100, \"size_multiplier\": 0.0-1.5, \"rationale\": \"...\", \"red_flags\": [\"...\"]}"
         )
@@ -556,6 +560,18 @@ class CentralLLMController:
         approval_floor = self._approval_confidence_floor(trade_request)
         max_flags = int(self.cfg.get("max_red_flags", 2))
 
+        # Evidence quality and archetype checks
+        evidence_quality = trade_request.get("evidence_quality")
+        price = 0.0
+        try:
+            price = float(trade_request.get("suggested_price", 0) or 0)
+        except Exception:
+            price = 0.0
+
+        if (evidence_quality is None or float(evidence_quality) < 0.2) and (0 < price <= 35.0):
+            if "unresearched_underdog" not in red_flags:
+                red_flags = list(red_flags) + ["unresearched_underdog"]
+
         if decision == "approve" and confidence < approval_floor:
             decision = "reject"
             rationale = (
@@ -575,9 +591,18 @@ class CentralLLMController:
             decision = "reject"
             rationale = f"{rationale} | size_multiplier was 0.0."
 
-        # Evidence quality guardrail: reduce size when evidence is weak.
-        evidence_quality = trade_request.get("evidence_quality")
         if (
+            decision == "approve"
+            and (evidence_quality is None or float(evidence_quality) < 0.2)
+            and (0 < price <= 30.0)
+            and confidence < 85.0
+        ):
+            decision = "reject"
+            rationale = (
+                f"{rationale} | Auto-rejected by unresearched underdog guardrail "
+                f"(price={price:.1f}¢, evidence_quality={evidence_quality}, confidence={confidence:.1f} < 85.0)."
+            )
+        elif (
             decision == "approve"
             and evidence_quality is not None
             and float(evidence_quality) < 0.5
@@ -627,6 +652,9 @@ class CentralLLMController:
             floor = max(floor, float(self.cfg.get("wide_spread_confidence_floor", 80.0)))
         if 0 < price <= float(self.cfg.get("longshot_price_threshold_cents", 10.0)):
             floor = max(floor, float(self.cfg.get("longshot_confidence_floor", 80.0)))
+        ev_qual = trade_request.get("evidence_quality")
+        if (ev_qual is None or float(ev_qual) < 0.2) and (0 < price <= 35.0):
+            floor = max(floor, 85.0)
         return max(0.0, min(100.0, floor))
 
     def _init_db(self) -> None:

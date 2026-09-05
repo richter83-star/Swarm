@@ -193,7 +193,10 @@ class MarketScanner:
         )
 
         opportunities: List[MarketOpportunity] = []
+        inter_ticker_delay = float(self.cfg.get("scanner_inter_ticker_delay_seconds", 0.05))
         for ticker in candidate_tickers:
+            if inter_ticker_delay > 0:
+                time.sleep(inter_ticker_delay)
             market = self._get_market_cached(ticker, ttl_seconds=cache_ttl)
             if not market:
                 continue
