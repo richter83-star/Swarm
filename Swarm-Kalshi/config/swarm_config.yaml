@@ -141,9 +141,9 @@ llm_advisor:
 central_llm:
   enabled: true
   provider: gemini
-  gemini_model: gemini-2.5-flash
+  gemini_model: gemini-3.5-flash
   gemini_api_key: ''
-  model: gemini-2.5-flash
+  model: gemini-3.5-flash
   ollama_base_url: http://127.0.0.1:11434
   anthropic_api_url: https://api.anthropic.com/v1/messages
   anthropic_api_key: ''
