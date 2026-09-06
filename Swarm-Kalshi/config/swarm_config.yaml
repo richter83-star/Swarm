@@ -227,7 +227,7 @@ research:
   source_timeout_secs: 15
   max_content_length: 8000
   extraction_provider: gemini
-  extraction_model: gemini-2.5-flash
+  extraction_model: gemini-3.1-flash-lite
   llm_max_tokens: 2048
   extraction_api_key: ''
   primary_domains: {}
@@ -240,7 +240,7 @@ research:
   providers:
     gemini:
       enabled: true
-      model: gemini-2.5-flash
+      model: gemini-3.1-flash-lite
     tavily:
       enabled: false
       daily_credit_budget: 30
