@@ -263,6 +263,13 @@ class BotRunner:
         self._session_start = None
         self._last_backtest_date: Optional[datetime] = None
 
+        # Autonomous Supervisor live runtime overrides
+        self._runtime_overrides_file = self.project_root / "data" / "runtime_overrides.json"
+        self._quarantined_by_supervisor: bool = False
+        self._quarantine_reason: str = ""
+        self._category_throttles: Dict[str, float] = {}
+        self._refresh_runtime_overrides()
+
         # Restore pending trades from DB so outcome reconciliation continues
         # across restarts (required for continuous learning feedback).
         for row in self.learning.get_pending_trades():
@@ -680,6 +687,57 @@ class BotRunner:
             # Never block trade flow.
             logger.warning("MetaLearner pre-analysis hook failed: %s", exc)
 
+    def _refresh_runtime_overrides(self) -> None:
+        """Load dynamic supervisor overrides from data/runtime_overrides.json."""
+        if not getattr(self, "_runtime_overrides_file", None) or not self._runtime_overrides_file.exists():
+            return
+        try:
+            with open(self._runtime_overrides_file, "r", encoding="utf-8") as fh:
+                overrides = json.load(fh) or {}
+
+            # 1. Check if this bot is quarantined or paused by supervisor
+            quarantined = set(overrides.get("quarantined_bots", []))
+            bot_overrides = overrides.get("bot_overrides", {}).get(self.bot_name, {})
+            is_paused = (self.bot_name in quarantined) or bool(bot_overrides.get("paused", False))
+
+            if is_paused:
+                if not getattr(self, "_quarantined_by_supervisor", False):
+                    self._quarantined_by_supervisor = True
+                    self._quarantine_reason = str(bot_overrides.get("reason") or "Autonomous Supervisor Quarantine")
+                    logger.warning(
+                        "[Supervisor Override] Bot '%s' QUARANTINED: %s",
+                        self.bot_name,
+                        self._quarantine_reason,
+                    )
+            else:
+                if getattr(self, "_quarantined_by_supervisor", False):
+                    self._quarantined_by_supervisor = False
+                    self._quarantine_reason = ""
+                    logger.info("[Supervisor Override] Bot '%s' released from quarantine.", self.bot_name)
+
+            # 2. Dynamic elevated confidence threshold
+            elevated_conf = bot_overrides.get("min_confidence_threshold")
+            if elevated_conf is not None:
+                new_conf = float(elevated_conf)
+                if hasattr(self, "analysis") and hasattr(self.analysis, "cfg"):
+                    old_conf = float(self.analysis.cfg.get("min_confidence_threshold", 65))
+                    if abs(new_conf - old_conf) > 1e-3:
+                        self.analysis.cfg["min_confidence_threshold"] = new_conf
+                        logger.info(
+                            "[Supervisor Override] Dynamic confidence threshold for %s: %.1f -> %.1f",
+                            self.bot_name,
+                            old_conf,
+                            new_conf,
+                        )
+
+            # 3. Category throttles
+            self._category_throttles = {
+                str(k).lower(): float(v)
+                for k, v in overrides.get("category_throttles", {}).items()
+            }
+        except Exception as exc:
+            logger.debug("Failed reading runtime overrides (non-fatal): %s", exc)
+
     def _refresh_swarm_insights(self) -> None:
         """Reload cross-bot meta insights from the coordinator's JSON file."""
         try:
@@ -861,6 +919,18 @@ class BotRunner:
 
     def _run_cycle(self) -> None:
         """Single trading cycle with multi-signal execution."""
+        self._refresh_runtime_overrides()
+        if getattr(self, "_quarantined_by_supervisor", False):
+            reason = getattr(self, "_quarantine_reason", "Autonomous Quarantine")
+            logger.info(
+                "Bot '%s' is quarantined by Autonomous Supervisor (%s). Skipping trading cycle.",
+                self.bot_name,
+                reason,
+            )
+            self._set_status("paused", f"Quarantined: {reason}")
+            self.behavior.idle_wait()
+            return
+
         if not self.behavior.state.is_active:
             if self.behavior.should_start_session():
                 self.behavior.start_session()
@@ -1072,6 +1142,24 @@ class BotRunner:
         pre_human_count = trend_count
         count = self.behavior.vary_trade_size(pre_human_count)
         human_mult = float(count / max(1, pre_human_count))
+
+        # Apply dynamic supervisor category throttles (if defined in runtime overrides)
+        cat_key = str(getattr(signal, "category", "") or "").lower()
+        if hasattr(self, "_category_throttles") and cat_key in self._category_throttles:
+            cat_throttle = float(self._category_throttles[cat_key])
+            if cat_throttle <= 0.0:
+                logger.info(
+                    "Supervisor category throttle rejected %s %s on %s: category '%s' is paused (multiplier=0.0).",
+                    signal.action, signal.side, signal.ticker, cat_key,
+                )
+                self.behavior.record_action(traded=False)
+                return
+            elif abs(cat_throttle - 1.0) > 1e-3:
+                count = max(1, int(count * cat_throttle))
+                logger.info(
+                    "Applied supervisor category throttle to %s [%s]: multiplier=%.2f, adjusted count=%d",
+                    signal.ticker, cat_key, cat_throttle, count,
+                )
         # Pre-screen locally before burning Tavily (research) + Anthropic (LLM) credits.
         # Rejects candidates whose quant confidence falls below the archetype-aware floor
         # (low volume, wide spread, longshot price) — these would be auto-rejected after

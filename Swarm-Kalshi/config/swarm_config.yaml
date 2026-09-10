@@ -1,198 +1,153 @@
 api:
-  key_id: 6f43cd14-8d6e-430a-9bb7-1fef7d39592f
-  private_key_path: keys/kalshi-private.key
   base_url: https://api.elections.kalshi.com/trade-api/v2
   demo_mode: true
-  rate_limit_per_second: 2.5
+  key_id: 6f43cd14-8d6e-430a-9bb7-1fef7d39592f
   min_request_interval: 0.35
-swarm:
-  unassigned_market_bot: vanguard
-  global_daily_loss_limit_cents: 15000
-  global_exposure_limit_cents: 50000
-  health_check_interval: 30
-  max_restart_attempts: 3
-  restart_cooldown_seconds: 60
-  portfolio_counts_ttl_seconds: 30
-  market_status_cache_ttl_seconds: 120
-  conflict_db_path: data/conflict_claims.db
-  stale_claim_hours: 24
+  private_key_path: keys/kalshi-private.key
+  rate_limit_per_second: 2.5
 auto_scale:
+  demote_drawdown_above_pct: 10.0
+  demote_roi_below_pct: -0.5
+  demote_sharpe_below: -0.05
+  demote_step_pct: 5.0
+  demote_total_pnl_below_cents: -100
+  demote_win_rate_below_pct: 48.0
   enabled: true
   evaluation_interval_seconds: 300
-  min_trades_for_scoring: 20
-  promote_step_pct: 2.5
-  demote_step_pct: 5.0
-  min_change_to_apply_pct: 0.5
-  min_allocation_pct: 10.0
   max_allocation_pct: 40.0
-  promote_min_win_rate_pct: 56.0
+  min_allocation_pct: 10.0
+  min_change_to_apply_pct: 0.5
+  min_trades_for_scoring: 20
+  promote_max_drawdown_pct: 6.0
   promote_min_roi_pct: 0.8
   promote_min_sharpe: 0.08
   promote_min_total_pnl_cents: 100
-  promote_max_drawdown_pct: 6.0
+  promote_min_win_rate_pct: 56.0
+  promote_step_pct: 2.5
   require_can_trade_for_promotion: true
-  demote_win_rate_below_pct: 48.0
-  demote_roi_below_pct: -0.5
-  demote_sharpe_below: -0.05
-  demote_total_pnl_below_cents: -100
-  demote_drawdown_above_pct: 10.0
-trading:
-  default_order_type: limit
-  min_confidence_threshold: 60
-  min_edge_cents: 0.4
-  min_liquidity_cents: 1500
-  min_volume_24h: 100
-  min_hours_to_expiry: 2
-  max_hours_to_expiry: 240
-  max_position_pct: 0.04
-  demo_bankroll_cents: 10000
-  max_open_positions: 3
-  open_positions_scope: per_bot
-  max_trades_per_day: 50
-  daily_loss_limit_cents: 2500
-  min_balance_cents: 100
-  max_drawdown_pct: 0.1
-  loss_streak_threshold: 4
-  loss_streak_size_multiplier: 0.5
-  limit_spread_buffer_cents: 1
-  max_signals_per_cycle: 10
-  max_entry_price_cents: 80
-  min_entry_price_cents: 15
-  market_scan_max_pages: 50
-  scan_mode: recent_focus
-  recent_trade_seed_pages: 1
-  recent_trade_seed_page_size: 200
-  recent_trade_seed_top_tickers: 35
-  scanner_inter_ticker_delay_seconds: 0.08
-  market_cache_ttl_seconds: 180
-  focus_min_liquidity_cents: 1500
-  focus_min_volume_24h: 300
-  focus_min_open_interest: 25
-  focus_min_recent_trades: 1
-  recent_activity_max_age_hours: 24
-  focus_max_hours_to_expiry: 240
-  stale_trade_hours: 48
-  exit_loss_threshold_cents: -20
-  auto_pause_on_consecutive_losses: 6
-  auto_pause_resume_hours: 12
-risk:
-  daily_loss_limit_cents: 2500
-  max_drawdown_pct: 0.1
-  drawdown_pause_cooldown_minutes: 60
-  min_trades_before_drawdown: 5
-  drawdown_auto_reset_peak_after_cooldown: true
-  drawdown_auto_reset_requires_flat_positions: false
-  drawdown_cooldown_extend_minutes: 15
-  drawdown_reentry_buffer_pct: 0.02
-  risk_block_log_throttle_seconds: 30
-  loss_streak_threshold: 4
-  loss_streak_size_multiplier: 0.5
-learning:
-  db_path: data/swarm_learning.db
-  rolling_window: 50
-  min_trades_for_review: 10
-  learning_rate: 0.03
-  decay_factor: 0.96
-  min_confidence_threshold: 60
-human_behavior:
-  action_delay_mean: 8.0
-  action_delay_std: 3.0
-  action_delay_min: 2.0
-  action_delay_max: 20.0
-  session_duration_min: 15
-  session_duration_max: 90
-  idle_period_min: 2
-  idle_period_max: 8
-  browse_without_trade_prob: 0.02
-  trade_size_min_multiplier: 0.6
-  trade_size_max_multiplier: 1.4
-mirofish:
-  enabled: false
-  api_url: ''
-  api_key: ''
-  cache_ttl_seconds: 300
-  timeout_seconds: 8
-  min_confidence: 45
-  weight: 0.0
-external_signals:
-  enabled: true
-  cache_ttl_seconds: 300
-  news_api_enabled: false
-  news_api_url: ''
-  news_api_key: ''
-  consensus_enabled: true
-  resolution_patterns_enabled: true
-  cross_reference_enabled: true
-  sentiment_weight: 0.15
-  consensus_weight: 0.25
-  resolution_pattern_weight: 0.2
-  cross_reference_weight: 0.15
-llm_advisor:
-  enabled: false
-  api_key: ''
-  model: gemini-2.5-flash
-  max_tokens: 150
-  temperature: 0.1
-  pre_screen_threshold: 60
-  llm_weight: 0.2
-  cache_ttl_seconds: 300
-  timeout_seconds: 10
-  max_calls_per_cycle: 5
-central_llm:
-  enabled: true
-  provider: gemini
-  gemini_model: gemini-3.5-flash
-  gemini_api_key: ''
-  model: gemini-3.5-flash
-  ollama_base_url: http://127.0.0.1:11434
-  anthropic_api_url: https://api.anthropic.com/v1/messages
-  anthropic_api_key: ''
-  anthropic_model: claude-3-5-haiku-latest
-  timeout_seconds: 20
-  min_approved_confidence: 60.0
-  max_red_flags: 4
-  default_size_multiplier: 1.0
-  fail_open: false
-  allow_quant_fallback_on_error: false
-  learning_enabled: true
-  adaptive_window: 40
-  adaptive_min_samples: 8
-  adaptive_cold_win_rate_pct: 42
-  adaptive_cold_avg_pnl_cents: -5
-  adaptive_reject_quant_floor: 60
-  adaptive_max_size_when_cold: 0.9
-  adaptive_hot_win_rate_pct: 58
-  adaptive_hot_avg_pnl_cents: 3
-  adaptive_size_boost: 1.1
-  adaptive_prompt_enabled: true
-  adaptive_prompt_window: 120
-  adaptive_prompt_min_samples: 6
-  adaptive_prompt_cold_win_rate_pct: 45
-  adaptive_prompt_cold_avg_pnl_cents: -3
-  adaptive_prompt_hot_win_rate_pct: 58
-  adaptive_prompt_hot_avg_pnl_cents: 3
-  adaptive_prompt_cold_size_cap: 0.7
-  adaptive_prompt_hot_size_boost: 1.1
-  adaptive_prompt_reject_quant_floor: 70
-  pre_screen_threshold: 58.0
-  approval_confidence_floor: 60.0
-  low_volume_threshold: 100.0
-  low_volume_confidence_floor: 65.0
-  wide_spread_threshold_cents: 10.0
-  wide_spread_confidence_floor: 65.0
-  longshot_price_threshold_cents: 12.0
-  longshot_confidence_floor: 70.0
-  db_path: data/central_llm_controller.db
 autonomous_mode:
-  enabled: true
   anthropic_only: false
-  require_llm_for_trade: false
   disable_local_llm_advisor: true
+  enabled: true
   llm_learning_enabled: true
   lock_manual_controls: false
-meta_learning:
+  require_llm_for_trade: false
+backtester:
+  auto_run_on_empty_db: false
+  backtest_batch_delay: 0.2
+  max_settled_markets: 200
+  min_volume_24h: 20
+  recalibrate_after: true
+central_llm:
+  adaptive_cold_avg_pnl_cents: -5
+  adaptive_cold_win_rate_pct: 42
+  adaptive_hot_avg_pnl_cents: 3
+  adaptive_hot_win_rate_pct: 58
+  adaptive_max_size_when_cold: 0.9
+  adaptive_min_samples: 8
+  adaptive_prompt_cold_avg_pnl_cents: -3
+  adaptive_prompt_cold_size_cap: 0.7
+  adaptive_prompt_cold_win_rate_pct: 45
+  adaptive_prompt_enabled: true
+  adaptive_prompt_hot_avg_pnl_cents: 3
+  adaptive_prompt_hot_size_boost: 1.1
+  adaptive_prompt_hot_win_rate_pct: 58
+  adaptive_prompt_min_samples: 6
+  adaptive_prompt_reject_quant_floor: 70
+  adaptive_prompt_window: 120
+  adaptive_reject_quant_floor: 60
+  adaptive_size_boost: 1.1
+  adaptive_window: 40
+  allow_quant_fallback_on_error: false
+  anthropic_api_key: ''
+  anthropic_api_url: https://api.anthropic.com/v1/messages
+  anthropic_model: claude-3-5-haiku-latest
+  approval_confidence_floor: 60.0
+  db_path: data/central_llm_controller.db
+  default_size_multiplier: 1.0
   enabled: true
-  min_confidence_to_apply: 0.7
+  fail_open: false
+  gemini_api_key: ''
+  gemini_model: gemini-3.5-flash
+  learning_enabled: true
+  longshot_confidence_floor: 70.0
+  longshot_price_threshold_cents: 12.0
+  low_volume_confidence_floor: 65.0
+  low_volume_threshold: 100.0
+  max_red_flags: 4
+  min_approved_confidence: 60.0
+  model: gemini-3.5-flash
+  ollama_base_url: http://127.0.0.1:11434
+  pre_screen_threshold: 58.0
+  provider: gemini
+  timeout_seconds: 20
+  wide_spread_confidence_floor: 65.0
+  wide_spread_threshold_cents: 10.0
+dashboard:
+  auth:
+    enabled: false
+    password: ''
+    username: admin
+  host: 0.0.0.0
+  port: 8888
+  refresh_interval_seconds: 15
+external_signals:
+  cache_ttl_seconds: 300
+  consensus_enabled: true
+  consensus_weight: 0.25
+  cross_reference_enabled: true
+  cross_reference_weight: 0.15
+  enabled: true
+  news_api_enabled: false
+  news_api_key: ''
+  news_api_url: ''
+  resolution_pattern_weight: 0.2
+  resolution_patterns_enabled: true
+  sentiment_weight: 0.15
+human_behavior:
+  action_delay_max: 20.0
+  action_delay_mean: 8.0
+  action_delay_min: 2.0
+  action_delay_std: 3.0
+  browse_without_trade_prob: 0.02
+  idle_period_max: 8
+  idle_period_min: 2
+  session_duration_max: 90
+  session_duration_min: 15
+  trade_size_max_multiplier: 1.4
+  trade_size_min_multiplier: 0.6
+learning:
+  db_path: data/swarm_learning.db
+  decay_factor: 0.96
+  learning_rate: 0.03
+  min_confidence_threshold: 60
+  min_trades_for_review: 10
+  rolling_window: 50
+llm_advisor:
+  api_key: ''
+  cache_ttl_seconds: 300
+  enabled: false
+  llm_weight: 0.2
+  max_calls_per_cycle: 5
+  max_tokens: 150
+  model: gemini-2.5-flash
+  pre_screen_threshold: 60
+  temperature: 0.1
+  timeout_seconds: 10
+logging:
+  backup_count: 5
+  file: logs/swarm.log
+  level: INFO
+  max_bytes: 10485760
+meta_evolver:
+  allow_file_writes: false
+  allow_self_rewrite: false
+  enabled: true
+  immutable_agents:
+  - GovernorAgent
+  - MetaEvolverAgent
+  mutation_rate: 0.3
+meta_learning:
   domains:
   - sports
   - politics
@@ -200,80 +155,125 @@ meta_learning:
   - economics
   - weather
   - entertainment
-meta_evolver:
   enabled: true
-  mutation_rate: 0.3
-  immutable_agents:
-  - GovernorAgent
-  - MetaEvolverAgent
-  allow_file_writes: false
-  allow_self_rewrite: false
-backtester:
-  max_settled_markets: 200
-  min_volume_24h: 20
-  auto_run_on_empty_db: false
-  recalibrate_after: true
-  backtest_batch_delay: 0.2
+  min_confidence_to_apply: 0.7
+mirofish:
+  api_key: ''
+  api_url: ''
+  cache_ttl_seconds: 300
+  enabled: false
+  min_confidence: 45
+  timeout_seconds: 8
+  weight: 0.0
+position_sizing:
+  kelly_fraction: 0.2
+  max_position_pct: 0.04
+  method: fractional_kelly
+  min_position_cents: 100
 prior_knowledge:
-  prior_strength: 10
   blend_with_observed: true
+  prior_strength: 10
 research:
+  blocked_domains: []
+  cache_ttl_hours: 24
+  content_fetch_top_n: 3
   enabled: true
-  search_provider: gemini
+  extraction_api_key: ''
+  extraction_model: gemini-3.1-flash-lite
+  extraction_provider: gemini
+  fetch_full_content: true
+  llm_max_tokens: 2048
+  max_content_length: 8000
   max_queries: 3
   max_sources: 4
-  fetch_full_content: true
-  content_fetch_top_n: 3
-  source_timeout_secs: 15
-  max_content_length: 8000
-  extraction_provider: gemini
-  extraction_model: gemini-3.1-flash-lite
-  llm_max_tokens: 2048
-  extraction_api_key: ''
-  primary_domains: {}
-  secondary_domains: []
-  blocked_domains: []
-  min_researchability_score: 45
-  search_timeout_seconds: 25
-  cache_ttl_hours: 24
   min_evidence_quality: 0.3
+  min_researchability_score: 45
+  primary_domains: {}
   providers:
+    duckduckgo:
+      enabled: true
     gemini:
       enabled: true
       model: gemini-3.1-flash-lite
-    tavily:
-      enabled: false
-      daily_credit_budget: 30
-      search_depth: basic
     serpapi:
       enabled: false
-    duckduckgo:
-      enabled: true
-position_sizing:
-  method: fractional_kelly
-  kelly_fraction: 0.2
-  min_position_cents: 100
-  max_position_pct: 0.04
-logging:
-  level: INFO
-  file: logs/swarm.log
-  max_bytes: 10485760
-  backup_count: 5
-dashboard:
-  host: 0.0.0.0
-  port: 8888
-  auth:
-    enabled: false
-    username: admin
-    password: ''
-  refresh_interval_seconds: 15
+    tavily:
+      daily_credit_budget: 30
+      enabled: false
+      search_depth: basic
+  search_provider: gemini
+  search_timeout_seconds: 25
+  secondary_domains: []
+  source_timeout_secs: 15
+risk:
+  daily_loss_limit_cents: 2500
+  drawdown_auto_reset_peak_after_cooldown: true
+  drawdown_auto_reset_requires_flat_positions: false
+  drawdown_cooldown_extend_minutes: 15
+  drawdown_pause_cooldown_minutes: 60
+  drawdown_reentry_buffer_pct: 0.02
+  loss_streak_size_multiplier: 0.5
+  loss_streak_threshold: 4
+  max_drawdown_pct: 0.1
+  min_trades_before_drawdown: 5
+  risk_block_log_throttle_seconds: 30
 supervisor:
+  auto_quarantine_unknown_sports: true
+  auto_remediation_enabled: true
+  cold_category_throttle_multiplier: 0.5
+  cold_category_win_rate_threshold: 40.0
   enabled: true
   interval_minutes: 15
-  auto_remediation_enabled: true
   max_consecutive_losses_trigger: 2
   min_category_sample_size: 4
-  cold_category_win_rate_threshold: 40.0
-  cold_category_throttle_multiplier: 0.5
-  auto_quarantine_unknown_sports: true
   stale_trade_max_age_hours: 48.0
+swarm:
+  conflict_db_path: data/conflict_claims.db
+  global_daily_loss_limit_cents: 15000
+  global_exposure_limit_cents: 50000
+  health_check_interval: 30
+  market_status_cache_ttl_seconds: 120
+  max_restart_attempts: 3
+  portfolio_counts_ttl_seconds: 30
+  restart_cooldown_seconds: 60
+  stale_claim_hours: 24
+  unassigned_market_bot: vanguard
+trading:
+  auto_pause_on_consecutive_losses: 6
+  auto_pause_resume_hours: 12
+  daily_loss_limit_cents: 2500
+  default_order_type: limit
+  demo_bankroll_cents: 10000
+  exit_loss_threshold_cents: -20
+  focus_max_hours_to_expiry: 240
+  focus_min_liquidity_cents: 1500
+  focus_min_open_interest: 25
+  focus_min_recent_trades: 1
+  focus_min_volume_24h: 300
+  limit_spread_buffer_cents: 1
+  loss_streak_size_multiplier: 0.5
+  loss_streak_threshold: 4
+  market_cache_ttl_seconds: 180
+  market_scan_max_pages: 50
+  max_drawdown_pct: 0.1
+  max_entry_price_cents: 80
+  max_hours_to_expiry: 240
+  max_open_positions: 3
+  max_position_pct: 0.04
+  max_signals_per_cycle: 10
+  max_trades_per_day: 50
+  min_balance_cents: 100
+  min_confidence_threshold: 60
+  min_edge_cents: 0.4
+  min_entry_price_cents: 15
+  min_hours_to_expiry: 2
+  min_liquidity_cents: 1500
+  min_volume_24h: 100
+  open_positions_scope: per_bot
+  recent_activity_max_age_hours: 24
+  recent_trade_seed_page_size: 200
+  recent_trade_seed_pages: 1
+  recent_trade_seed_top_tickers: 35
+  scan_mode: recent_focus
+  scanner_inter_ticker_delay_seconds: 0.08
+  stale_trade_hours: 48

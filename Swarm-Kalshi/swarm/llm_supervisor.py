@@ -62,6 +62,11 @@ class LLMSupervisor:
         "cold_category_throttle_multiplier": 0.50,
         "auto_quarantine_unknown_sports": True,
         "stale_trade_max_age_hours": 48.0,
+        "auto_quarantine_severe_drag": True,
+        "severe_drag_win_rate_threshold": 20.0,
+        "severe_drag_min_trades": 5,
+        "severe_drag_action": "quarantine",
+        "elevated_confidence_threshold": 75.0,
     }
 
     def __init__(
@@ -111,8 +116,26 @@ class LLMSupervisor:
             conn.commit()
 
     # ------------------------------------------------------------------
-    # Data Collection Methods
+    # Data Collection & Normalization Methods
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _infer_category(ticker: str, current_cat: Optional[str] = None) -> str:
+        """Infer or normalize market category from ticker symbol if missing or generic."""
+        if current_cat and str(current_cat).strip() and str(current_cat).strip().lower() not in ("unknown", "none", ""):
+            return str(current_cat).strip().lower()
+        t = str(ticker or "").upper()
+        if any(p in t for p in ("LOL", "CSGO", "VAL", "LEAGUE", "NFL", "NBA", "MLB", "SOCCER", "TENNIS", "UFC", "EPL", "MLS", "ADVANCE")):
+            return "sports"
+        if any(p in t for p in ("HYPE", "XRP", "SOL", "ZEC", "BTC", "ETH", "DOGE", "CRYPTO")):
+            return "crypto"
+        if any(p in t for p in ("WTI", "GAS", "AAA", "OIL", "CPI", "FED", "RATE", "INFLATION", "JOBS", "GDP")):
+            return "economics"
+        if any(p in t for p in ("WEATHER", "TEMP", "RAIN", "SNOW", "HURRICANE", "HIGH", "LOW")):
+            return "weather"
+        if any(p in t for p in ("POLITICS", "PRESIDENT", "SENATE", "HOUSE", "CONGRESS", "ELECTION")):
+            return "politics"
+        return "unknown"
 
     def _get_all_bot_trades(self) -> Dict[str, List[Dict[str, Any]]]:
         """Read all trades from bot databases."""
@@ -211,16 +234,37 @@ class LLMSupervisor:
             category_performance: Dict[str, Dict[str, Any]] = defaultdict(
                 lambda: {"wins": 0, "losses": 0, "expired": 0, "breakeven": 0, "total": 0, "pnl_cents": 0}
             )
+            bot_performance: Dict[str, Dict[str, Any]] = {}
+            bot_categories: Dict[str, Set[str]] = defaultdict(set)
 
             for bot_name, trades in trades_by_bot.items():
                 settled = [t for t in trades if t.get("outcome") not in ("pending", None)]
                 all_settled_trades.extend(settled)
                 wins = sum(1 for t in settled if t.get("outcome") == "win")
                 losses = sum(1 for t in settled if t.get("outcome") == "loss")
+                expired = sum(1 for t in settled if t.get("outcome") == "expired")
+                breakeven = sum(1 for t in settled if t.get("outcome") == "breakeven")
+                bot_pnl = sum(int(t.get("pnl_cents") or 0) for t in settled)
+                decided = wins + losses
                 total_settled = len(settled)
+                decided_wr = (wins / decided) * 100.0 if decided > 0 else None
+
+                bot_performance[bot_name] = {
+                    "wins": wins,
+                    "losses": losses,
+                    "expired": expired,
+                    "breakeven": breakeven,
+                    "decided": decided,
+                    "total": total_settled,
+                    "pnl_cents": bot_pnl,
+                    "win_rate": round(decided_wr, 1) if decided_wr is not None else 0.0,
+                }
 
                 for t in settled:
-                    cat = (t.get("category") or "unknown").lower().strip()
+                    raw_cat = t.get("category")
+                    ticker = t.get("ticker") or ""
+                    cat = self._infer_category(ticker, raw_cat)
+                    bot_categories[bot_name].add(cat)
                     outcome = str(t.get("outcome") or "").lower()
                     pnl = int(t.get("pnl_cents") or 0)
                     category_performance[cat]["total"] += 1
@@ -234,56 +278,162 @@ class LLMSupervisor:
                     else:
                         category_performance[cat]["breakeven"] += 1
 
-                if total_settled >= 5:
-                    win_rate = (wins / total_settled) * 100.0
-                    if win_rate < 40.0:
+            # --- 2. Category Performance & Auto-Throttling ---
+            cold_threshold = float(self.cfg.get("cold_category_win_rate_threshold", 40.0))
+            min_sample = int(self.cfg.get("min_category_sample_size", 4))
+            throttle_mult = float(self.cfg.get("cold_category_throttle_multiplier", 0.50))
+            flagged_categories_set: Set[str] = set()
+            quarantined_bots: List[str] = []
+            bot_overrides: Dict[str, Dict[str, Any]] = {}
+            category_throttles: Dict[str, float] = {}
+
+            for cat, stats in category_performance.items():
+                decided = stats["wins"] + stats["losses"]
+                cat_pnl = stats["pnl_cents"]
+                # True quantitative math: win rate is strictly wins / decided
+                win_rate = (stats["wins"] / max(1, decided)) * 100.0 if decided > 0 else 0.0
+
+                # Flag sub-par categories only if decided sample is sufficient, win rate is low, AND category is losing money
+                if decided >= min_sample and win_rate < cold_threshold and cat_pnl < 0:
+                    flagged_categories_set.add(cat)
+                    category_throttles[cat] = throttle_mult
+                    action_desc = None
+                    if self.cfg.get("auto_remediation_enabled", True):
+                        action_desc = f"Auto-throttled {cat} position sizing to {throttle_mult:.2f}x"
+                        auto_remediations.append({
+                            "type": "category_throttle",
+                            "category": cat,
+                            "win_rate": round(win_rate, 1),
+                            "multiplier": throttle_mult,
+                            "applied_at": now_utc,
+                        })
+
+                    findings.append(
+                        SupervisorFinding(
+                            category="decision_quality",
+                            severity="warning",
+                            title=f"Sub-par Category Performance: '{cat}'",
+                            description=(
+                                f"Category '{cat}' win rate is {win_rate:.1f}% across {decided} decided contracts "
+                                f"(PnL: {cat_pnl:+d}¢)."
+                            ),
+                            auto_action_taken=action_desc,
+                            recommended_action="Maintain reduced sizing until positive calibration recovers.",
+                        )
+                    )
+                elif decided == 0 and stats["expired"] >= 10:
+                    # Informational notice about zero-loss expired limit orders; not a warning deduction
+                    findings.append(
+                        SupervisorFinding(
+                            category="system_health",
+                            severity="info",
+                            title=f"High Contract Expiration Rate in '{cat}'",
+                            description=(
+                                f"Category '{cat}' had {stats['expired']} contracts expire without fills/decisions "
+                                f"(PnL: {cat_pnl:+d}¢). Capital preserved (0 losses)."
+                            ),
+                            auto_action_taken=None,
+                            recommended_action="Review limit order pricing and settlement timing.",
+                        )
+                    )
+
+            # --- Evaluate Bot Calibration (Deduplicating Category Overlaps & Severe Drag Quarantine) ---
+            severe_drag_enabled = bool(self.cfg.get("auto_quarantine_severe_drag", True))
+            severe_thresh = float(self.cfg.get("severe_drag_win_rate_threshold", 20.0))
+            severe_min = int(self.cfg.get("severe_drag_min_trades", 5))
+            severe_action = str(self.cfg.get("severe_drag_action", "quarantine")).lower()
+            elevated_conf = float(self.cfg.get("elevated_confidence_threshold", 75.0))
+
+            for bot_name, stats in bot_performance.items():
+                decided = stats["decided"]
+                decided_wr = stats["win_rate"]
+                bot_pnl = stats["pnl_cents"]
+
+                # 1. Severe Drag Check -> Autonomous Bot Quarantine or Confidence Elevation
+                if severe_drag_enabled and decided >= severe_min and decided_wr < severe_thresh and bot_pnl < 0:
+                    quarantined_bots.append(bot_name)
+                    if severe_action == "elevate_threshold":
+                        bot_overrides[bot_name] = {
+                            "min_confidence_threshold": elevated_conf,
+                            "reason": f"Severe win rate drag: {decided_wr:.1f}% across {decided} trades (PnL: {bot_pnl:+d}¢)",
+                        }
+                        action_desc = f"Auto-elevated {bot_name.capitalize()} confidence threshold to {elevated_conf:.1f}%"
+                    else:
+                        bot_overrides[bot_name] = {
+                            "paused": True,
+                            "reason": f"Severe win rate drag: {decided_wr:.1f}% across {decided} trades (PnL: {bot_pnl:+d}¢)",
+                        }
+                        action_desc = f"Auto-quarantined {bot_name.capitalize()} (trading paused due to {decided_wr:.1f}% win rate across {decided} trades)"
+
+                    if self.cfg.get("auto_remediation_enabled", True):
+                        auto_remediations.append({
+                            "type": "bot_quarantine",
+                            "bot_name": bot_name,
+                            "win_rate": round(decided_wr, 1),
+                            "pnl_cents": bot_pnl,
+                            "decided_trades": decided,
+                            "action": severe_action,
+                            "applied_action": action_desc,
+                            "applied_at": now_utc,
+                        })
+
+                    findings.append(
+                        SupervisorFinding(
+                            category="calibration",
+                            severity="critical" if stats["wins"] == 0 else "warning",
+                            title=f"Autonomous Quarantine Active on {bot_name.capitalize()}",
+                            description=(
+                                f"{bot_name.capitalize()} exhibits severe historical drag with a decided win rate of {decided_wr:.1f}% "
+                                f"({stats['wins']}/{decided} trades, PnL: {bot_pnl:+d}¢). "
+                                f"Automated protection activated: {action_desc}."
+                            ),
+                            bot_name=bot_name,
+                            auto_action_taken=action_desc,
+                            recommended_action="Inspect prediction calibration and underlying models before unpausing.",
+                        )
+                    )
+                    continue
+
+                # 2. General Calibration / Win Rate Drag Check (if not in severe drag quarantine)
+                if decided >= 5 and decided_wr < 40.0 and bot_pnl < 0:
+                    cats = bot_categories.get(bot_name, set())
+                    overlap_flagged = cats.intersection(flagged_categories_set)
+                    if overlap_flagged and len(cats) == len(overlap_flagged):
+                        # The bot's drag is already fully captured and throttled at the category level
+                        findings.append(
+                            SupervisorFinding(
+                                category="calibration",
+                                severity="info",
+                                title=f"Historical Win Rate Drag on {bot_name.capitalize()} (Isolated to Throttled Categories)",
+                                description=(
+                                    f"{bot_name.capitalize()} has a decided win rate of {decided_wr:.1f}% "
+                                    f"({stats['wins']}/{decided} trades, PnL: {bot_pnl:+d}¢). Drag is fully isolated to "
+                                    f"auto-throttled category: {', '.join(sorted(overlap_flagged))}."
+                                ),
+                                bot_name=bot_name,
+                            )
+                        )
+                    else:
                         findings.append(
                             SupervisorFinding(
                                 category="calibration",
                                 severity="warning",
                                 title=f"Low Historical Win Rate on {bot_name.capitalize()}",
                                 description=(
-                                    f"{bot_name.capitalize()} has a settled win rate of {win_rate:.1f}% "
-                                    f"({wins}/{total_settled} trades). Evaluating sub-category drag."
+                                    f"{bot_name.capitalize()} has a decided win rate of {decided_wr:.1f}% "
+                                    f"({stats['wins']}/{decided} trades, PnL: {bot_pnl:+d}¢). Evaluating sub-category drag."
                                 ),
                                 bot_name=bot_name,
                             )
                         )
 
-            # --- 2. Category Performance & Auto-Throttling ---
-            cold_threshold = float(self.cfg.get("cold_category_win_rate_threshold", 40.0))
-            min_sample = int(self.cfg.get("min_category_sample_size", 4))
-            throttle_mult = float(self.cfg.get("cold_category_throttle_multiplier", 0.50))
-
-            for cat, stats in category_performance.items():
-                if stats["total"] >= min_sample:
-                    decided = stats["wins"] + stats["losses"]
-                    win_rate = (stats["wins"] / max(1, decided)) * 100.0 if decided > 0 else 0.0
-                    if win_rate < cold_threshold or (decided == 0 and stats["expired"] >= 3):
-                        action_desc = None
-                        if self.cfg.get("auto_remediation_enabled", True):
-                            action_desc = f"Auto-throttled {cat} position sizing to {throttle_mult:.2f}x"
-                            auto_remediations.append({
-                                "type": "category_throttle",
-                                "category": cat,
-                                "win_rate": round(win_rate, 1),
-                                "multiplier": throttle_mult,
-                                "applied_at": now_utc,
-                            })
-
-                        findings.append(
-                            SupervisorFinding(
-                                category="decision_quality",
-                                severity="warning",
-                                title=f"Sub-par Category Performance: '{cat}'",
-                                description=(
-                                    f"Category '{cat}' win rate is {win_rate:.1f}% across {stats['total']} settled contracts "
-                                    f"(PnL: {stats['pnl_cents']:+d}¢)."
-                                ),
-                                auto_action_taken=action_desc,
-                                recommended_action="Maintain reduced sizing until positive calibration recovers.",
-                            )
-                        )
+            # --- Synchronize Runtime Overrides to Disk ---
+            if self.cfg.get("auto_remediation_enabled", True):
+                self._sync_runtime_overrides(
+                    quarantined_bots=quarantined_bots,
+                    bot_overrides=bot_overrides,
+                    category_throttles=category_throttles,
+                )
 
             # --- 3. Audit Stale / Stuck Pending Trades ---
             stale_cutoff_hours = float(self.cfg.get("stale_trade_max_age_hours", 48.0))
@@ -415,9 +565,13 @@ class LLMSupervisor:
             else:
                 grade = "F"
 
+            total_pnl_cents = sum(int(t.get("pnl_cents") or 0) for t in all_settled_trades)
+            pnl_dollars = total_pnl_cents / 100.0
+            pnl_str = f"+${pnl_dollars:.2f}" if total_pnl_cents >= 0 else f"-${abs(pnl_dollars):.2f}"
+
             summary = (
                 f"Autonomous Supervisor completed audit at {now_utc}. "
-                f"Health Grade: {grade} ({score:.1f}%). "
+                f"Health Grade: {grade} ({score:.1f}%) | Portfolio PnL: {pnl_str}. "
                 f"Identified {len(findings)} finding(s) [{critical_count} critical, {warning_count} warning, {info_count} info], "
                 f"executed {len(auto_remediations)} automated remediation(s)."
             )
@@ -426,12 +580,14 @@ class LLMSupervisor:
             ai_synthesis = self._generate_ai_synthesis(findings, {
                 "log_metrics": log_metrics,
                 "category_performance": dict(category_performance),
+                "total_pnl_cents": total_pnl_cents,
             })
 
             report = {
                 "timestamp": now_utc,
                 "health_grade": grade,
                 "score_pct": round(score, 1),
+                "total_pnl_cents": total_pnl_cents,
                 "total_findings": len(findings),
                 "critical_count": critical_count,
                 "warning_count": warning_count,
@@ -443,6 +599,7 @@ class LLMSupervisor:
                 "auto_remediations": auto_remediations,
                 "log_metrics": log_metrics,
                 "category_performance": dict(category_performance),
+                "bot_performance": bot_performance,
             }
 
             self._save_report(report)
@@ -510,6 +667,43 @@ class LLMSupervisor:
                     time.sleep(0.05)
                     continue
 
+    def _sync_runtime_overrides(
+        self,
+        quarantined_bots: List[str],
+        bot_overrides: Dict[str, Dict[str, Any]],
+        category_throttles: Dict[str, float],
+    ) -> None:
+        """
+        Atomically synchronize active bot quarantines, confidence elevations,
+        and category throttles to data/runtime_overrides.json.
+        """
+        overrides_path = self.data_dir / "runtime_overrides.json"
+        current: Dict[str, Any] = {}
+        if overrides_path.exists():
+            try:
+                with open(overrides_path, "r", encoding="utf-8") as f:
+                    current = json.load(f) or {}
+            except Exception:
+                current = {}
+
+        current["quarantined_bots"] = sorted(list(set(quarantined_bots)))
+        current["bot_overrides"] = bot_overrides
+        current["category_throttles"] = category_throttles
+        current["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+
+        try:
+            tmp_file = overrides_path.with_suffix(".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2)
+            tmp_file.replace(overrides_path)
+            logger.info(
+                "[Supervisor] Synchronized runtime overrides (quarantined=%s, throttles=%s)",
+                current["quarantined_bots"],
+                list(category_throttles.keys()),
+            )
+        except Exception as exc:
+            logger.warning("Failed writing runtime_overrides.json: %s", exc)
+
     def _auto_remediate_rate_limits(self, rate_limits_count: int) -> str:
         """
         Autonomously remediate high API rate-limiting (HTTP 429).
@@ -522,7 +716,15 @@ class LLMSupervisor:
         overrides_path = self.data_dir / "runtime_overrides.json"
         config_path = self.project_root / "config" / "swarm_config.yaml"
 
-        overrides = {
+        current: Dict[str, Any] = {}
+        if overrides_path.exists():
+            try:
+                with open(overrides_path, "r", encoding="utf-8") as f:
+                    current = json.load(f) or {}
+            except Exception:
+                current = {}
+
+        current.update({
             "rate_limit_per_second": 2.5,
             "min_request_interval": 0.35,
             "recent_trade_seed_top_tickers": 35,
@@ -530,11 +732,13 @@ class LLMSupervisor:
             "scanner_inter_ticker_delay_seconds": 0.08,
             "remediated_at": datetime.now(timezone.utc).isoformat(),
             "reason": f"Auto-remediated {rate_limits_count} HTTP 429 backoff events",
-        }
+        })
 
         try:
-            with open(overrides_path, "w", encoding="utf-8") as f:
-                json.dump(overrides, f, indent=2)
+            tmp_file = overrides_path.with_suffix(".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2)
+            tmp_file.replace(overrides_path)
         except Exception as e:
             logger.warning("Failed writing runtime_overrides.json: %s", e)
 

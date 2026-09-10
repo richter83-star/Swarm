@@ -110,6 +110,18 @@ series_prefix_to_category:
   KXMLSGAME: sports
   KXMLSTOTAL: sports
   KXMLS: sports
+  KXLOLGAME: sports
+  KXLOLMAP: sports
+  KXLOL: sports
+  KXLEAGUESCUP: sports
+
+  # Crypto Series
+  KXSOL: crypto
+  KXXRP: crypto
+  KXHYPE: crypto
+  KXZEC: crypto
+  KXDOGE: crypto
+
 
 title_keywords:
   # Politics

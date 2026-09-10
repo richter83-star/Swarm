@@ -4,7 +4,8 @@ bot:
   description: General catch-all specialist
 learning:
   db_path: data/vanguard.db
-excluded_categories: [politics, elections, economics, weather]
+excluded_categories: [politics, elections, economics, weather, crypto]
 trading:
   min_confidence_threshold: 60
   max_position_pct: 0.04
+
