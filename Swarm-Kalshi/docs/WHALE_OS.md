@@ -60,7 +60,12 @@ reliability.db, status.json, calibration.json). All of it is gitignored.
 ## Go / no-go before any live capital
 
 - At least ~400 resolved fired markets (one per market; repeats don't count)
-- Lower bound of the 95% CI on mean P&L per contract > 0 after fees
+- ...spread over at least 100 independent events: every strike of one event
+  (one city's daily high, one BTC hourly print) settles on the same number, so
+  the CI is clustered by event
+- Lower bound of that clustered 95% CI on mean P&L per contract > 0 after fees
+- All of it priced as a taker (ask + fee, 1 contract). Maker quoting is off in
+  shadow because a bid+1 order mostly fills when the price moves against it
 - Agents with negative skill against the market get down-weighted
   automatically; drop any that stay negative
 
@@ -69,9 +74,16 @@ reliability.db, status.json, calibration.json). All of it is gitignored.
 - Weather station coordinates: check each against the market rules text.
 - Weather forecast error by lead day (`base_sigma_f`) is a prior, not fitted.
 - Crypto uses Coinbase spot as a proxy; Kalshi settles on a CF Benchmarks index.
-- Maker entries assume a fill, so shadow P&L on maker orders is an upper bound.
+- Shadow entries are taker-priced (`prefer_maker: false`); if maker quoting is turned
+  on, its P&L assumes a fill and is an upper bound.
 - Maker fee treatment varies by series; check Kalshi's current fee schedule.
 - HISTORY is fitted on past settled markets; its edge is measured only on
   markets settled after the table was built (the shadow ledger), never in-sample.
 - With quorum 3 and at most three independent families per market (book, weather
   or crypto, history), a fire needs every family to agree. Expect few fires.
+- A family's vote is split across its members that took a side; a member inside
+  the deadband (e.g. BOOK at mid) neither helps nor dilutes it.
+- Agent skill is scored on each agent's first opinion per market, never on
+  vetoed markets, with the market Brier floored at 0.02.
+- NWS climate days use local standard time; Open-Meteo days use the local clock.
+  During DST the two can disagree by an hour on borderline highs.

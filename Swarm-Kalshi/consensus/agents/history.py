@@ -38,6 +38,9 @@ class HistoryAgent(Agent):
         self.table = table if table is not None else self._read()
         self.min_n = int(self.config.get("min_bucket_n", 15))
         self.prior_n = float(self.config.get("prior_n", 20))
+        # a lead "matches" a market within max(lead_tolerance_frac * lead, lead_tolerance_min_h)
+        self.lead_frac = float(self.config.get("lead_tolerance_frac", 0.5))
+        self.lead_min_h = float(self.config.get("lead_tolerance_min_h", 0.1))
 
     def _read(self) -> Dict[str, Any]:
         try:
@@ -74,6 +77,9 @@ class HistoryAgent(Agent):
         if hours is None:
             return next(iter(leads.values()))
         key = min(leads, key=lambda k: abs(float(k) - hours))
+        # long-shot bias changes as close approaches: a 24h table says little at 30 minutes
+        if abs(float(key) - hours) > max(self.lead_frac * float(key), self.lead_min_h):
+            return None
         return leads[key]
 
     def estimate(self, ctx: MarketContext) -> Optional[Estimate]:

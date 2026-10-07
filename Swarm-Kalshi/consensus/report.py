@@ -70,9 +70,11 @@ def render(r: Dict[str, Any]) -> str:
         f"{'-' if s['win_rate'] is None else format(s['win_rate'] * 100, '.1f') + '%'}   "
         f"mean {_c(s['mean_pnl_cents'], 2)} vs expected {_c(s['mean_expected_edge_cents'], 2)}   "
         f"total {_c(s['total_pnl_cents'])}",
-        f"95% CI     {'-' if not ci else f'{ci[0]:+.1f}c to {ci[1]:+.1f}c'} per contract",
-        f"go/no-go   {'PASS' if g['pass'] else 'not yet'}  ({g['resolved']}/{g['target']} settled, "
-        f"needs CI low > 0)   days running {g['days_running']}",
+        f"95% CI     {'-' if not ci else f'{ci[0]:+.1f}c to {ci[1]:+.1f}c'} per contract "
+        f"(clustered by event)",
+        f"go/no-go   {'PASS' if g['pass'] else 'not yet'}  ({g['resolved']}/{g['target']} settled markets, "
+        f"{g['events']}/{g['target_events']} independent events, needs CI low > 0)   "
+        f"days running {g['days_running']}",
         f"rule       fire at {r['rule']['quorum']} families, >= {r['rule']['min_voters']} voters, "
         f"edge >= {r['rule']['min_edge_cents']}c net of fees",
         f"calibration {'present' if cal['exists'] else 'MISSING'}  {len(cal['series'])} series  "

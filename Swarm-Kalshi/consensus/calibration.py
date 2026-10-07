@@ -48,8 +48,12 @@ def market_price_at(reader: KalshiPublic, series: str, market: Dict[str, Any],
     target = close - lead_hours * 3600.0
     if opened is not None and target < opened:
         return None
-    candles = reader.get_candlesticks(series, market["ticker"], int(target - 3 * 3600),
-                                      int(target + 3600), period_interval=60)
+    if lead_hours < 2:      # sub-hour leads (hourly crypto markets): 1-minute candles
+        candles = reader.get_candlesticks(series, market["ticker"], int(target - 15 * 60),
+                                          int(target + 60), period_interval=1)
+    else:
+        candles = reader.get_candlesticks(series, market["ticker"], int(target - 3 * 3600),
+                                          int(target + 3600), period_interval=60)
     best: Optional[Tuple[float, int]] = None
     for c in candles:
         end = c.get("end_period_ts")
@@ -77,11 +81,50 @@ def bucket(rows: List[Tuple[int, bool]], bin_width: int = 10) -> List[Dict[str, 
     return bins
 
 
+def _strike(m: Dict[str, Any]) -> float:
+    for k in ("floor_strike", "cap_strike"):
+        try:
+            if m.get(k) is not None:
+                return float(m[k])
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def sample_by_event(markets: List[Dict[str, Any]], per_event: int, max_events: int) -> List[Dict[str, Any]]:
+    """
+    Up to ``per_event`` strikes from each of the newest ``max_events`` events, taken from
+    the middle of each event's strike ladder.  The ladder is laid out at listing time,
+    so the choice never looks at the outcome (no hindsight selection), and the middle
+    strikes are the ones that trade away from 0c/100c.
+    """
+    events: Dict[str, List[Dict[str, Any]]] = {}
+    for m in markets:
+        events.setdefault(str(m.get("event_ticker") or m["ticker"].rsplit("-", 1)[0]), []).append(m)
+    newest = sorted(events.values(), key=lambda ms: max(parse_ts(x.get("close_time")) or 0 for x in ms),
+                    reverse=True)[:max_events]
+    out: List[Dict[str, Any]] = []
+    for ms in newest:
+        ladder = sorted(ms, key=_strike)
+        mid = len(ladder) // 2
+        lo = max(0, mid - per_event // 2)
+        out.extend(ladder[lo:lo + per_event])
+    return out
+
+
 def build_series(reader: KalshiPublic, series: str, leads: List[float],
-                 max_markets: int = 300, bin_width: int = 10) -> Dict[str, Any]:
-    pages = max(1, (max_markets + 199) // 200)
-    markets = [m for m in reader.get_markets(series, status="settled", limit=200, max_pages=pages)
-               if m.get("result") in ("yes", "no")][:max_markets]
+                 max_markets: int = 300, bin_width: int = 10,
+                 per_event: int = 0, max_events: int = 0) -> Dict[str, Any]:
+    if per_event and max_events:
+        # many strikes per event (hourly crypto): page through enough events, then sample
+        pages = max(1, min(400, (max_events * 120 + 199) // 200))
+        settled = [m for m in reader.get_markets(series, status="settled", limit=200, max_pages=pages)
+                   if m.get("result") in ("yes", "no")]
+        markets = sample_by_event(settled, per_event, max_events)
+    else:
+        pages = max(1, (max_markets + 199) // 200)
+        markets = [m for m in reader.get_markets(series, status="settled", limit=200, max_pages=pages)
+                   if m.get("result") in ("yes", "no")][:max_markets]
     by_lead: Dict[str, Any] = {}
     for lead in leads:
         rows: List[Tuple[int, bool]] = []
@@ -95,7 +138,8 @@ def build_series(reader: KalshiPublic, series: str, leads: List[float],
                 rows.append((p, m["result"] == "yes"))
         by_lead[str(lead)] = {"n": len(rows), "bins": bucket(rows, bin_width)}
         log.info("%s lead %sh: %d samples", series, lead, len(rows))
-    return {"built_at": time.time(), "markets": len(markets), "leads": by_lead}
+    events = len({str(m.get("event_ticker") or m["ticker"].rsplit("-", 1)[0]) for m in markets})
+    return {"built_at": time.time(), "markets": len(markets), "events": events, "leads": by_lead}
 
 
 def load_table(path: str) -> Dict[str, Any]:
@@ -113,32 +157,50 @@ def save_table(path: str, table: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+DEFAULT_PLAN = {"leads": [12.0, 24.0, 36.0], "max_markets": 300, "per_event": 0, "max_events": 0,
+                "bin_width": 10}
+
+
+def plan_for(series: str, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build plan for one series: defaults <- calibration.* <- calibration.per_series[series]."""
+    cfg = dict(cfg or {})
+    per = (cfg.pop("per_series", None) or {}).get(series) or {}
+    plan = {**DEFAULT_PLAN, **{k: v for k, v in cfg.items() if k in DEFAULT_PLAN},
+            **{k: v for k, v in per.items() if k in DEFAULT_PLAN}}
+    plan["leads"] = [float(x) for x in plan["leads"]]
+    return plan
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Build WHALE-OS price calibration tables")
     ap.add_argument("--series", default="", help="comma-separated series tickers "
                     "(default: every series in whale_os.yaml)")
     ap.add_argument("--config", default=None, help="path to whale_os.yaml")
-    ap.add_argument("--leads", default="6,24", help="hours before close, comma-separated")
-    ap.add_argument("--max-markets", type=int, default=300)
-    ap.add_argument("--bin-width", type=int, default=10)
+    ap.add_argument("--leads", default="", help="hours before close, comma-separated "
+                    "(default: whale_os.yaml calibration plan per series)")
+    ap.add_argument("--max-markets", type=int, default=0)
     ap.add_argument("--out", default="", help="default: the HISTORY agent's table_path")
     args = ap.parse_args(argv)
-    if not args.series or not args.out:
-        from consensus.settings import load_settings
-        settings = load_settings(args.config)
-        args.series = args.series or ",".join(settings.series)
-        args.out = args.out or str((settings.agents.get("history") or {}).get("table_path")
-                                   or settings.calibration_path)
+    from consensus.settings import load_settings
+    settings = load_settings(args.config)
+    series_list = [s.strip().upper() for s in (args.series or ",".join(settings.series)).split(",") if s.strip()]
+    out = args.out or str((settings.agents.get("history") or {}).get("table_path") or settings.calibration_path)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     reader = KalshiPublic()
-    table = load_table(args.out)
-    leads = [float(x) for x in args.leads.split(",") if x.strip()]
-    for series in [s.strip().upper() for s in args.series.split(",") if s.strip()]:
+    table = load_table(out)
+    for series in series_list:
+        plan = plan_for(series, settings.calibration)
+        if args.leads:
+            plan["leads"] = [float(x) for x in args.leads.split(",") if x.strip()]
+        if args.max_markets:
+            plan["max_markets"] = args.max_markets
+        log.info("%s plan: %s", series, plan)
         table.setdefault("series", {})[series] = build_series(
-            reader, series, leads, args.max_markets, args.bin_width)
-        save_table(args.out, table)
-    print(f"wrote {args.out}")
+            reader, series, plan["leads"], int(plan["max_markets"]), int(plan["bin_width"]),
+            int(plan["per_event"]), int(plan["max_events"]))
+        save_table(out, table)
+    print(f"wrote {out}")
     return 0
 
 

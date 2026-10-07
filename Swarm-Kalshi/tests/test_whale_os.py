@@ -61,6 +61,11 @@ class TestParsing:
         assert s.volume_24h == 1200 and s.open_interest == 800
         assert s.hours_to_close == pytest.approx(39.0, abs=0.01)
 
+    def test_liquidity_dollars_over_one_dollar(self):
+        s = snapshot_from_market(raw_market(liquidity_dollars="1234.56"), NOW)
+        assert s.liquidity_cents == 123456
+        assert snapshot_from_market(raw_market(liquidity_dollars="0.50"), NOW).liquidity_cents == 50
+
     def test_parse_orderbook_fp(self):
         ob = parse_orderbook({"orderbook_fp": {"yes_dollars": [["0.4400", "120.00"]],
                                                "no_dollars": [["0.5400", "80.00"]]}})
@@ -199,10 +204,29 @@ class TestAgents:
         assert 0.4 < v.p_yes < 0.6
 
     def test_history_applies_bucket_bias(self):
-        table = {"series": {"KXHIGHNY": {"leads": {"24": {"n": 100, "bins": [
+        table = {"series": {"KXHIGHNY": {"leads": {"36": {"n": 100, "bins": [
             {"lo": 40, "hi": 50, "n": 100, "yes": 30, "avg_price": 45.0}]}}}}}
         v, _ = HistoryAgent({"prior_n": 0}, table=table).vote(ctx_for(raw_market()))
         assert v.p_yes == pytest.approx(0.30, abs=1e-6)     # mid 45 + (30 - 45)
+
+    def test_history_abstains_when_no_lead_is_close(self):
+        # market is 39h from close; a 6h-only table must not be applied to it
+        table = {"series": {"KXHIGHNY": {"leads": {"6": {"n": 100, "bins": [
+            {"lo": 40, "hi": 50, "n": 100, "yes": 30, "avg_price": 45.0}]}}}}}
+        v, _ = HistoryAgent({"prior_n": 0}, table=table).vote(ctx_for(raw_market()))
+        assert v.abstained
+
+    def test_calibration_samples_middle_of_each_ladder(self):
+        from consensus.calibration import plan_for, sample_by_event
+        ms = [{"ticker": f"KXBTCD-26OCT07{h:02d}-T{k}", "event_ticker": f"KXBTCD-26OCT07{h:02d}",
+               "floor_strike": k, "close_time": f"2026-10-07T{h:02d}:00:00Z"}
+              for h in range(10, 14) for k in range(100, 200, 10)]
+        picked = sample_by_event(ms, per_event=2, max_events=3)
+        assert len(picked) == 6 and {m["floor_strike"] for m in picked} == {140, 150}
+        assert {m["event_ticker"] for m in picked} == {"KXBTCD-26OCT0711", "KXBTCD-26OCT0712", "KXBTCD-26OCT0713"}
+        cfg = {"leads": [12, 24], "per_series": {"KXBTCD": {"leads": [0.25], "per_event": 8, "max_events": 9}}}
+        assert plan_for("KXBTCD", cfg)["leads"] == [0.25] and plan_for("KXBTCD", cfg)["max_events"] == 9
+        assert plan_for("KXHIGHNY", cfg)["leads"] == [12.0, 24.0] and plan_for("KXHIGHNY", cfg)["per_event"] == 0
 
     def test_history_thin_bucket_abstains(self):
         table = {"series": {"KXHIGHNY": {"leads": {"24": {"bins": [
@@ -218,7 +242,7 @@ class TestAgents:
                              clock=lambda: clock["t"])
         v, _ = agent.vote(ctx_for(raw_market()))
         assert v.abstained                                   # no file yet
-        path.write_text(json.dumps({"series": {"KXHIGHNY": {"leads": {"24": {"n": 100, "bins": [
+        path.write_text(json.dumps({"series": {"KXHIGHNY": {"leads": {"36": {"n": 100, "bins": [
             {"lo": 40, "hi": 50, "n": 100, "yes": 30, "avg_price": 45.0}]}}}}}))
         clock["t"] = 30.0
         assert agent.vote(ctx_for(raw_market()))[0].abstained   # throttled: not re-checked yet
@@ -332,12 +356,56 @@ class TestShadow:
         assert runner.ledger.summary().decisions == 1
         m["result"] = "yes"
         clock["t"] += 600
+        assert runner.settle(clock["t"]) == 0                # not closed yet: not even fetched
+        clock["t"] += 2 * 86400                              # past close_time
         assert runner.settle(clock["t"]) == 1
         s = runner.ledger.summary()
         assert s.resolved_fired == 1 and s.wins == 1 and s.total_pnl_cents > 0
         assert runner.reliability.stats("a").n == 1
         status = json.load(open(runner.s.status_path))
         assert status["mode"] == "shadow"
+
+    def test_settlement_waits_for_close_rotates_and_retires(self, tmp_path):
+        ms = [raw_market(ticker=f"KXHIGHNY-26OCT08-B7{i}.5", floor=70 + i, cap=71 + i) for i in (4, 6, 8)]
+        runner, clock = make_runner(tmp_path, ms, [StubAgent(n, 0.70) for n in ("a", "b", "c")],
+                                    settle_batch=1, settle_max_misses=2)
+        broken = ms[2]["ticker"]
+        real_get = runner.reader.get_market
+
+        def get_market(t):
+            if t == broken:
+                raise RuntimeError("404")
+            return real_get(t)
+        runner.reader.get_market = get_market
+        runner.run_cycle()
+        assert len(runner.ledger.open_tickers()) == 3
+        ms[0]["result"], ms[1]["result"] = "yes", "void"
+        assert runner.settle(clock["t"]) == 0                 # nothing has closed yet: no fetches
+        clock["t"] += 3 * 86400                                # past close_time (Oct 9)
+        assert runner.settle(clock["t"]) == 1                  # B74.5 settles
+        assert runner.settle(clock["t"] + 1) == 0              # B76.5 is void -> retired, no P&L
+        assert runner.settle(clock["t"] + 2) == 0              # broken: miss 1
+        assert broken in runner.ledger.open_tickers()
+        assert runner.settle(clock["t"] + 3) == 0              # miss 2 -> retired
+        assert runner.ledger.open_tickers() == [] and runner.reliability.open_tickers() == []
+        s = runner.ledger.summary()
+        assert s.resolved_fired == 1 and s.fired == 3          # voided fires never enter P&L stats
+
+    def test_reliability_scores_first_forecast_and_skips_vetoes(self, tmp_path):
+        m = raw_market()
+        agent = StubAgent("a", 0.70)
+        runner, clock = make_runner(tmp_path, [m], [agent, StubAgent("b", 0.7), StubAgent("c", 0.7)])
+        runner.run_cycle()
+        agent._p = 0.99                                        # later, near-close opinion
+        clock["t"] += 600
+        runner.run_cycle()
+        row = runner.reliability._conn.execute(
+            "SELECT p_yes FROM forecasts WHERE agent='a'").fetchall()
+        assert row == [(0.70,)]                                # the first opinion is the one scored
+        vetoed = raw_market(ticker="KXHIGHNY-26OCT08-B90.5", bid="0.0100", ask="0.0200", floor=90, cap=91)
+        runner.reader.markets[vetoed["ticker"]] = vetoed
+        runner.run_cycle()
+        assert vetoed["ticker"] not in runner.reliability.open_tickers()
 
     def test_expensive_agent_only_on_disagreement_and_budget(self, tmp_path):
         markets = [raw_market(ticker=f"KXHIGHNY-26OCT08-B7{i}.5", floor=70 + i, cap=71 + i) for i in range(3)]
@@ -486,11 +554,21 @@ def test_ledger_dedupes_first_fire(tmp_path):
     assert len(led.pnl_curve()) == 1
 
 
-def test_reliability_upserts_open_forecast():
+def test_reliability_keeps_first_open_forecast():
     from consensus.schema import AgentVote
     rs = ReliabilityStore()
     for p in (0.6, 0.7, 0.8):
         rs.record_forecast(AgentVote(agent="a", ticker="T", p_yes=p), 0.5)
     rs.resolve("T", True)
     st = rs.stats("a")
-    assert st.n == 1 and st.brier_agent == pytest.approx(0.04)
+    assert st.n == 1 and st.brier_agent == pytest.approx(0.16)     # (0.6 - 1)^2: the first opinion
+
+
+def test_reliability_brier_floor_bounds_skill():
+    from consensus.schema import AgentVote
+    rs = ReliabilityStore(brier_floor=0.02)
+    rs.record_forecast(AgentVote(agent="a", ticker="T", p_yes=0.97), 0.99)   # market already ~certain
+    rs.resolve("T", True)
+    st = rs.stats("a")
+    # without the floor: (0.0001 - 0.0009) / 0.0001 = -8.0; with it the penalty stays small
+    assert st.skill == pytest.approx((0.0001 - 0.0009) / 0.02)

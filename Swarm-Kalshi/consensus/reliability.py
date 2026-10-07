@@ -11,6 +11,12 @@ beats the market earns more, one that is worse than the market earns less.
     weight = (n * raw + prior_n * 1.0) / (n + prior_n)     # shrink toward 1.0
 
 Agents with no resolved history get weight 1.0.
+
+Each agent is scored once per market, on its FIRST recorded opinion: that is
+the forecast available when Jev decides.  Scoring the last pre-close opinion
+instead would grade agents on near-certain 99c markets, where the market's
+own Brier score is ~0 and skill ratios become noise.  ``brier_floor`` bounds
+the denominator for the same reason.
 """
 
 from __future__ import annotations
@@ -58,7 +64,9 @@ class ReliabilityStore:
         skill_gain: float = 2.0,
         min_weight: float = 0.05,
         max_weight: float = 2.0,
+        brier_floor: float = 0.02,
     ) -> None:
+        self.brier_floor = float(brier_floor)
         self.window = int(window)
         self.prior_n = int(prior_n)
         self.skill_gain = float(skill_gain)
@@ -79,9 +87,9 @@ class ReliabilityStore:
         """
         Store a non-abstaining vote alongside the market's implied probability.
 
-        One open forecast per (agent, ticker): a newer vote replaces the older
-        one, so an agent polled every cycle is scored once per market, on its
-        latest pre-settlement opinion.
+        One forecast per (agent, ticker): later votes on the same market are
+        ignored, so an agent polled every cycle is scored once, on the opinion
+        it held when the market first came up for a decision.
         """
         if vote.abstained:
             return None
@@ -92,11 +100,6 @@ class ReliabilityStore:
                 (vote.agent, vote.ticker),
             ).fetchone()
             if row:
-                self._conn.execute(
-                    "UPDATE forecasts SET p_yes = ?, market_p = ?, created_at = ? WHERE id = ?",
-                    (*args, row[0]),
-                )
-                self._conn.commit()
                 return int(row[0])
             cur = self._conn.execute(
                 "INSERT INTO forecasts (agent, ticker, p_yes, market_p, created_at) "
@@ -125,6 +128,13 @@ class ReliabilityStore:
             self._conn.commit()
             return int(cur.rowcount)
 
+    def void(self, ticker: str) -> int:
+        """Drop open forecasts on a market that will never resolve yes/no."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM forecasts WHERE ticker = ? AND outcome IS NULL", (ticker,))
+            self._conn.commit()
+            return int(cur.rowcount)
+
     # -- reads ------------------------------------------------------------
 
     def stats(self, agent: str) -> AgentStats:
@@ -140,7 +150,7 @@ class ReliabilityStore:
             return AgentStats(agent, 0, None, None, 0.0, 1.0)
         brier_agent = sum((p - o) ** 2 for p, _, o in rows) / n
         brier_market = sum((m - o) ** 2 for _, m, o in rows) / n
-        skill = (brier_market - brier_agent) / brier_market if brier_market > 0 else 0.0
+        skill = (brier_market - brier_agent) / max(brier_market, self.brier_floor)
         raw = min(max(1.0 + self.skill_gain * skill, self.min_weight), self.max_weight)
         weight = (n * raw + self.prior_n * 1.0) / (n + self.prior_n)
         return AgentStats(agent, n, brier_agent, brier_market, skill, weight)

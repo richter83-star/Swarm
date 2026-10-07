@@ -10,6 +10,12 @@ prices are optimistic (they assume a fill); treat maker results as an upper
 bound until live fills confirm them.  Statistics count only the first fired
 decision per market, so re-evaluating a market every cycle cannot inflate
 the sample size.
+
+Strikes of one event (every bracket of one city's daily high, every strike of
+one BTC hourly print) settle on the same number, so their outcomes are not
+independent.  The confidence interval is therefore cluster-robust by event
+(``ticker`` minus its last segment), and ``resolved_events`` reports how many
+independent clusters the sample really has.
 """
 
 from __future__ import annotations
@@ -60,6 +66,11 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE INDEX IF NOT EXISTS ix_agent_runs ON agent_runs(agent, ts);
 """
 
+def event_of(ticker: str) -> str:
+    """Kalshi event ticker: the market ticker without its strike segment."""
+    return ticker.rsplit("-", 1)[0] if "-" in ticker else ticker
+
+
 # Only the FIRST fired decision per ticker counts toward P&L statistics:
 # re-evaluating the same market every cycle must not multiply one outcome.
 _FIRST_FIRES = (
@@ -75,6 +86,7 @@ class LedgerSummary:
     vetoed: int
     held: int
     resolved_fired: int
+    resolved_events: int
     wins: int
     win_rate: Optional[float]
     mean_expected_edge_cents: Optional[float]
@@ -135,6 +147,16 @@ class DecisionLedger:
                 )
             self._conn.commit()
             return len(rows)
+
+    def void(self, ticker: str, resolved_at: Optional[float] = None) -> int:
+        """Retire open decisions on a market that will never pay out (void / unfetchable).
+        outcome = -1 marks them closed; pnl stays NULL so they never enter statistics."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE decisions SET outcome = -1, pnl_cents = NULL, resolved_at = ? "
+                "WHERE ticker = ? AND outcome IS NULL", (float(resolved_at or time.time()), ticker))
+            self._conn.commit()
+            return int(cur.rowcount)
 
     def recent(self, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
@@ -243,9 +265,17 @@ class DecisionLedger:
             out.append({"ts": ts, "ticker": ticker, "pnl": pnl, "cum": round(total, 3)})
         return out
 
+    def first_ts(self) -> Optional[float]:
+        with self._lock:
+            row = self._conn.execute("SELECT MIN(created_at) FROM decisions").fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+
     def summary(self, since: Optional[float] = None) -> LedgerSummary:
         where = "WHERE created_at >= ?" if since is not None else ""
-        extra = "AND created_at >= ?" if since is not None else ""
+        # first fires are found over the WHOLE ledger, then filtered by date, so a market
+        # that fired before ``since`` cannot count again because it re-fired after it
+        after = "AND created_at >= ?" if since is not None else ""
+        first = _FIRST_FIRES.format(extra="")
         args = (float(since),) if since is not None else ()
         with self._lock:
             counts = dict(self._conn.execute(
@@ -254,20 +284,26 @@ class DecisionLedger:
             markets = self._conn.execute(
                 f"SELECT COUNT(DISTINCT ticker) FROM decisions {where}", args).fetchone()[0]
             fired_markets = self._conn.execute(
-                f"SELECT COUNT(*) FROM ({_FIRST_FIRES.format(extra=extra)})", args).fetchone()[0]
+                f"SELECT COUNT(*) FROM decisions WHERE id IN ({first}) {after}", args).fetchone()[0]
             fired = self._conn.execute(
-                "SELECT edge_cents, pnl_cents FROM decisions "
-                f"WHERE id IN ({_FIRST_FIRES.format(extra=extra)}) AND pnl_cents IS NOT NULL",
+                "SELECT ticker, edge_cents, pnl_cents FROM decisions "
+                f"WHERE id IN ({first}) AND pnl_cents IS NOT NULL {after}",
                 args,
             ).fetchall()
         n = len(fired)
-        pnls = [p for _, p in fired]
+        pnls = [p for _, _, p in fired]
         wins = sum(1 for p in pnls if p > 0)
         mean_pnl = sum(pnls) / n if n else None
+        clusters: Dict[str, float] = {}
+        for ticker, _, p in fired:
+            key = event_of(ticker)
+            clusters[key] = clusters.get(key, 0.0) + (p - mean_pnl)
+        g = len(clusters)
         ci = None
-        if n >= 2:
-            var = sum((p - mean_pnl) ** 2 for p in pnls) / (n - 1)
-            half = 1.96 * math.sqrt(var / n)
+        if n >= 2 and g >= 2:
+            # cluster-robust variance of the mean (CR1): (G/(G-1)) * sum_g (sum_i e_i)^2 / n^2
+            var = (g / (g - 1)) * sum(r * r for r in clusters.values()) / (n * n)
+            half = 1.96 * math.sqrt(var)
             ci = (mean_pnl - half, mean_pnl + half)
         return LedgerSummary(
             decisions=sum(counts.values()),
@@ -276,9 +312,10 @@ class DecisionLedger:
             vetoed=counts.get("veto", 0),
             held=counts.get("hold", 0),
             resolved_fired=n,
+            resolved_events=g,
             wins=wins,
             win_rate=(wins / n) if n else None,
-            mean_expected_edge_cents=(sum(e for e, _ in fired) / n) if n else None,
+            mean_expected_edge_cents=(sum(e for _, e, _ in fired) / n) if n else None,
             mean_pnl_cents=mean_pnl,
             pnl_ci95_cents=ci,
             total_pnl_cents=float(sum(pnls)),

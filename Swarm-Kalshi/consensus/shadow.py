@@ -57,6 +57,10 @@ class ShadowRunner:
             ConsensusConfig.from_dict(settings.consensus), reliability=self.reliability, clock=clock)
         self.agents = agents if agents is not None else build_agents(settings.agents)
         self._last_recorded: Dict[str, Tuple[str, Optional[str], float]] = {}
+        # settlement bookkeeping (in memory; after a restart every open ticker is checked once)
+        self._close_at: Dict[str, float] = {}
+        self._last_check: Dict[str, float] = {}
+        self._misses: Dict[str, int] = {}
 
     # ------------------------------------------------------------------ #
 
@@ -94,6 +98,9 @@ class ShadowRunner:
 
     def evaluate(self, raw: Dict[str, Any], now: float, budget: Dict[str, int]) -> Decision:
         snap = snapshot_from_market(raw, now)
+        close_at = parse_ts(raw.get("close_time"))
+        if close_at is not None:
+            self._close_at[snap.ticker] = close_at
         ctx = MarketContext(snapshot=snap, raw=raw, reader=self.reader, now=now)
         votes: List[AgentVote] = []
         runs: List[Dict[str, Any]] = []
@@ -118,25 +125,51 @@ class ShadowRunner:
             self.ledger.record(decision)
             self._last_recorded[decision.ticker] = (decision.action, decision.side, decision.created_at)
         self.ledger.record_agent_runs(runs)
-        self.reliability.record_votes(votes, mid / 100.0)
+        if decision.action != "veto":        # untradeable markets say nothing about skill
+            self.reliability.record_votes(votes, mid / 100.0)
         return decision
 
     def settle(self, now: float) -> int:
+        """
+        Reconcile open decisions/forecasts against Kalshi results.
+
+        Only markets past their close time are checked (unknown close time, e.g.
+        after a restart, counts as checkable), least-recently-checked first, so
+        a long list of open hourly strikes can never starve the rest.  A market
+        that settles to anything other than yes/no (void, scalar) or cannot be
+        fetched ``settle_max_misses`` times in a row is retired without P&L.
+        """
         open_tickers = list(dict.fromkeys(self.ledger.open_tickers() + self.reliability.open_tickers()))
+        due = [t for t in open_tickers if self._close_at.get(t, 0.0) <= now]
+        due.sort(key=lambda t: self._last_check.get(t, 0.0))
         settled = 0
-        for ticker in open_tickers[: self.s.settle_batch]:
+        for ticker in due[: self.s.settle_batch]:
+            self._last_check[ticker] = now
             try:
                 m = self.reader.get_market(ticker)
             except Exception as exc:
-                log.debug("settle fetch %s failed: %s", ticker, exc)
+                self._misses[ticker] = self._misses.get(ticker, 0) + 1
+                log.debug("settle fetch %s failed (%d): %s", ticker, self._misses[ticker], exc)
+                if self._misses[ticker] >= self.s.settle_max_misses:
+                    self._retire(ticker, now, f"unfetchable x{self._misses[ticker]}")
                 continue
+            self._misses.pop(ticker, None)
             result = str(m.get("result") or "").lower()
-            if result not in ("yes", "no"):
-                continue
-            self.ledger.resolve(ticker, result == "yes", now)
-            self.reliability.resolve(ticker, result == "yes", now)
-            settled += 1
+            status = str(m.get("status") or "").lower()
+            if result in ("yes", "no"):
+                self.ledger.resolve(ticker, result == "yes", now)
+                self.reliability.resolve(ticker, result == "yes", now)
+                settled += 1
+            elif result or status in ("settled", "finalized"):
+                self._retire(ticker, now, f"result={result or '-'} status={status or '-'}")
         return settled
+
+    def _retire(self, ticker: str, now: float, why: str) -> None:
+        log.info("retiring %s without P&L (%s)", ticker, why)
+        self.ledger.void(ticker, now)
+        self.reliability.void(ticker)
+        for d in (self._close_at, self._last_check, self._misses):
+            d.pop(ticker, None)
 
     def run_cycle(self) -> Dict[str, Any]:
         t0 = self.clock()

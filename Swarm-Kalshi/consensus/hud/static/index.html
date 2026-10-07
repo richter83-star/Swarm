@@ -614,7 +614,9 @@ function renderPnl(){
   $("ghostV").textContent = `${sgn(s.total_pnl_cents,1)} / contract · ${s.resolved_fired} settled`;
   const ci = s.pnl_ci95_cents;
   $("pnlKv").innerHTML = [["trades", `${s.fired} fired · ${s.resolved_fired} settled`], ["win rate", s.win_rate === null ? "—" : fmt(s.win_rate*100,1,"%")],
-    ["mean / expected", `${sgn(s.mean_pnl_cents,2)} / ${sgn(s.mean_expected_edge_cents,2)}`], ["95% ci", ci ? `${fmt(ci[0],1)} to ${fmt(ci[1],1)}` : "—"]]
+    ["mean / expected", `${sgn(s.mean_pnl_cents,2)} / ${sgn(s.mean_expected_edge_cents,2)}`], ["95% ci · by event", ci ? `${fmt(ci[0],1)} to ${fmt(ci[1],1)}` : "—"],
+    ["go / no-go", (() => { const g = S.go_no_go;
+      return `<span class="${g.pass ? "ok" : ""}">${g.pass ? "PASS" : "not yet"}</span> · ${g.resolved}/${g.target} mkts · ${g.events}/${g.target_events} events`; })()]]
     .map(([k,v]) => `<span>${k}</span><b>${v}</b>`).join("");
 }
 
@@ -623,7 +625,7 @@ function renderTrades(){
   $("trBody").innerHTML = tr.map((t,i) => `<tr><td class="n">${String(tr.length-i).padStart(3,"0")}</td><td title="${esc(t.ticker)}">${esc(short(t.ticker))}</td>
     <td class="a">${t.agree}</td><td>${esc(t.agents.join("+") || "—")}</td><td class="${t.side === "yes" ? "ok" : "bad"}">${t.side} ${t.price_cents}c</td>
     <td class="r">${t.p.toFixed(2)}</td><td class="r ${t.pnl_cents > 0 ? "ok" : t.pnl_cents < 0 ? "bad" : ""}">${t.pnl_cents === null ? "—" : sgn(t.pnl_cents,1)}</td>
-    <td class="${t.outcome === null ? "" : "ok"}">${t.outcome === null ? "open" : "settled"}</td></tr>`).join("");
+    <td class="${t.outcome === null || t.outcome === -1 ? "" : "ok"}">${t.outcome === null ? "open" : t.outcome === -1 ? "void" : "settled"}</td></tr>`).join("");
 }
 
 function renderLog(active){

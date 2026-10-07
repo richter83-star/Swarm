@@ -25,10 +25,12 @@ class WhaleOSSettings:
     expensive_trigger_cents: float = 3.0
     record_interval_s: int = 3600
     settle_batch: int = 60
+    settle_max_misses: int = 6
     agent_run_retention_days: int = 7
     consensus: Dict[str, Any] = field(default_factory=dict)
     agents: Dict[str, Any] = field(default_factory=dict)
     hud: Dict[str, Any] = field(default_factory=dict)
+    calibration: Dict[str, Any] = field(default_factory=dict)
 
     def _path(self, name: str) -> str:
         base = Path(self.data_dir)

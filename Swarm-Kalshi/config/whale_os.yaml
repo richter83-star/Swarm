@@ -38,6 +38,7 @@ expensive_trigger_cents: 3.0
 
 record_interval_s: 3600          # re-log an unchanged hold at most hourly
 settle_batch: 60
+settle_max_misses: 6              # retire a market that can't be fetched 6 checks running
 agent_run_retention_days: 7
 
 # Jev.  Quorum counts independent FAMILIES (BOOK + WHALES = one family).
@@ -51,8 +52,13 @@ consensus:
   market_weight: 1.0
   correlation_alpha: 1.0
   max_vote_age_s: 900
-  prefer_maker: true
-  reference_contracts: 10
+  # Shadow evidence is taker-priced: a resting maker bid at bid+1 mostly fills when the
+  # price moves against it, so booking it as filled would flatter the results.  Turn
+  # maker quoting on only for live execution, after the taker-priced gate has passed.
+  prefer_maker: false
+  # P&L is booked per single contract, so the fee is rounded for a single contract too
+  # (Kalshi rounds the fee up to the cent per order; small orders pay proportionally more).
+  reference_contracts: 1
   vetoes:
     max_spread_cents: 6
     min_hours_to_close: 0.25
@@ -87,10 +93,12 @@ agents:
     max_hours_to_close: 48
   history:
     enabled: true
-    # Built by: python -m consensus.calibration --series KXHIGHNY,... --leads 6,24
+    # Built by: python -m consensus.calibration   (plan below, under `calibration:`)
     table_path: data/whale_os/calibration.json
     min_bucket_n: 15
     prior_n: 20
+    lead_tolerance_frac: 0.5      # abstain unless a table lead is within 50% of hours-to-close
+    lead_tolerance_min_h: 0.1
   xvenue:
     enabled: false
     mappings: []
@@ -104,3 +112,15 @@ hud:
   host: 127.0.0.1
   port: 8890
   refresh_seconds: 10
+
+# HISTORY calibration plan (python -m consensus.calibration).  Leads are hours
+# before close and should cover the window the runner actually trades in.
+calibration:
+  leads: [12, 24, 36]           # next-day weather markets trade ~6-48h before close
+  max_markets: 300
+  bin_width: 10
+  per_series:
+    # hourly crypto: ~100 strikes per event, open 1h; sample the middle of each ladder
+    KXBTCD: {leads: [0.25, 0.5, 0.75], per_event: 8, max_events: 250}
+    KXETHD: {leads: [0.25, 0.5, 0.75], per_event: 8, max_events: 250}
+

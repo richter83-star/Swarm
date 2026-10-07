@@ -100,7 +100,7 @@ try {
         "calibrate" {
             # The runner hot-reloads the table when the file changes; no restart needed.
             # Series come from config\whale_os.yaml.
-            Start-Tracked "calibration" @("-m", "consensus.calibration", "--leads", "6,24", "--max-markets", "300")
+            Start-Tracked "calibration" @("-m", "consensus.calibration")
         }
         "logs"    { foreach ($k in @($Services.Keys) + "calibration") {
                         $f = Join-Path $LogDir "$k.log"

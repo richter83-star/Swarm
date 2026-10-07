@@ -177,6 +177,16 @@ def _cents_field(m: Dict[str, Any], new: str, old: str) -> int:
     return to_cents(v)
 
 
+def _amount_cents(m: Dict[str, Any], new: str, old: str) -> int:
+    """Money amounts (not prices): ``*_dollars`` strings are always dollars, any size;
+    the legacy field is already in cents."""
+    v = m.get(new)
+    if v not in (None, ""):
+        return int(round(float(v) * 100))
+    v = m.get(old)
+    return int(v) if v not in (None, "") else 0
+
+
 def _count_field(m: Dict[str, Any], new: str, old: str) -> int:
     v = m.get(new)
     if v in (None, ""):
@@ -203,7 +213,7 @@ def snapshot_from_market(m: Dict[str, Any], now: Optional[float] = None) -> Mark
         last_price=_cents_field(m, "last_price_dollars", "last_price"),
         volume_24h=_count_field(m, "volume_24h_fp", "volume_24h"),
         open_interest=_count_field(m, "open_interest_fp", "open_interest"),
-        liquidity_cents=_cents_field(m, "liquidity_dollars", "liquidity"),
+        liquidity_cents=_amount_cents(m, "liquidity_dollars", "liquidity"),
         hours_to_close=hours,
         rules_text=rules,
     )

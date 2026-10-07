@@ -18,6 +18,7 @@ from consensus.reliability import ReliabilityStore
 from consensus.settings import WhaleOSSettings
 
 GO_NO_GO_MIN_RESOLVED = 400
+GO_NO_GO_MIN_EVENTS = 100      # independent events: strikes of one event share one outcome
 FAN_MIN_RESOLVED = 10
 FAN_PATHS = 120
 
@@ -263,7 +264,7 @@ def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
                        "agents": agreeing, "edge_cents": d["edge_cents"], "pnl_cents": d.get("pnl_cents"),
                        "outcome": d.get("outcome"), "created_at": d["created_at"]})
 
-    first_ts = min((d["created_at"] for d in recent), default=None)
+    first_ts = ledger.first_ts()
     return {
         "mode": settings.mode.upper(),
         "generated_at": now,
@@ -271,8 +272,10 @@ def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
         "summary": summary,
         "go_no_go": {
             "resolved": summary["resolved_fired"], "target": GO_NO_GO_MIN_RESOLVED,
+            "events": summary["resolved_events"], "target_events": GO_NO_GO_MIN_EVENTS,
             "ci_low": ci[0] if ci else None,
-            "pass": bool(ci and ci[0] > 0 and summary["resolved_fired"] >= GO_NO_GO_MIN_RESOLVED),
+            "pass": bool(ci and ci[0] > 0 and summary["resolved_fired"] >= GO_NO_GO_MIN_RESOLVED
+                         and summary["resolved_events"] >= GO_NO_GO_MIN_EVENTS),
             "days_running": round((now - first_ts) / 86400, 1) if first_ts else 0.0,
         },
         "rule": {"quorum": cfg.get("quorum", 4), "min_voters": cfg.get("min_voters", 4),

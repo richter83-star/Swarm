@@ -17,7 +17,7 @@ cd "$ROOT"
 declare -A CMD=(
   [shadow]="-m consensus.shadow"
   [hud]="-m consensus.hud"
-  [calibration]="-m consensus.calibration --leads 6,24 --max-markets 300"
+  [calibration]="-m consensus.calibration"
 )
 
 alive() {  # alive NAME -> prints pid if the tracked process is ours and running

@@ -149,6 +149,19 @@ class TestEngine:
         assert d.action == "hold"
         assert d.effective_agree == pytest.approx(1.0)
 
+    def test_deadband_member_does_not_dilute_its_family(self):
+        # book sits at mid (no opinion), whales leans YES: the book family counts as a full YES
+        votes = [vote("book", 0.505, family="book"), vote("whales", 0.60, family="book"),
+                 vote("weather", 0.70), vote("history", 0.60)]
+        d = engine().decide(market(), votes)
+        assert d.side == "yes" and d.effective_agree == pytest.approx(3.0)
+
+    def test_split_family_counts_half_each_way(self):
+        votes = [vote("book", 0.40, family="book"), vote("whales", 0.60, family="book"),
+                 vote("weather", 0.70), vote("history", 0.60)]
+        d = engine().decide(market(), votes)
+        assert d.side == "yes" and d.effective_agree == pytest.approx(2.5)
+
     def test_fee_eats_thin_edge(self):
         votes = [vote(a, 0.53) for a in "abcd"]
         d = engine(prefer_maker=False).decide(market(), votes)
@@ -272,6 +285,44 @@ class TestLedger:
         s = ledger.summary()
         assert s.wins == 0
         assert s.total_pnl_cents == pytest.approx(-(d.price_cents + d.fee_cents_per_contract))
+
+    def _fire(self, ledger, ticker, created_at=NOW):
+        e = ConsensusEngine(ConsensusConfig(), clock=lambda: created_at)
+        d = e.decide(market(ticker=ticker), [vote(a, 0.75, ticker=ticker) for a in "abcd"])
+        assert d.action == "fire"
+        ledger.record(d)
+        return d
+
+    def test_ci_is_clustered_by_event(self):
+        # 3 events x 4 strikes: strikes of one event share their outcome
+        ledger = DecisionLedger()
+        outcomes = {"EVA": True, "EVB": False, "EVC": True}
+        for ev, won in outcomes.items():
+            for k in range(4):
+                t = f"KXHIGHNY-{ev}-T{70 + k}"
+                self._fire(ledger, t)
+                ledger.resolve(t, outcome_yes=won)
+        s = ledger.summary()
+        assert s.resolved_fired == 12 and s.resolved_events == 3
+        pnls = [p for (p,) in ledger._conn.execute("SELECT pnl_cents FROM decisions")]
+        m = sum(pnls) / 12
+        naive_half = 1.96 * (sum((p - m) ** 2 for p in pnls) / 11 / 12) ** 0.5
+        clustered_half = (s.pnl_ci95_cents[1] - s.pnl_ci95_cents[0]) / 2
+        assert clustered_half > 1.5 * naive_half          # 12 correlated strikes != 12 samples
+
+    def test_summary_since_does_not_recount_refires(self):
+        ledger = DecisionLedger()
+        self._fire(ledger, "KXHIGHNY-EVA-T70", created_at=NOW - 7200)
+        self._fire(ledger, "KXHIGHNY-EVA-T70", created_at=NOW)     # same market fires again later
+        assert ledger.summary().fired == 1
+        assert ledger.summary(since=NOW - 3600).fired == 0          # its first fire is before the cutoff
+        assert ledger.first_ts() == pytest.approx(NOW - 7200)
+
+    def test_void_closes_without_pnl(self):
+        ledger = DecisionLedger()
+        self._fire(ledger, "KXHIGHNY-EVA-T70")
+        assert ledger.void("KXHIGHNY-EVA-T70") == 1
+        assert ledger.open_tickers() == [] and ledger.summary().resolved_fired == 0
 
     def test_recent_returns_payloads(self):
         ledger = DecisionLedger()

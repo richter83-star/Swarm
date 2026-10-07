@@ -59,7 +59,7 @@ class ConsensusConfig:
     prefer_maker: bool = True
     taker_rate: float = TAKER_RATE
     maker_rate: float = MAKER_RATE
-    reference_contracts: int = 10       # order size assumed for fee rounding
+    reference_contracts: int = 1        # order size assumed for fee rounding (P&L is per contract)
     vetoes: VetoConfig = field(default_factory=VetoConfig)
 
     @classmethod
@@ -205,23 +205,28 @@ class ConsensusEngine:
         return _sigmoid(num / den)
 
     def _majority(self, active: List[AgentVote], mid_cents: float) -> Tuple[Optional[str], int, float]:
+        """
+        Direction by independent families.  Each family contributes at most 1.0,
+        split across its members that took a side; members inside the deadband
+        have no directional opinion and neither help nor dilute their family.
+        (BOOK at mid + WHALES leaning YES counts as one full YES family; BOOK
+        leaning NO + WHALES leaning YES counts as half a family each way.)
+        """
         band = self.config.direction_deadband_cents
-        family_size: Dict[str, int] = defaultdict(int)
-        for v in active:
-            family_size[v.family] += 1
-        counts = {"yes": 0, "no": 0}
-        effective = {"yes": 0.0, "no": 0.0}
+        sides: Dict[str, List[str]] = defaultdict(list)
         for v in active:
             p_c = float(v.p_yes) * 100.0
             if p_c > mid_cents + band:
-                s = "yes"
+                sides[v.family].append("yes")
             elif p_c < mid_cents - band:
-                s = "no"
-            else:
-                continue
-            counts[s] += 1
-            effective[s] += 1.0 / family_size[v.family]
-        if effective["yes"] == effective["no"]:
+                sides[v.family].append("no")
+        counts = {"yes": 0, "no": 0}
+        effective = {"yes": 0.0, "no": 0.0}
+        for fam_sides in sides.values():
+            for s in fam_sides:
+                counts[s] += 1
+                effective[s] += 1.0 / len(fam_sides)
+        if abs(effective["yes"] - effective["no"]) < 1e-9:
             return None, 0, 0.0
         side = "yes" if effective["yes"] > effective["no"] else "no"
         return side, counts[side], effective[side]
