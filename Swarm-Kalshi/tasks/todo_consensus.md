@@ -15,21 +15,28 @@ mode before it ever places an order.
 - [x] `consensus/ledger.py` — decision log + shadow P&L + 95% CI summary
 - [x] `tests/test_consensus.py`
 
-## Phase B — Agent adapters (next)
-- [ ] Order-book agent (wrap `AnalysisEngine._fair_value`)
-- [ ] Research agent (wrap research pipeline `estimated_probability`)
-- [ ] Base-rate agent (wrap `prior_knowledge.py`)
-- [ ] Domain agents (sentinel / oracle / pulse -> votes, abstain outside domain)
-- [ ] Flow agent (momentum, volume spikes, large fills)
-- [ ] Cross-venue agent (Polymarket price for matched events)
+## Phase B — Agents (WHALE-OS)
+- [x] BOOK — order-book microprice (`consensus/agents/orderbook.py`)
+- [x] WHALES — taker flow + large prints (`consensus/agents/flow.py`)
+- [x] MODEL — weather via Open-Meteo multi-model (`consensus/agents/weather.py`)
+- [x] MODEL — crypto lognormal via Coinbase (`consensus/agents/crypto.py`)
+- [x] HISTORY — series price calibration + builder CLI (`consensus/agents/history.py`, `consensus/calibration.py`)
+- [x] XVENUE — Polymarket, explicit mappings (`consensus/agents/cross_venue.py`)
+- [x] RESEARCH — Gemini + web search, budgeted, price-blind (`consensus/agents/research.py`)
+- [ ] Economics / politics domain agents (oracle / sentinel knowledge -> votes)
 
 ## Phase C — Shadow mode
-- [ ] Recorder in `bot_runner` cycle: build votes, call `ConsensusEngine.decide`, write to `DecisionLedger` — no orders
-- [ ] Settlement hook: `ledger.resolve` + `reliability.resolve` on market settlement
-- [ ] `consensus:` section in `swarm_config.yaml` (`ConsensusConfig.from_dict`)
+- [x] Standalone runner `python -m consensus.shadow` (public data, no keys, no orders)
+- [x] Settlement sweep updates ledger P&L and agent reliability
+- [x] `config/whale_os.yaml`
+- [x] Ledger dedupes to first fire per market; reliability keeps one open forecast per agent+market
+- [ ] Run on the VPS for 2-4 weeks; build calibration tables
 
 ## Phase D — HUD
-- [ ] Agent tiles, consensus matrix, Jev panel, decision tape, P&L — every number labelled DEMO / SHADOW / LIVE
+- [x] `python -m consensus.hud` — agent tiles, Jev rail + gates, decision tape, consensus matrix, shadow P&L, go/no-go meter; labelled SHADOW
+
+## Phase E — Live (only after the gate passes)
+- [ ] Route Jev `fire` decisions through `risk_manager` sizing + global trade guard in `bot_runner`, demo first
 
 ## Go / No-Go gate (before any live capital)
 - Resolved fired decisions >= ~400 (detects a ~5c edge)
@@ -38,3 +45,4 @@ mode before it ever places an order.
 
 ## Review
 - Phase A: 37 new tests; full suite green.
+- Phases B-D: 35 more tests; live read-only cycles ran end-to-end (sandbox: 8 markets; your machine: 80 markets, 117s, 0 errors, weather voting on 56). Round-robin discovery added after the first full cycle starved crypto series.

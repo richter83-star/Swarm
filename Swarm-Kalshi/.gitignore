@@ -60,3 +60,6 @@ openclaw-office/
 license.key
 keygen.py
 temp_test/
+
+# WHALE-OS shadow runtime data
+data/whale_os/

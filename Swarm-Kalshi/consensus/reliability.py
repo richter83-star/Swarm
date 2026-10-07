@@ -19,7 +19,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 from consensus.schema import AgentVote, clamp_probability
 
@@ -76,18 +76,40 @@ class ReliabilityStore:
     # -- writes -----------------------------------------------------------
 
     def record_forecast(self, vote: AgentVote, market_p: float) -> Optional[int]:
-        """Store a non-abstaining vote alongside the market's implied probability."""
+        """
+        Store a non-abstaining vote alongside the market's implied probability.
+
+        One open forecast per (agent, ticker): a newer vote replaces the older
+        one, so an agent polled every cycle is scored once per market, on its
+        latest pre-settlement opinion.
+        """
         if vote.abstained:
             return None
+        args = (float(vote.p_yes), clamp_probability(market_p), float(vote.created_at))
         with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM forecasts WHERE agent = ? AND ticker = ? AND outcome IS NULL",
+                (vote.agent, vote.ticker),
+            ).fetchone()
+            if row:
+                self._conn.execute(
+                    "UPDATE forecasts SET p_yes = ?, market_p = ?, created_at = ? WHERE id = ?",
+                    (*args, row[0]),
+                )
+                self._conn.commit()
+                return int(row[0])
             cur = self._conn.execute(
                 "INSERT INTO forecasts (agent, ticker, p_yes, market_p, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (vote.agent, vote.ticker, float(vote.p_yes),
-                 clamp_probability(market_p), float(vote.created_at)),
+                (vote.agent, vote.ticker, *args),
             )
             self._conn.commit()
             return int(cur.lastrowid)
+
+    def open_tickers(self) -> List[str]:
+        with self._lock:
+            return [r[0] for r in self._conn.execute(
+                "SELECT DISTINCT ticker FROM forecasts WHERE outcome IS NULL")]
 
     def record_votes(self, votes: Iterable[AgentVote], market_p: float) -> int:
         return sum(1 for v in votes if self.record_forecast(v, market_p) is not None)

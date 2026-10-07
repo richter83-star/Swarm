@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WHALE-OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --abyss:#07131F; --panel:#0C1E2E; --panel-2:#0F2638; --line:#17344A; --line-hi:#22506D;
+  --ice:#CFE6EE; --muted:#6F8EA1; --dim:#46657A; --cyan:#5FD4E8;
+  --yes:#4FD1A5; --no:#F2A25C; --veto:#E5677A; --flat:#3A5568;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --head:"Chakra Petch",var(--mono);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--abyss);color:var(--ice);font:14px/1.5 var(--mono)}
+body{min-height:100vh;background:
+  radial-gradient(1200px 500px at 50% -200px,rgba(95,212,232,.10),transparent 70%),var(--abyss)}
+a{color:var(--cyan)}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.wrap{max-width:1600px;margin:0 auto;padding:14px 16px 28px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 22px;padding:6px 2px 14px;border-bottom:1px solid var(--line)}
+.brand{font:700 26px/1 var(--head);letter-spacing:.06em;color:var(--ice)}
+.brand span{color:var(--cyan)}
+.mode{font:600 12px/1 var(--head);padding:6px 9px;border:1px solid var(--cyan);color:var(--cyan);border-radius:3px}
+.stat{color:var(--muted);font-size:12px}
+.stat b{color:var(--ice);font-weight:500}
+.gate{margin-left:auto;min-width:240px}
+.gate .bar{height:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
+.gate .fill{height:100%;background:var(--cyan)}
+.gate.pass .fill{background:var(--yes)}
+
+h2{font:600 15px/1.2 var(--head);margin:0 0 10px;color:var(--ice);letter-spacing:.02em}
+h2 small{font:400 12px var(--mono);color:var(--muted);margin-left:8px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px 14px;min-width:0}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin:14px 0}
+.tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--fam,var(--line-hi));border-radius:4px;padding:10px 12px}
+.tile .top{display:flex;justify-content:space-between;align-items:baseline}
+.tile .name{font:700 16px/1 var(--head);letter-spacing:.08em}
+.tile .fam{font-size:11px;color:var(--muted)}
+.tile .nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;font-size:11px;color:var(--muted);margin:8px 0 6px}
+.tile .nums span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .nums b{display:block;color:var(--ice);font:500 14px/1.3 var(--mono)}
+.tile .err{font-size:11px;color:var(--veto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile canvas{width:100%;height:28px;display:block}
+
+.main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1.5fr) minmax(0,1fr);gap:12px}
+@media (max-width:1150px){.main{grid-template-columns:1fr 1fr}.jev{grid-column:1/-1;order:-1}}
+@media (max-width:720px){.main{grid-template-columns:1fr}.gate{margin-left:0}}
+
+.tape{max-height:560px;overflow:auto}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+.row:last-child{border-bottom:0}
+.tag{font:600 11px/1 var(--head);padding:4px 6px;border-radius:3px;align-self:start;min-width:44px;text-align:center}
+.tag.fire{background:var(--yes);color:#06261C}
+.tag.hold{background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+.tag.veto{background:transparent;color:var(--veto);border:1px solid var(--veto)}
+.row .tk{color:var(--ice);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .why{grid-column:2/4;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .px{color:var(--muted);text-align:right}
+.yes{color:var(--yes)} .no{color:var(--no)}
+
+/* Jev: the one loud element */
+.jev{border-color:var(--line-hi);background:linear-gradient(180deg,var(--panel-2),var(--panel))}
+.jev .head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:baseline}
+.jev .tk{font:600 18px/1.2 var(--head);word-break:break-all}
+.verdict{font:700 30px/1 var(--head);letter-spacing:.04em}
+.verdict.fire{color:var(--yes)} .verdict.hold{color:var(--muted)} .verdict.veto{color:var(--veto)}
+.rail{position:relative;height:150px;margin:18px 4px 6px}
+.rail .axis{position:absolute;left:0;right:0;top:74px;height:2px;background:var(--line-hi)}
+.rail .tick{position:absolute;top:80px;font-size:10px;color:var(--dim);transform:translateX(-50%)}
+.rail .vote{position:absolute;width:3px;height:26px;top:61px;transform:translateX(-1px);border-radius:1px}
+.rail .vote.abs{display:none}
+.rail .mk{position:absolute;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.rail .mk .dot{width:14px;height:14px;border-radius:50%;margin:0 auto}
+.rail .prior{top:98px}.rail .prior .dot{border:2px solid var(--ice);background:var(--abyss)}
+.rail .post{top:5px}.rail .post .dot{background:var(--cyan);box-shadow:0 0 18px rgba(95,212,232,.7)}
+.rail .mk span{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.rail .post span{margin:0 0 3px;order:-1}
+.rail .band{position:absolute;top:66px;height:18px;background:rgba(242,162,92,.14);border-left:1px dashed var(--no);border-right:1px dashed var(--no)}
+@media (prefers-reduced-motion:no-preference){
+  .rail .post,.rail .prior,.rail .vote,.rail .band{transition:left .6s cubic-bezier(.2,.8,.2,1),width .6s}
+}
+.gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;margin-top:10px}
+.g{font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;color:var(--muted)}
+.g.ok{border-color:rgba(79,209,165,.45);color:var(--yes)}
+.g.bad{border-color:rgba(229,103,122,.45);color:var(--veto)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:12px}
+.kv div{font-size:11px;color:var(--muted)}
+.kv b{display:block;font:500 17px/1.2 var(--mono);color:var(--ice)}
+.votes{margin-top:12px;font-size:12px}
+.votes div{display:grid;grid-template-columns:78px 56px 1fr;gap:8px;padding:3px 0;border-top:1px solid var(--line)}
+.votes .r{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.big{font:600 32px/1 var(--head)}
+.big.pos{color:var(--yes)} .big.neg{color:var(--veto)}
+#pnl{width:100%;height:120px;display:block;margin:10px 0}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px;color:var(--muted)}
+.summary b{color:var(--ice);font-weight:500;float:right}
+
+.matrix{margin-top:12px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:5px 8px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 12px var(--head);color:var(--muted);letter-spacing:.06em}
+td.tk,th.tk{text-align:left;color:var(--ice)}
+.c{display:inline-block;width:26px;height:14px;border-radius:2px}
+.c.yes{background:var(--yes)} .c.no{background:var(--no)} .c.flat{background:var(--flat)}
+.c.abstain{background:transparent;border:1px dashed var(--dim)} .c.absent{background:transparent}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--muted);margin-top:8px}
+.legend .c{width:14px;height:10px;vertical-align:middle;margin-right:5px}
+footer{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.6;max-width:110ch}
+.empty{color:var(--muted);font-size:13px;padding:18px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">WHALE<span>-</span>OS</div>
+    <div class="mode" id="mode">SHADOW</div>
+    <div class="stat" id="cycle">Waiting for the first cycle</div>
+    <div class="gate" id="gate">
+      <div class="stat">Go/no-go: <b id="gateText">0 of 400 resolved</b></div>
+      <div class="bar"><div class="fill" id="gateFill" style="width:0%"></div></div>
+    </div>
+  </header>
+
+  <section class="tiles" id="tiles" aria-label="Agents"></section>
+
+  <section class="main">
+    <div class="panel tape-wrap">
+      <h2>Decision tape <small id="tapeCount"></small></h2>
+      <div class="tape" id="tape"><div class="empty">No decisions yet. Start the shadow runner: python -m consensus.shadow</div></div>
+    </div>
+
+    <div class="panel jev" id="jev" aria-live="polite">
+      <h2>Jev <small>pooled view of the most decisive recent market</small></h2>
+      <div class="empty">Jev speaks once agents have voted on a market.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Shadow P&amp;L <small>cents per contract, first fire per market</small></h2>
+      <div class="big" id="pnlBig">0.0c</div>
+      <canvas id="pnl" aria-label="Cumulative shadow P&L"></canvas>
+      <div class="summary" id="summary"></div>
+    </div>
+  </section>
+
+  <section class="panel matrix">
+    <h2>Consensus matrix <small>latest view per market</small></h2>
+    <div id="matrix"><div class="empty">Votes appear here per market and agent.</div></div>
+    <div class="legend">
+      <span><i class="c yes"></i>Above price</span><span><i class="c no"></i>Below price</span>
+      <span><i class="c flat"></i>Agrees with price</span><span><i class="c abstain"></i>Abstained</span>
+    </div>
+  </section>
+
+  <footer id="foot">
+    Shadow mode: no orders are placed. P&amp;L is hypothetical, assumes one contract filled at the logged price
+    including Kalshi fees, and counts only the first fired decision per market. Maker prices assume a fill, so treat
+    them as an upper bound until live fills confirm them.
+  </footer>
+</div>
+
+<script>
+const FAM = {microstructure:"#5FD4E8", weather_model:"#8FB8FF", crypto_model:"#C9A6FF",
+             history:"#E8D27A", cross_venue:"#F29BC6", research:"#7FE3C3"};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (n, d=1, unit="") => (n === null || n === undefined || Number.isNaN(n)) ? "–" : Number(n).toFixed(d) + unit;
+const ago = ts => { if(!ts) return "never"; const s = Math.max(0, Date.now()/1000 - ts);
+  return s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s/60)}m ago` : `${Math.round(s/3600)}h ago`; };
+
+function spark(canvas, values, color){
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const g = canvas.getContext("2d"); g.scale(dpr,dpr); g.clearRect(0,0,w,h);
+  const max = Math.max(1, ...values), bw = w / values.length;
+  g.fillStyle = color;
+  values.forEach((v,i) => { const bh = (v/max)*(h-2); g.globalAlpha = .35 + .65*(v/max);
+    g.fillRect(i*bw+1, h-bh, Math.max(1,bw-2), bh); });
+}
+
+function line(canvas, pts){
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const g = canvas.getContext("2d"); g.scale(dpr,dpr); g.clearRect(0,0,w,h);
+  if (pts.length < 2){ g.fillStyle="#46657A"; g.font="12px JetBrains Mono, monospace";
+    g.fillText("Curve starts after two settled fires", 4, h/2); return; }
+  const ys = pts.map(p=>p.cum), lo = Math.min(0,...ys), hi = Math.max(0,...ys), span = (hi-lo)||1;
+  const X = i => (i/(pts.length-1))*(w-4)+2, Y = v => h-4-((v-lo)/span)*(h-8);
+  g.strokeStyle="#22506D"; g.setLineDash([3,4]); g.beginPath(); g.moveTo(0,Y(0)); g.lineTo(w,Y(0)); g.stroke();
+  g.setLineDash([]); g.lineWidth=2; g.strokeStyle = ys[ys.length-1] >= 0 ? "#4FD1A5" : "#E5677A";
+  g.beginPath(); pts.forEach((p,i)=> i ? g.lineTo(X(i),Y(p.cum)) : g.moveTo(X(i),Y(p.cum))); g.stroke();
+}
+
+function renderHeader(s){
+  document.getElementById("mode").textContent = s.mode;
+  const st = s.status || {};
+  document.getElementById("cycle").innerHTML = st.cycle_started
+    ? `Last cycle <b>${ago(st.cycle_started)}</b>, <b>${st.markets}</b> markets in <b>${fmt(st.cycle_seconds,1)}s</b>, `
+      + `fire <b>${st.counts?.fire||0}</b> / hold <b>${st.counts?.hold||0}</b> / veto <b>${st.counts?.veto||0}</b>, settled <b>${st.settled||0}</b>`
+    : "Waiting for the first cycle";
+  const g = s.go_no_go, pct = Math.min(100, 100*g.resolved/g.target);
+  document.getElementById("gateText").textContent =
+    `${g.resolved} of ${g.target} resolved` + (g.ci_low !== null ? `, CI low ${fmt(g.ci_low,2)}c` : "")
+    + (g.pass ? ", passing" : "");
+  document.getElementById("gateFill").style.width = pct + "%";
+  document.getElementById("gate").classList.toggle("pass", g.pass);
+}
+
+function renderTiles(agents){
+  const el = document.getElementById("tiles");
+  el.innerHTML = agents.map(a => `
+    <article class="tile" style="--fam:${FAM[a.family]||"#22506D"}">
+      <div class="top"><span class="name">${esc(a.label)}</span><span class="fam">${esc(a.family)}${a.tier==="expensive"?", budgeted":""}</span></div>
+      <div class="nums"><span>Votes<b>${a.votes_24h}</b></span><span>Abstain<b>${a.abstains_24h}</b></span>
+        <span>Latency<b>${a.avg_latency_ms|0}ms</b></span><span>Weight<b>${fmt(a.weight,2)}</b></span></div>
+      <canvas data-agent="${esc(a.name)}" aria-label="${esc(a.label)} votes per hour, last 24 hours"></canvas>
+      <div class="nums"><span>Scored<b>${a.resolved_n}</b></span>
+        <span title="Brier skill against the market price">Skill<b class="${a.skill>0?"yes":a.skill<0?"no":""}">${a.resolved_n? (a.skill>0?"+":"")+fmt(a.skill*100,1)+"%" : "–"}</b></span>
+        <span>Seen<b>${ago(a.last_ts)}</b></span><span>Errors<b class="${a.errors_24h?"no":""}">${a.errors_24h}</b></span></div>
+      ${a.errors_24h ? `<div class="err" title="${esc(a.last_error)}">${esc(a.last_error)}</div>` : ""}
+    </article>`).join("");
+  el.querySelectorAll("canvas").forEach(c => {
+    const a = agents.find(x => x.name === c.dataset.agent);
+    spark(c, a.spark, FAM[a.family] || "#5FD4E8");
+  });
+}
+
+function renderTape(tape){
+  const el = document.getElementById("tape");
+  document.getElementById("tapeCount").textContent = tape.length ? `${tape.length} latest` : "";
+  if (!tape.length) return;
+  el.innerHTML = tape.map(d => `
+    <div class="row">
+      <span class="tag ${d.action}">${d.action}</span>
+      <span class="tk" title="${esc(d.ticker)}">${esc(d.ticker)}</span>
+      <span class="px">${d.side?`<span class="${d.side}">${d.side}</span> `:""}${d.price_cents?d.price_cents+"c":""} ${d.action!=="veto"?`${fmt(d.edge_cents,1)}c`:""}
+        ${d.pnl_cents!==null&&d.pnl_cents!==undefined?`<b class="${d.pnl_cents>=0?"yes":"no"}">${d.pnl_cents>=0?"+":""}${fmt(d.pnl_cents,1)}</b>`:""}</span>
+      <span class="why" title="${esc((d.reasons||[]).join("; "))}">${esc((d.reasons||[])[0]||"")} · ${d.voting_count} voting, ${d.abstain_count} abstained</span>
+    </div>`).join("");
+}
+
+function renderJev(j){
+  const el = document.getElementById("jev");
+  if (!j) return;
+  const pct = p => `${Math.min(100,Math.max(0,p*100))}%`;
+  const ticks = [0,25,50,75,100].map(t => `<div class="tick" style="left:${t}%">${t}</div>`).join("");
+  const votes = (j.votes||[]).map(v => {
+    if (v.p_yes === null || v.p_yes === undefined) return "";
+    const color = FAM[v.family] || "#5FD4E8";
+    return `<div class="vote" style="left:${pct(v.p_yes)};background:${color}" title="${esc(v.agent)} ${fmt(v.p_yes*100,1)}"></div>`;
+  }).join("");
+  let band = "";
+  if (j.price_cents){
+    const lo = j.side==="yes" ? j.price_cents : 100-j.price_cents, hi = lo + (j.side==="yes"? j.fee_cents : -j.fee_cents);
+    band = `<div class="band" style="left:${Math.min(lo,hi)}%;width:${Math.max(.6,Math.abs(hi-lo))}%" title="entry price plus fee"></div>`;
+  }
+  el.innerHTML = `
+    <h2>Jev <small>pooled view of the most decisive recent market</small></h2>
+    <div class="head"><div class="tk">${esc(j.ticker)}</div><div class="verdict ${j.action}">${esc(j.action)}${j.side?" "+esc(j.side):""}</div></div>
+    <div class="rail" role="img" aria-label="Market price ${fmt(j.prior*100,1)}, pooled probability ${fmt(j.posterior*100,1)}">
+      <div class="axis"></div>${ticks}${band}${votes}
+      <div class="mk post" style="left:${pct(j.posterior)}"><span>pooled ${fmt(j.posterior*100,1)}</span><div class="dot"></div></div>
+      <div class="mk prior" style="left:${pct(j.prior)}"><div class="dot"></div><span>market ${fmt(j.prior*100,1)}</span></div>
+    </div>
+    <div class="gates">${(j.gates||[]).map(g=>`<div class="g ${g.ok?"ok":"bad"}">${g.ok?"pass":"fail"}: ${esc(g.name)}</div>`).join("")}</div>
+    <div class="kv">
+      <div>Entry<b>${j.price_cents?j.price_cents+"c "+esc(j.order_type||""):"–"}</b></div>
+      <div>Fee per contract<b>${fmt(j.fee_cents,2)}c</b></div>
+      <div>Net edge<b class="${j.edge_cents>0?"yes":"no"}">${fmt(j.edge_cents,2)}c</b></div>
+      <div>Agreement<b>${fmt(j.effective_agree,2)} / ${fmt(j.quorum,0)}</b></div>
+    </div>
+    <div class="votes">${(j.votes||[]).map(v=>`<div><span style="color:${FAM[v.family]||"#5FD4E8"}">&#9646; ${esc(v.agent)}</span>
+      <span>${v.p_yes===null||v.p_yes===undefined?"abstain":fmt(v.p_yes*100,1)}</span>
+      <span class="r" title="${esc(v.rationale)}">${esc(v.rationale)}</span></div>`).join("")}</div>`;
+}
+
+function renderPnl(s){
+  const sum = s.summary, curve = s.pnl_curve || [];
+  const big = document.getElementById("pnlBig");
+  big.textContent = `${sum.total_pnl_cents>=0?"+":""}${fmt(sum.total_pnl_cents,1)}c`;
+  big.className = "big " + (sum.total_pnl_cents>0?"pos":sum.total_pnl_cents<0?"neg":"");
+  line(document.getElementById("pnl"), curve);
+  const ci = sum.pnl_ci95_cents;
+  document.getElementById("summary").innerHTML = `
+    <div>Markets seen<b>${sum.markets}</b></div><div>Fired<b>${sum.fired}</b></div>
+    <div>Resolved fires<b>${sum.resolved_fired}</b></div><div>Win rate<b>${sum.win_rate===null?"–":fmt(sum.win_rate*100,1)+"%"}</b></div>
+    <div>Mean P&amp;L<b>${fmt(sum.mean_pnl_cents,2,"c")}</b></div><div>Expected edge<b>${fmt(sum.mean_expected_edge_cents,2,"c")}</b></div>
+    <div>95% CI<b>${ci?fmt(ci[0],1)+" to "+fmt(ci[1],1):"–"}</b></div><div>Vetoed<b>${sum.vetoed}</b></div>`;
+}
+
+function renderMatrix(m){
+  if (!m.rows.length) return;
+  const head = `<tr><th class="tk">Market</th>${m.agents.map(a=>`<th>${esc(a)}</th>`).join("")}<th>Jev</th></tr>`;
+  const rows = m.rows.map(r => `<tr><td class="tk">${esc(r.ticker)}</td>${m.agents.map(a=>
+      `<td><i class="c ${r.cells[a]}" title="${esc(a)}: ${r.cells[a]}"></i></td>`).join("")}
+      <td><span class="tag ${r.action}">${r.action}${r.side&&r.action==="fire"?" "+r.side:""}</span></td></tr>`).join("");
+  document.getElementById("matrix").innerHTML = `<table><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+}
+
+let timer;
+async function tick(){
+  try{
+    const r = await fetch("/api/state", {cache:"no-store"});
+    if (!r.ok) throw new Error(`HUD API returned ${r.status}`);
+    const s = await r.json();
+    renderHeader(s); renderTiles(s.agents); renderTape(s.tape); renderJev(s.jev); renderPnl(s); renderMatrix(s.matrix);
+    clearTimeout(timer); timer = setTimeout(tick, (s.refresh_seconds||10)*1000);
+  }catch(e){
+    document.getElementById("cycle").textContent = `Cannot reach the HUD API (${e.message}). Retrying in 15s.`;
+    clearTimeout(timer); timer = setTimeout(tick, 15000);
+  }
+}
+tick();
+</script>
+</body>
+</html>

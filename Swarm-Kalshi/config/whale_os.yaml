@@ -1,0 +1,106 @@
+# WHALE-OS — shadow-mode consensus swarm for Kalshi
+#
+# Shadow mode reads PUBLIC market data only and never places orders.
+# It records what Jev would do, then scores every decision and every agent
+# against real settlements.  Promotion to live trading is a separate,
+# deliberate step gated on the go/no-go criteria in tasks/todo_consensus.md.
+
+mode: shadow
+data_dir: data/whale_os          # ledger.db, reliability.db, status.json, calibration.json
+cycle_seconds: 300
+
+# Markets to watch.  Weather (MODEL agent has station data for these) and
+# daily crypto price levels.  Add or remove series freely.
+series:
+  - KXHIGHNY
+  - KXHIGHCHI
+  - KXHIGHMIA
+  - KXHIGHAUS
+  - KXHIGHDEN
+  - KXHIGHLAX
+  - KXHIGHPHIL
+  - KXHIGHTDC
+  - KXHIGHTSFO
+  - KXHIGHTSEA
+  - KXHIGHTHOU
+  - KXBTCD
+  - KXETHD
+
+max_markets_per_series: 8        # highest 24h volume first
+max_markets_per_cycle: 104      # 13 series x 8, interleaved round-robin
+min_hours_to_close: 0.25
+max_hours_to_close: 48
+
+# RESEARCH (LLM + web) only runs where a cheap agent disagrees with the
+# price by at least this much, and at most this many calls per cycle.
+max_expensive_calls_per_cycle: 5
+expensive_trigger_cents: 3.0
+
+record_interval_s: 3600          # re-log an unchanged hold at most hourly
+settle_batch: 60
+agent_run_retention_days: 7
+
+# Jev.  Quorum counts independent FAMILIES (BOOK + WHALES = one family).
+# With MODEL + HISTORY + microstructure (+ RESEARCH/XVENUE when enabled),
+# 3 independent agreeing families is the practical WHALE-OS "4 of 6".
+consensus:
+  quorum: 3
+  min_voters: 3
+  min_edge_cents: 3.0
+  direction_deadband_cents: 1.0
+  market_weight: 1.0
+  correlation_alpha: 1.0
+  max_vote_age_s: 900
+  prefer_maker: true
+  reference_contracts: 10
+  vetoes:
+    max_spread_cents: 6
+    min_hours_to_close: 0.25
+    min_mid_cents: 3
+    max_mid_cents: 97
+    blocked_series_prefixes: [KXMVE]
+    blocked_rule_terms: []
+
+agents:
+  book:
+    enabled: true
+    depth_cents: 3
+  whales:
+    enabled: true
+    window_minutes: 60
+    min_trades: 5
+    max_shift_cents: 4
+    whale_contracts: 250
+  weather:
+    enabled: true
+    models: [gfs_seamless, ecmwf_ifs025, icon_seamless, gem_seamless]
+    max_lead_days: 3
+    same_day_cutoff_local_hour: 11   # skip same-day markets after this local hour
+    base_sigma_f: {0: 1.8, 1: 2.5, 2: 3.2, 3: 3.8}
+    # Verify each station against the market rules text before trusting it.
+    # Override or add: stations: {KXHIGHNY: {name: ..., lat: ..., lon: ..., tz: ...}}
+  crypto:
+    enabled: true
+    granularity_s: 300
+    tail_factor: 1.2
+    min_seconds_to_close: 180
+    max_hours_to_close: 48
+  history:
+    enabled: true
+    # Built by: python -m consensus.calibration --series KXHIGHNY,... --leads 6,24
+    table_path: data/whale_os/calibration.json
+    min_bucket_n: 15
+    prior_n: 20
+  xvenue:
+    enabled: false
+    mappings: []
+  research:
+    enabled: false               # needs GEMINI_API_KEY; costs money per call
+    model: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+    cache_ttl_s: 21600
+
+hud:
+  host: 127.0.0.1
+  port: 8890
+  refresh_seconds: 10
