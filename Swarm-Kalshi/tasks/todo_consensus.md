@@ -34,6 +34,7 @@ mode before it ever places an order.
 
 ## Phase D — HUD
 - [x] `python -m consensus.hud` — agent tiles, Jev rail + gates, decision tape, consensus matrix, shadow P&L, go/no-go meter; labelled SHADOW
+- [x] v2 animated HUD to the WHALE-OS reference: vortex field with source→agent→Jev particle flow, log replay, sources latency, inspector + vote bars, reliability, live book, candles, drift-vs-noise fan, Bayes, matrix, trades_out, tail -f, stat tiles
 
 ## Phase E — Live (only after the gate passes)
 - [ ] Route Jev `fire` decisions through `risk_manager` sizing + global trade guard in `bot_runner`, demo first
@@ -46,3 +47,8 @@ mode before it ever places an order.
 ## Review
 - Phase A: 37 new tests; full suite green.
 - Phases B-D: 35 more tests; live read-only cycles ran end-to-end (sandbox: 8 markets; your machine: 80 markets, 117s, 0 errors, weather voting on 56). Round-robin discovery added after the first full cycle starved crypto series.
+- HUD v2: v1 was rejected (static, far below the reference). Rebuilt; verified with headless screenshots at 1440 and 390 px against the reference crops, zero console errors, frame diff confirms animation. Your machine: 406 tests pass; HUD serving live data (104 markets/cycle, 7 live feeds, book + candles from Kalshi).
+
+## Lessons (this project)
+- A visual reference is the spec: render with realistic data and compare side by side before calling a UI done; empty states hide layout gaps.
+- Scripted edits: replace exact unique strings; never splice between two index() anchors that may be far apart. Back up a file before scripted multi-region edits.
