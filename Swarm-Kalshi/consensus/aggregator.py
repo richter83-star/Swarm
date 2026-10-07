@@ -56,7 +56,7 @@ class ConsensusConfig:
     correlation_alpha: float = 1.0      # 1.0 => a family's total weight == one agent
     confidence_floor: float = 0.5       # weight factor = floor + (1-floor)*confidence
     max_vote_age_s: float = 15 * 60
-    prefer_maker: bool = True
+    prefer_maker: bool = False         # shadow evidence is taker-priced; maker fills are not guaranteed
     taker_rate: float = TAKER_RATE
     maker_rate: float = MAKER_RATE
     reference_contracts: int = 1        # order size assumed for fee rounding (P&L is per contract)

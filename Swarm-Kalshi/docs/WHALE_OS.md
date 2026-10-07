@@ -85,5 +85,10 @@ reliability.db, status.json, calibration.json). All of it is gitignored.
   the deadband (e.g. BOOK at mid) neither helps nor dilutes it.
 - Agent skill is scored on each agent's first opinion per market, never on
   vetoed markets, with the market Brier floored at 0.02.
+- The CI is clustered by event and uses a t value with (events - 1) degrees of
+  freedom, but correlation ACROSS events is not modelled: adjacent BTC hours share
+  one price path, and cities on the same day share forecast-model bias. Treat a
+  marginal pass with suspicion; look at results by day before going live.
+- Calibration only uses candles the runner could trade (spread <= 6c).
 - NWS climate days use local standard time; Open-Meteo days use the local clock.
   During DST the two can disagree by an hour on borderline highs.

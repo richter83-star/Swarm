@@ -231,6 +231,8 @@ class TestAgents:
         from consensus.calibration import _candle_mid_cents
         assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.0000"}, "yes_ask": {"close_dollars": "0.0100"}}) == 1
         assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.0000"}, "yes_ask": {"close_dollars": "1.0000"}}) is None
+        assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.0000"}, "yes_ask": {"close_dollars": "0.6000"}}) is None
+        assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.4400"}, "yes_ask": {"close_dollars": "0.4500"}}) == 45
         cfg = {"leads": [12, 24], "per_series": {"KXBTCD": {"leads": [0.25], "per_event": 8, "max_events": 9}}}
         assert plan_for("KXBTCD", cfg)["leads"] == [0.25] and plan_for("KXBTCD", cfg)["max_events"] == 9
         assert plan_for("KXHIGHNY", cfg)["leads"] == [12.0, 24.0] and plan_for("KXHIGHNY", cfg)["per_event"] == 0

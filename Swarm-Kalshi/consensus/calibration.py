@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,14 +28,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from consensus.data_sources import KalshiPublic, parse_ts, to_cents
 
 log = logging.getLogger(__name__)
+MAX_SPREAD_CENTS = 6          # same as the runner's max_spread veto
 
 
 def _candle_mid_cents(c: Dict[str, Any]) -> Optional[int]:
     bid = to_cents((c.get("yes_bid") or {}).get("close_dollars"))
     ask = to_cents((c.get("yes_ask") or {}).get("close_dollars"))
-    # one-sided books are real prices too: 0c bid / 1c ask is a ~0.5c market
-    if 0 <= bid < ask <= 100 and (bid > 0 or ask < 100):
-        return min(99, max(1, int(round((bid + ask) / 2))))
+    # one-sided books count only when tight (0c bid / 1c ask is a ~0.5c market); a book
+    # wider than the runner's max_spread veto is not a price the runner could ever trade
+    if 0 <= bid < ask <= 100 and (bid > 0 or ask < 100) and ask - bid <= MAX_SPREAD_CENTS:
+        return min(99, max(1, int(math.floor((bid + ask) / 2 + 0.5))))
     price = c.get("price") or {}
     p = to_cents(price.get("close_dollars") or price.get("previous_dollars"))
     return p if 0 < p < 100 else None

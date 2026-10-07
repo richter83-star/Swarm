@@ -73,6 +73,17 @@ def event_of(ticker: str) -> str:
 
 # Only the FIRST fired decision per ticker counts toward P&L statistics:
 # re-evaluating the same market every cycle must not multiply one outcome.
+# two-sided 95% t critical values by degrees of freedom (G - 1 clusters); 1.96 beyond 30
+_T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262,
+        10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131, 16: 2.120, 17: 2.110,
+        18: 2.101, 19: 2.093, 20: 2.086, 21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060,
+        26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042}
+
+
+def t95(df: int) -> float:
+    return _T95.get(df, 1.96) if df >= 1 else float("inf")
+
+
 _FIRST_FIRES = (
     "SELECT MIN(id) FROM decisions WHERE action = 'fire' {extra} GROUP BY ticker"
 )
@@ -303,7 +314,7 @@ class DecisionLedger:
         if n >= 2 and g >= 2:
             # cluster-robust variance of the mean (CR1): (G/(G-1)) * sum_g (sum_i e_i)^2 / n^2
             var = (g / (g - 1)) * sum(r * r for r in clusters.values()) / (n * n)
-            half = 1.96 * math.sqrt(var)
+            half = t95(g - 1) * math.sqrt(var)      # few events -> wide interval, honestly
             ci = (mean_pnl - half, mean_pnl + half)
         return LedgerSummary(
             decisions=sum(counts.values()),

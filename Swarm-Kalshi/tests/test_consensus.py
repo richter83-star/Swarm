@@ -128,8 +128,10 @@ class TestEngine:
         assert d.side == "yes"
         assert d.agree_count == 4
         assert d.abstain_count == 2
-        assert d.order_type == "maker" and d.price_cents == 49
+        assert d.order_type == "taker" and d.price_cents == 52       # default: taker-priced
         assert d.edge_cents >= 2.0
+        m = engine(prefer_maker=True).decide(market(), votes)       # live execution option
+        assert m.order_type == "maker" and m.price_cents == 49
 
     def test_three_agree_holds_on_quorum(self):
         votes = [vote(a, 0.75) for a in "abc"] + [vote("d", 0.50), vote("e", 0.50)]
@@ -208,7 +210,7 @@ class TestEngine:
 
     def test_taker_when_spread_too_tight_for_maker(self):
         votes = [vote(a, 0.80) for a in "abcd"]
-        d = engine().decide(market(yes_bid=50, yes_ask=51), votes)
+        d = engine(prefer_maker=True).decide(market(yes_bid=50, yes_ask=51), votes)
         assert d.order_type == "taker" and d.price_cents == 51
 
     def test_config_from_dict(self):
@@ -309,6 +311,8 @@ class TestLedger:
         naive_half = 1.96 * (sum((p - m) ** 2 for p in pnls) / 11 / 12) ** 0.5
         clustered_half = (s.pnl_ci95_cents[1] - s.pnl_ci95_cents[0]) / 2
         assert clustered_half > 1.5 * naive_half          # 12 correlated strikes != 12 samples
+        from consensus.ledger import t95
+        assert t95(2) == pytest.approx(4.303) and t95(500) == 1.96
 
     def test_summary_since_does_not_recount_refires(self):
         ledger = DecisionLedger()
