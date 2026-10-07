@@ -32,8 +32,9 @@ log = logging.getLogger(__name__)
 def _candle_mid_cents(c: Dict[str, Any]) -> Optional[int]:
     bid = to_cents((c.get("yes_bid") or {}).get("close_dollars"))
     ask = to_cents((c.get("yes_ask") or {}).get("close_dollars"))
-    if 0 < bid < ask < 100:
-        return int(round((bid + ask) / 2))
+    # one-sided books are real prices too: 0c bid / 1c ask is a ~0.5c market
+    if 0 <= bid < ask <= 100 and (bid > 0 or ask < 100):
+        return min(99, max(1, int(round((bid + ask) / 2))))
     price = c.get("price") or {}
     p = to_cents(price.get("close_dollars") or price.get("previous_dollars"))
     return p if 0 < p < 100 else None
@@ -91,12 +92,34 @@ def _strike(m: Dict[str, Any]) -> float:
     return 0.0
 
 
-def sample_by_event(markets: List[Dict[str, Any]], per_event: int, max_events: int) -> List[Dict[str, Any]]:
+def _atm_index(ladder: List[Dict[str, Any]], price_at) -> int:
+    """Index of the strike priced nearest 50c, by binary search (prices are monotone in
+    strike along a ladder).  Falls back to the middle when prices are unavailable."""
+    lo, hi = 0, len(ladder) - 1
+    seen = {lo: price_at(ladder[lo]), hi: price_at(ladder[hi])}
+    if seen[lo] is None or seen[hi] is None or seen[lo] == seen[hi]:
+        return len(ladder) // 2
+    falling = seen[lo] > seen[hi]
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        seen[mid] = price_at(ladder[mid])
+        if seen[mid] is None:
+            return mid
+        if (seen[mid] > 50) == falling:
+            lo = mid
+        else:
+            hi = mid
+    return lo if abs(seen[lo] - 50) <= abs(seen[hi] - 50) else hi
+
+
+def sample_by_event(markets: List[Dict[str, Any]], per_event: int, max_events: int,
+                    price_at=None) -> List[Dict[str, Any]]:
     """
-    Up to ``per_event`` strikes from each of the newest ``max_events`` events, taken from
-    the middle of each event's strike ladder.  The ladder is laid out at listing time,
-    so the choice never looks at the outcome (no hindsight selection), and the middle
-    strikes are the ones that trade away from 0c/100c.
+    Up to ``per_event`` strikes from each of the newest ``max_events`` events, centred on
+    the strike that was priced nearest 50c (``price_at``, evaluated at the EARLIEST lead,
+    so later leads never see selection based on their own future).  Selecting on price
+    is safe for a calibration table: the table is P(yes | price), and price is exactly
+    what is conditioned on.  Without ``price_at`` the ladder middle is used.
     """
     events: Dict[str, List[Dict[str, Any]]] = {}
     for m in markets:
@@ -106,8 +129,8 @@ def sample_by_event(markets: List[Dict[str, Any]], per_event: int, max_events: i
     out: List[Dict[str, Any]] = []
     for ms in newest:
         ladder = sorted(ms, key=_strike)
-        mid = len(ladder) // 2
-        lo = max(0, mid - per_event // 2)
+        mid = _atm_index(ladder, price_at) if price_at and len(ladder) > 2 else len(ladder) // 2
+        lo = max(0, min(mid - per_event // 2, len(ladder) - per_event))
         out.extend(ladder[lo:lo + per_event])
     return out
 
@@ -120,7 +143,14 @@ def build_series(reader: KalshiPublic, series: str, leads: List[float],
         pages = max(1, min(400, (max_events * 120 + 199) // 200))
         settled = [m for m in reader.get_markets(series, status="settled", limit=200, max_pages=pages)
                    if m.get("result") in ("yes", "no")]
-        markets = sample_by_event(settled, per_event, max_events)
+        earliest = max(leads)
+
+        def price_at(m: Dict[str, Any]) -> Optional[int]:
+            try:
+                return market_price_at(reader, series, m, earliest)
+            except Exception:
+                return None
+        markets = sample_by_event(settled, per_event, max_events, price_at)
     else:
         pages = max(1, (max_markets + 199) // 200)
         markets = [m for m in reader.get_markets(series, status="settled", limit=200, max_pages=pages)

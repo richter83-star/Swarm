@@ -121,6 +121,7 @@ calibration:
   bin_width: 10
   per_series:
     # hourly crypto: ~100 strikes per event, open 1h; sample the middle of each ladder
-    KXBTCD: {leads: [0.25, 0.5, 0.75], per_event: 8, max_events: 250}
-    KXETHD: {leads: [0.25, 0.5, 0.75], per_event: 8, max_events: 250}
+    # (strikes centred on the one priced nearest 50c at the earliest lead; ~15 min per series)
+    KXBTCD: {leads: [0.25, 0.5, 0.75], per_event: 6, max_events: 150}
+    KXETHD: {leads: [0.25, 0.5, 0.75], per_event: 6, max_events: 150}
 

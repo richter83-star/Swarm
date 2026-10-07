@@ -224,6 +224,13 @@ class TestAgents:
         picked = sample_by_event(ms, per_event=2, max_events=3)
         assert len(picked) == 6 and {m["floor_strike"] for m in picked} == {140, 150}
         assert {m["event_ticker"] for m in picked} == {"KXBTCD-26OCT0711", "KXBTCD-26OCT0712", "KXBTCD-26OCT0713"}
+        # centred on the strike priced nearest 50c: price falls with strike, 50c crosses at 170
+        price = lambda m: max(1, min(99, 50 - (m["floor_strike"] - 170)))
+        picked = sample_by_event(ms, per_event=2, max_events=1, price_at=price)
+        assert {m["floor_strike"] for m in picked} == {160, 170}
+        from consensus.calibration import _candle_mid_cents
+        assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.0000"}, "yes_ask": {"close_dollars": "0.0100"}}) == 1
+        assert _candle_mid_cents({"yes_bid": {"close_dollars": "0.0000"}, "yes_ask": {"close_dollars": "1.0000"}}) is None
         cfg = {"leads": [12, 24], "per_series": {"KXBTCD": {"leads": [0.25], "per_event": 8, "max_events": 9}}}
         assert plan_for("KXBTCD", cfg)["leads"] == [0.25] and plan_for("KXBTCD", cfg)["max_events"] == 9
         assert plan_for("KXHIGHNY", cfg)["leads"] == [12.0, 24.0] and plan_for("KXHIGHNY", cfg)["per_event"] == 0
