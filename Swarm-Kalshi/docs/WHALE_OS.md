@@ -25,22 +25,37 @@ BOOK and WHALES share a family, so together they count as one vote.
 
 ## Run it (from `Swarm-Kalshi/`)
 
-```bash
-# 1. One cycle to check everything is wired
-python -m consensus.shadow --once
+One control script per platform runs the shadow runner and the HUD in the
+background (PID files in `data/whale_os/run`, logs in `data/whale_os/logs`).
 
-# 2. Optional, recommended: build HISTORY tables (public data, takes a while)
-python -m consensus.calibration --series KXHIGHNY,KXHIGHCHI,KXHIGHMIA,KXHIGHAUS,KXHIGHDEN,KXHIGHLAX,KXHIGHPHIL,KXHIGHTDC,KXHIGHTSFO,KXHIGHTSEA,KXHIGHTHOU,KXBTCD,KXETHD --leads 6,24
-
-# 3. Run continuously (every 5 minutes by default)
-python -m consensus.shadow
-
-# 4. HUD in another terminal -> http://127.0.0.1:8890
-python -m consensus.hud
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\whale_os.ps1 start      # runner + HUD
+powershell -ExecutionPolicy Bypass -File scripts\whale_os.ps1 status     # processes + report
+powershell -ExecutionPolicy Bypass -File scripts\whale_os.ps1 calibrate  # rebuild HISTORY table (~25 min)
+powershell -ExecutionPolicy Bypass -File scripts\whale_os.ps1 stop
 ```
 
+```bash
+# Linux / VPS (HUD stays on 127.0.0.1; tunnel it: ssh -L 8890:127.0.0.1:8890 root@<vps>)
+./scripts/whale_os.sh start | status | calibrate | report | logs | stop
+```
+
+Pieces, if you want them one at a time:
+
+```bash
+python -m consensus.shadow --once     # one cycle, to check wiring
+python -m consensus.calibration       # HISTORY table for every series in whale_os.yaml
+python -m consensus.shadow            # continuous, every cycle_seconds (default 300)
+python -m consensus.hud               # http://127.0.0.1:8890
+python -m consensus.report            # plain-text status, go/no-go, per-agent skill
+```
+
+The HISTORY agent re-reads `calibration.json` when it changes (checked every
+60 s), so rebuilding the table weekly needs no restart.
+
 Config: `config/whale_os.yaml`. Data: `data/whale_os/` (ledger.db,
-reliability.db, status.json, calibration.json).
+reliability.db, status.json, calibration.json). All of it is gitignored.
 
 ## Go / no-go before any live capital
 
@@ -56,3 +71,7 @@ reliability.db, status.json, calibration.json).
 - Crypto uses Coinbase spot as a proxy; Kalshi settles on a CF Benchmarks index.
 - Maker entries assume a fill, so shadow P&L on maker orders is an upper bound.
 - Maker fee treatment varies by series; check Kalshi's current fee schedule.
+- HISTORY is fitted on past settled markets; its edge is measured only on
+  markets settled after the table was built (the shadow ledger), never in-sample.
+- With quorum 3 and at most three independent families per market (book, weather
+  or crypto, history), a fire needs every family to agree. Expect few fires.

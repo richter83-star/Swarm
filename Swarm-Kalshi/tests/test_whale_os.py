@@ -210,6 +210,26 @@ class TestAgents:
         v, _ = HistoryAgent({}, table=table).vote(ctx_for(raw_market()))
         assert v.abstained
 
+    def test_history_hot_reloads_rebuilt_table(self, tmp_path):
+        import os
+        path = tmp_path / "calibration.json"
+        clock = {"t": 0.0}
+        agent = HistoryAgent({"table_path": str(path), "prior_n": 0, "reload_check_s": 60},
+                             clock=lambda: clock["t"])
+        v, _ = agent.vote(ctx_for(raw_market()))
+        assert v.abstained                                   # no file yet
+        path.write_text(json.dumps({"series": {"KXHIGHNY": {"leads": {"24": {"n": 100, "bins": [
+            {"lo": 40, "hi": 50, "n": 100, "yes": 30, "avg_price": 45.0}]}}}}}))
+        clock["t"] = 30.0
+        assert agent.vote(ctx_for(raw_market()))[0].abstained   # throttled: not re-checked yet
+        clock["t"] = 61.0
+        v, _ = agent.vote(ctx_for(raw_market()))
+        assert v.p_yes == pytest.approx(0.30, abs=1e-6)
+        path.write_text("{not json")                          # half-written rebuild
+        os.utime(path, (1, 1))
+        clock["t"] = 200.0
+        assert agent.vote(ctx_for(raw_market()))[0].abstained   # degrades to abstain, no crash
+
     def test_cross_venue_mapping_and_invert(self):
         class PM:
             def outcome_price(self, slug, outcome="Yes"):
@@ -361,6 +381,28 @@ class TestShadow:
         assert state["trades"][0]["ticker"] == m["ticker"] and state["inspector"]["ticker"] == m["ticker"]
         assert any(line["kind"] == "fire" for line in state["log"])
         assert state["fan"]["ready"] is False and state["hourly"]["fire"][-1] == 1
+        assert state["calibration"]["exists"] is False and state["calibration"]["missing"] == ["KXHIGHNY"]
+
+    def test_report_summarizes_runner_and_gate(self, tmp_path):
+        from consensus.report import render, summarize
+        runner, clock = make_runner(tmp_path, [raw_market()], [StubAgent(n, 0.70) for n in ("a", "b", "c")])
+        runner.run_cycle()
+        r = summarize(runner.s, now=clock["t"] + 60)
+        assert r["runner"]["healthy"] and r["summary"]["fired"] == 1
+        assert r["go_no_go"]["pass"] is False and r["calibration"]["exists"] is False
+        text = render(r)
+        assert "SHADOW" in text and "fired 1" in text and "not yet" in text
+        assert summarize(runner.s, now=clock["t"] + 86400)["runner"]["healthy"] is False
+
+    def test_hud_calibration_status(self, tmp_path):
+        path = tmp_path / "calibration.json"
+        path.write_text(json.dumps({"series": {"KXHIGHNY": {"built_at": NOW - 2 * 86400, "leads": {
+            "6.0": {"n": 120, "bins": []}, "24.0": {"n": 80, "bins": []}}}}}))
+        s = WhaleOSSettings.from_dict({"data_dir": str(tmp_path), "series": ["KXHIGHNY", "KXBTCD"],
+                                       "agents": {"history": {"table_path": str(path)}}})
+        cal = build_state(s, DecisionLedger(), ReliabilityStore(":memory:"), now=NOW)["calibration"]
+        assert cal["exists"] and cal["series"] == ["KXHIGHNY"] and cal["missing"] == ["KXBTCD"]
+        assert cal["age_days"] == 2.0 and cal["samples"] == 200
 
     def test_drift_fan_bootstrap(self):
         from consensus.hud.state import _fan
@@ -401,6 +443,24 @@ class TestShadow:
         assert c.get("/healthz").json["ok"] is True
         assert c.get("/api/state").status_code == 200
         assert b"WHALE" in c.get("/").data
+
+
+def test_calibration_cli_defaults_to_config(tmp_path, monkeypatch):
+    import consensus.calibration as cal
+    seen = []
+
+    class Reader:
+        def get_markets(self, series, **kw):
+            seen.append(series)
+            return []
+    monkeypatch.setattr(cal, "KalshiPublic", Reader)
+    out = tmp_path / "cal.json"
+    cfg = tmp_path / "w.yaml"
+    cfg.write_text(f"data_dir: {tmp_path.as_posix()}\nseries: [KXHIGHNY, KXBTCD]\n"
+                   f"agents:\n  history:\n    table_path: {out.as_posix()}\n")
+    assert cal.main(["--config", str(cfg), "--leads", "6"]) == 0
+    assert seen == ["KXHIGHNY", "KXBTCD"]
+    assert sorted(json.loads(out.read_text())["series"]) == ["KXBTCD", "KXHIGHNY"]
 
 
 def test_settings_refuse_live_mode(tmp_path):

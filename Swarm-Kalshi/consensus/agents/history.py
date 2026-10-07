@@ -6,10 +6,16 @@ price actually resolved YES (table built by ``consensus.calibration``),
 shrinks that rate toward the price when the bucket is thin, and applies the
 bias to the current mid.  Abstains when the series has no table or the
 bucket has too few samples.
+
+The table file is re-read when it changes on disk (checked at most every
+``reload_check_s`` seconds), so a weekly rebuild takes effect without a
+restart of the shadow runner.
 """
 
 from __future__ import annotations
 
+import os
+import time
 from typing import Any, Dict, Optional
 
 from consensus.agents.base import Agent, Estimate, MarketContext
@@ -21,13 +27,44 @@ class HistoryAgent(Agent):
     family = "history"
     label = "HISTORY"
 
-    def __init__(self, config=None, table: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config=None, table: Optional[Dict[str, Any]] = None,
+                 clock=time.monotonic) -> None:
         super().__init__(config)
-        self.table = table if table is not None else load_table(self.config.get("table_path", ""))
+        self.path = "" if table is not None else str(self.config.get("table_path", "") or "")
+        self.reload_check_s = float(self.config.get("reload_check_s", 60))
+        self._clock = clock
+        self._mtime: Optional[float] = None
+        self._checked = clock()
+        self.table = table if table is not None else self._read()
         self.min_n = int(self.config.get("min_bucket_n", 15))
         self.prior_n = float(self.config.get("prior_n", 20))
 
+    def _read(self) -> Dict[str, Any]:
+        try:
+            self._mtime = os.path.getmtime(self.path) if self.path else None
+        except OSError:
+            self._mtime = None
+        try:
+            return load_table(self.path)
+        except (OSError, ValueError):          # half-written or corrupt: keep running, abstain
+            return {"version": 1, "series": {}}
+
+    def maybe_reload(self) -> bool:
+        """Re-read the table if the file changed since the last read."""
+        if not self.path or self._clock() - self._checked < self.reload_check_s:
+            return False
+        self._checked = self._clock()
+        try:
+            mtime = os.path.getmtime(self.path)
+        except OSError:
+            return False
+        if mtime == self._mtime:
+            return False
+        self.table = self._read()
+        return True
+
     def applies(self, ctx: MarketContext) -> bool:
+        self.maybe_reload()
         return ctx.series in (self.table.get("series") or {})
 
     def _lead_entry(self, entry: Dict[str, Any], hours: Optional[float]) -> Optional[Dict[str, Any]]:

@@ -10,6 +10,9 @@ CLI (public data, no credentials):
 
     python -m consensus.calibration --series KXHIGHNY,KXHIGHCHI \
         --leads 6,24 --max-markets 300 --out data/whale_os/calibration.json
+
+    python -m consensus.calibration      # every series in config/whale_os.yaml,
+                                         # written where the HISTORY agent reads it
 """
 
 from __future__ import annotations
@@ -112,12 +115,20 @@ def save_table(path: str, table: Dict[str, Any]) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Build WHALE-OS price calibration tables")
-    ap.add_argument("--series", required=True, help="comma-separated series tickers")
+    ap.add_argument("--series", default="", help="comma-separated series tickers "
+                    "(default: every series in whale_os.yaml)")
+    ap.add_argument("--config", default=None, help="path to whale_os.yaml")
     ap.add_argument("--leads", default="6,24", help="hours before close, comma-separated")
     ap.add_argument("--max-markets", type=int, default=300)
     ap.add_argument("--bin-width", type=int, default=10)
-    ap.add_argument("--out", default="data/whale_os/calibration.json")
+    ap.add_argument("--out", default="", help="default: the HISTORY agent's table_path")
     args = ap.parse_args(argv)
+    if not args.series or not args.out:
+        from consensus.settings import load_settings
+        settings = load_settings(args.config)
+        args.series = args.series or ",".join(settings.series)
+        args.out = args.out or str((settings.agents.get("history") or {}).get("table_path")
+                                   or settings.calibration_path)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     reader = KalshiPublic()

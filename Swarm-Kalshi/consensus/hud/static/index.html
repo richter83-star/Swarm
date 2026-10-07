@@ -512,7 +512,11 @@ function renderTiles(){
     const errRate = a.runs_24h ? a.errors_24h / a.runs_24h : 0;   // flag only a failing agent, not one stray timeout
     const state = !a.enabled ? "offline" : errRate > .2 ? `<span class="st-err">err ${(errRate*100)|0}%</span>` : live ? `<span class="st-poll">polling</span>` : "idle";
     const l1 = t.querySelector(".l1"), l2 = t.querySelector(".l2");
-    l1.innerHTML = `<b>${a.sources.length}</b> src · ${state}`; l1.title = a.family;
+    const cal = S.calibration || {};
+    l1.innerHTML = a.name === "history" && a.enabled
+      ? (cal.exists ? `table <b>${cal.series.length}</b> series · <b>${fmt(cal.age_days,1)}d</b> old · ${state}` : `<span class="st-err">no table</span> · run calibrate`)
+      : `<b>${a.sources.length}</b> src · ${state}`;
+    l1.title = a.name === "history" && cal.missing && cal.missing.length ? `${a.family} · not covered: ${cal.missing.join(", ")}` : a.family;
     l2.innerHTML = a.enabled ? `sig <b>${a.votes_24h}</b> · lat <b>${a.avg_latency_ms|0}ms</b> · err <b>${a.errors_24h}</b> · w <b>${fmt(a.weight,2)}</b>` : `enable in whale_os.yaml`;
     l2.title = a.last_error || "";
     a._cv = t.querySelector("canvas"); });

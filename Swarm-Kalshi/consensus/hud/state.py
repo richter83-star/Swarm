@@ -112,6 +112,28 @@ def _log_lines(recent: List[Dict[str, Any]], runs: List[Dict[str, Any]], band: f
     return lines[-80:]
 
 
+def _calibration(settings: WhaleOSSettings, now: float) -> Dict[str, Any]:
+    """Is the HISTORY table present, how fresh, which series does it cover?"""
+    path = str(((settings.agents or {}).get("history") or {}).get("table_path") or "")
+    out: Dict[str, Any] = {"exists": False, "series": [], "missing": list(settings.series),
+                           "age_days": None, "samples": 0}
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            table = json.load(fh)
+    except (OSError, ValueError):
+        return out
+    series = table.get("series") or {}
+    built = [float(v.get("built_at") or 0) for v in series.values() if v.get("built_at")]
+    out.update(exists=True, series=sorted(series),
+               missing=[x for x in settings.series if x not in series],
+               age_days=round((now - min(built)) / 86400, 1) if built else None,
+               samples=sum(int(l.get("n") or 0) for v in series.values()
+                           for l in (v.get("leads") or {}).values()))
+    return out
+
+
 def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
                 reliability: ReliabilityStore, now: Optional[float] = None) -> Dict[str, Any]:
     now = time.time() if now is None else now
@@ -270,6 +292,7 @@ def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
         "fan": _fan([c["pnl"] for c in curve]),
         "hourly": {"votes": votes_hourly, **hourly},
         "series": settings.series,
+        "calibration": _calibration(settings, now),
         "markets_tape": [{"ticker": t, "mid": d["market_mid_cents"], "action": d["action"]}
                          for t, d in list(latest_by_ticker.items())[:40]],
     }
