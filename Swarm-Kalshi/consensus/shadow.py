@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from consensus.agents import Agent, MarketContext, build_agents
 from consensus.aggregator import ConsensusConfig, ConsensusEngine
-from consensus.data_sources import KalshiPublic, parse_ts, snapshot_from_market
+from consensus.data_sources import KalshiPublic, parse_ts, snapshot_from_market, source_stats
 from consensus.ledger import DecisionLedger
 from consensus.reliability import ReliabilityStore
 from consensus.schema import AgentVote, Decision
@@ -169,6 +169,8 @@ class ShadowRunner:
             "expensive_calls_left": budget["expensive"],
             "series": self.s.series,
             "agents": [a.name for a in self.agents],
+            "cycle_period_s": self.s.cycle_seconds,
+            "sources": source_stats(),
         }
         self._write_status(report)
         return report

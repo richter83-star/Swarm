@@ -83,6 +83,15 @@ class TestParsing:
         assert om.daily_max_f(0, 0, "UTC", "2026-10-08", ["gfs_seamless", "ecmwf_ifs025"]) == {
             "gfs_seamless": 74.1, "ecmwf_ifs025": 75.3}
 
+    def test_source_labels(self):
+        from consensus.data_sources import source_label
+        base = "https://api.elections.kalshi.com/trade-api/v2"
+        assert source_label(f"{base}/markets/KXHIGHNY-26OCT08-B74.5/orderbook") == "kalshi /orderbook"
+        assert source_label(f"{base}/markets/trades") == "kalshi /trades"
+        assert source_label(f"{base}/markets") == "kalshi /markets"
+        assert source_label(f"{base}/markets/KXHIGHNY-26OCT08-B74.5") == "kalshi /market"
+        assert source_label("https://api.exchange.coinbase.com/products/BTC-USD/candles") == "coinbase /candles"
+
     def test_open_meteo_error_raises(self):
         om = OpenMeteo(get_json=lambda url, params: {"error": True, "reason": "limit"})
         with pytest.raises(RuntimeError):
@@ -346,9 +355,42 @@ class TestShadow:
         state = build_state(runner.s, runner.ledger, runner.reliability, now=clock["t"])
         assert state["mode"] == "SHADOW"
         assert state["jev"]["action"] == "fire"
-        assert state["matrix"]["rows"][0]["cells"]["book"] == "yes"
+        assert state["matrix"]["history"][-1]["cells"]["book"] == "yes"
         assert state["go_no_go"]["target"] == 400 and state["go_no_go"]["pass"] is False
         assert any(a["name"] == "book" and a["votes_24h"] == 1 for a in state["agents"])
+        assert state["trades"][0]["ticker"] == m["ticker"] and state["inspector"]["ticker"] == m["ticker"]
+        assert any(line["kind"] == "fire" for line in state["log"])
+        assert state["fan"]["ready"] is False and state["hourly"]["fire"][-1] == 1
+
+    def test_drift_fan_bootstrap(self):
+        from consensus.hud.state import _fan
+        fan = _fan([10.0] * 8 + [-5.0] * 4)
+        assert fan["ready"] and len(fan["paths"]) == 120 and len(fan["paths"][0]) == 13
+        assert fan["actual"][-1] == pytest.approx(60.0)
+        assert fan["p5"] <= fan["median"] <= fan["p95"] and 0.0 <= fan["p_profit"] <= 1.0
+
+    def test_market_snapshot_and_endpoint(self, tmp_path):
+        pytest.importorskip("flask")
+        from consensus.hud import create_app, market_snapshot
+
+        class R(FakeReader):
+            def get_orderbook(self, ticker):
+                return {"yes": [[44, 10.0]], "no": [[54, 12.0]]}
+
+            def get_candlesticks(self, series, ticker, start, end, period_interval=60):
+                return [{"end_period_ts": 1, "price": {"open_dollars": "0.40", "high_dollars": "0.46",
+                                                       "low_dollars": "0.39", "close_dollars": "0.45"},
+                         "volume_fp": "12.00"},
+                        {"end_period_ts": 2, "price": {"previous_dollars": "0.45"},
+                         "yes_bid": {"close_dollars": "0.44"}, "yes_ask": {"close_dollars": "0.46"}}]
+        reader = R([raw_market()])
+        snap = market_snapshot(reader, raw_market()["ticker"], NOW)
+        assert snap["candles"][0] == {"t": 1, "o": 40, "h": 46, "l": 39, "c": 45, "v": 12.0}
+        assert snap["candles"][1]["c"] == 45.0 and snap["book"]["no"] == [[54, 12.0]]
+        runner, _ = make_runner(tmp_path, [raw_market()], [StubAgent("a", 0.5)])
+        c = create_app(runner.s, runner.ledger, runner.reliability, reader=reader).test_client()
+        assert c.get(f"/api/market/{raw_market()['ticker']}").json["yes_bid"] == 44
+        assert c.get("/api/market/bad%20ticker!").status_code == 400
 
     def test_hud_flask_endpoints(self, tmp_path):
         pytest.importorskip("flask")

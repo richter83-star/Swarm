@@ -35,6 +35,55 @@ POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
 
 
 # --------------------------------------------------------------------------- #
+# Per-source latency stats (shown on the HUD's sources panel)
+# --------------------------------------------------------------------------- #
+
+SOURCE_STATS: Dict[str, Dict[str, Any]] = {}
+_STATS_LOCK = threading.Lock()
+
+
+def source_label(url: str) -> str:
+    """Human label for an endpoint, e.g. 'kalshi /orderbook', 'coinbase /candles'."""
+    p = urlparse(url)
+    host, path = p.netloc.lower(), p.path
+    if "kalshi" in host:
+        for key in ("orderbook", "trades", "candlesticks"):
+            if key in path:
+                return f"kalshi /{key}"
+        return "kalshi /market" if path.rstrip("/").count("/markets/") else "kalshi /markets"
+    if "open-meteo" in host:
+        return "open-meteo /forecast"
+    if "coinbase" in host:
+        return "coinbase /candles" if "candles" in path else "coinbase /ticker"
+    if "polymarket" in host:
+        return "polymarket /markets"
+    return host or url
+
+
+def record_source(label: str, host: str, ms: float, ok: bool) -> None:
+    with _STATS_LOCK:
+        s = SOURCE_STATS.setdefault(label, {"name": label, "host": host, "calls": 0, "errors": 0,
+                                            "total_ms": 0.0, "last_ms": 0, "samples": [], "last_ts": 0.0})
+        s["calls"] += 1
+        s["errors"] += 0 if ok else 1
+        s["total_ms"] += ms
+        s["last_ms"] = int(ms)
+        s["last_ts"] = time.time()
+        s["samples"] = (s["samples"] + [int(ms)])[-24:]
+
+
+def source_stats() -> List[Dict[str, Any]]:
+    with _STATS_LOCK:
+        out = []
+        for s in SOURCE_STATS.values():
+            d = {k: v for k, v in s.items() if k != "total_ms"}
+            d["avg_ms"] = round(s["total_ms"] / s["calls"], 1) if s["calls"] else 0.0
+            d["samples"] = list(s["samples"])
+            out.append(d)
+        return sorted(out, key=lambda d: d["name"])
+
+
+# --------------------------------------------------------------------------- #
 # HTTP
 # --------------------------------------------------------------------------- #
 
@@ -63,14 +112,23 @@ class HttpJson:
 
     def __call__(self, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
         host = urlparse(url).netloc
+        label = source_label(url)
         delay = 1.0
         for attempt in range(self.max_retries + 1):
             self._space(host)
-            resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            t0 = time.monotonic()
+            try:
+                resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            except Exception:
+                record_source(label, host, (time.monotonic() - t0) * 1000, False)
+                raise
+            ms = (time.monotonic() - t0) * 1000
             if resp.status_code == 429 and attempt < self.max_retries:
+                record_source(label, host, ms, False)
                 time.sleep(delay)
                 delay *= 2
                 continue
+            record_source(label, host, ms, resp.ok)
             resp.raise_for_status()
             return resp.json()
         raise RuntimeError(f"rate limited: {url}")

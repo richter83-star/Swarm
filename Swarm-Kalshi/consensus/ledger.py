@@ -202,6 +202,28 @@ class DecisionLedger:
             a["avg_latency_ms"] = round(a.pop("latency_sum") / a["runs"], 1) if a["runs"] else 0.0
         return out
 
+    def hourly_counts(self, since: float, buckets: int = 24, bucket_s: int = 3600) -> Dict[str, List[int]]:
+        """Decisions per action per hour bucket, oldest bucket first."""
+        out = {a: [0] * buckets for a in ("fire", "hold", "veto")}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, CAST((created_at - ?) / ? AS INTEGER) AS b, COUNT(*) FROM decisions "
+                "WHERE created_at >= ? GROUP BY action, b",
+                (float(since), int(bucket_s), float(since))).fetchall()
+        for action, b, n in rows:
+            b = min(int(b), buckets - 1)          # 'now' itself lands in the last bucket
+            if action in out and b >= 0:
+                out[action][b] += n
+        return out
+
+    def recent_runs(self, limit: int = 60) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, agent, ticker, latency_ms, status, error FROM agent_runs "
+                "ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+        return [{"ts": r[0], "agent": r[1], "ticker": r[2], "latency_ms": r[3],
+                 "status": r[4], "error": r[5] or ""} for r in rows]
+
     def open_tickers(self) -> List[str]:
         with self._lock:
             return [r[0] for r in self._conn.execute(

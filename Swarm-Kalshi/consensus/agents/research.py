@@ -60,18 +60,29 @@ def gemini_forecaster(model: str, api_key: str) -> Forecaster:
     from google import genai
     from google.genai import types
 
+    import time
+
+    from consensus.data_sources import record_source
+
     client = genai.Client(api_key=api_key)
 
     def run(prompt: str) -> str:
-        resp = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                temperature=0.2,
-            ),
-        )
-        return getattr(resp, "text", "") or ""
+        t0 = time.monotonic()
+        ok = False
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.2,
+                ),
+            )
+            ok = True
+            return getattr(resp, "text", "") or ""
+        finally:
+            record_source("gemini /search", "generativelanguage.googleapis.com",
+                          (time.monotonic() - t0) * 1000, ok)
 
     return run
 
