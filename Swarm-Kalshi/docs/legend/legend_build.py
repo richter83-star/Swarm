@@ -140,7 +140,7 @@ def build(sys_, pw):
 
 if __name__ == "__main__":
     env = pathlib.Path("/root/govaward-alpha/.env").read_text()
-    pw_ = next(l.split("=", 1)[1].strip() for l in env.splitlines() if l.startswith("GOVAWARD_DASH_PASSWORD="))
+    pw_ = next((l.split("=", 1)[1].strip() for l in env.splitlines() if l.startswith("GOVAWARD_DASH_PASSWORD=")), None)
     GOV["ctx"] = {"http_credentials": {"username": "legend", "password": pw_}}
     import sys
     only = set(sys.argv[1:])            # e.g. "WHALE_OS" to rebuild one sheet
