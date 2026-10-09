@@ -25,7 +25,7 @@ body{min-height:100vh;overflow-x:hidden;
 body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
   background:repeating-linear-gradient(180deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px)}
 :focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.os{max-width:1920px;margin:0 auto;padding:10px 12px 0;display:grid;gap:8px;
+.os{max-width:none;margin:0;padding:10px 14px 0;display:grid;gap:8px;
   grid-template-columns:repeat(12,minmax(0,1fr))}
 
 /* panels with corner brackets */
@@ -72,7 +72,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
 
 /* main band */
 .left{grid-column:1/4;display:grid;grid-template-rows:auto auto 1fr;gap:8px;min-height:0}
-.field{grid-column:4/10;padding:0;min-height:640px;container-type:inline-size;overflow:hidden}
+.field{grid-column:4/10;padding:0;min-height:700px;container-type:inline-size;overflow:hidden}
 .right{grid-column:10/13;display:grid;grid-template-rows:auto auto 1fr;gap:8px}
 
 .src{max-height:380px;overflow:hidden}
@@ -104,16 +104,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
 .rel .note{margin-top:8px;color:var(--dimmer);font-size:11px;line-height:1.5}
 
 .field canvas{position:absolute;inset:0;width:100%;height:100%;z-index:1}
-.field .fhud,.field .head{z-index:2}
+.field .fhud,.field .mission{z-index:2}
 .fhud{position:absolute;left:14px;top:10px;color:var(--dimmer);font-size:11px;line-height:1.6;pointer-events:none}
 .fhud.r{left:auto;right:14px;text-align:right}
 .fhud.b{top:auto;bottom:10px}
-.head{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;pointer-events:none;padding:0 14px}
-.head .l1{font:700 clamp(15px,4.2cqw,46px)/1.08 var(--head);color:var(--bright);letter-spacing:.02em;text-shadow:var(--glow)}
-.head .l2{font:700 clamp(15px,4.2cqw,46px)/1.12 var(--head);color:var(--cyan);text-shadow:0 0 22px rgba(57,255,20,.7)}
-.head .l3{margin-top:14px;font-size:12px;letter-spacing:.32em;color:#5FA77A}
-.ghost{position:absolute;left:4%;top:9%;z-index:0;pointer-events:none;font:700 clamp(18px,4.4cqw,44px)/1 var(--head);color:#12391F;opacity:.7}
-.ghost small{display:block;font-size:.8em;color:#1A5A30;margin-top:6px}
+.mission{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:2;pointer-events:none;white-space:nowrap;
+  font:600 11px/1 var(--head);letter-spacing:.2em;color:#5FA77A;text-transform:uppercase;padding:6px 14px;
+  border:1px solid var(--line2);background:rgba(0,0,0,.6);box-shadow:0 0 18px rgba(57,255,20,.08) inset}
+.mission b{color:var(--cyan);font-weight:700;text-shadow:0 0 8px rgba(57,255,20,.7)}
+.mission .ms{display:none}
+@container (max-width:1100px){ .mission .ml{display:none} .mission .ms{display:inline} }
+#fTL{display:none}
+@container (max-width:560px){ .mission{top:58px} #fTR{display:none} }
+.fhud.b.ev{font-size:12px;color:var(--text)} .ev .k-fire{color:var(--yes)} .ev .k-veto{color:var(--veto)} .ev .k-hold{color:#8FE3AE}
+.ghost{position:absolute;left:14px;top:10px;z-index:2;pointer-events:none;font:700 22px/1.05 var(--head);
+  color:var(--cyan);text-shadow:0 0 12px rgba(57,255,20,.55)}
+.ghost small{display:block;font:11px/1.3 var(--mono);color:var(--dim);letter-spacing:.08em;margin-top:4px}
+.ghost.neg{color:#FF8FA3;text-shadow:0 0 12px rgba(255,59,92,.45)}
 
 .jev .big{display:flex;align-items:center;gap:14px}
 .jev .num{font:700 64px/1 var(--head);color:var(--bright);text-shadow:var(--glow);letter-spacing:.01em}
@@ -175,6 +182,13 @@ td.n{color:var(--dimmer)} td.a{color:var(--cyan)} td.r{text-align:right}
   background:repeating-linear-gradient(90deg,#7FE8A6 0 2px,transparent 2px 3px,#7FE8A6 3px 4px,transparent 4px 7px,#7FE8A6 7px 10px,transparent 10px 11px)}
 @keyframes scroll{to{transform:translateX(-100%)}}
 
+@media (min-width:1800px){
+  html,body{font-size:14px}
+  .ph h2{font-size:18px} .tile .nm{font-size:17px} .tile .meta{font-size:12px} .tile canvas{height:36px}
+  .jev .num{font-size:80px} .pnl .num{font-size:54px} .stat .v{font-size:44px} .stat canvas{height:42px}
+  .row3>.p{height:330px} .trades,.logp{height:350px} .field{min-height:860px}
+  .ll{height:23px} .lrow{height:21px} .srow{height:21px}
+}
 @media (max-width:1400px){
   .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
   .left{grid-column:1/5}.field{grid-column:5/13}.right{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto}
@@ -188,7 +202,7 @@ td.n{color:var(--dimmer)} td.a{color:var(--cyan)} td.r{text-align:right}
   .left,.field,.right,.row3>.p,.trades,.logp{grid-column:1/-1}
   .right{grid-template-columns:1fr}
   .field{min-height:560px}
-  .ghost{display:none}
+  .ghost{font-size:18px}
   .left,.right,.row3>.p,.trades,.logp,.stats,.marq{order:1}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .sys{margin-left:0}
@@ -241,13 +255,9 @@ td.n{color:var(--dimmer)} td.a{color:var(--cyan)} td.r{text-align:right}
     <canvas id="fieldCv" aria-hidden="true"></canvas>
     <div class="fhud" id="fTL">VORTEX · decision field · jev core<br>particles 0 · ticks 0 · agents 0</div>
     <div class="fhud r" id="fTR">replay 0/0<br>fps 0</div>
-    <div class="ghost" id="ghost">SHADOW P&amp;L<small id="ghostV">+0.0c / contract</small></div>
-    <div class="head">
-      <div class="l1" id="h1">0 SERIES · 0 AGENTS · ONE RULE</div>
-      <div class="l2" id="h2">JEV FIRES ONLY WHEN 3 FAMILIES AGREE</div>
-      <div class="l3">SHADOW MODE · NO ORDERS ARE PLACED</div>
-    </div>
-    <div class="fhud b" id="fBL">last event —</div>
+    <div class="ghost" id="ghost"><span id="ghostN">+0.0c</span><small id="ghostV">shadow p&amp;l · per contract</small></div>
+    <div class="mission" id="mission">jev fires only when <b>3</b> families agree · shadow mode · no orders</div>
+    <div class="fhud b ev" id="fBL">last event —</div>
     <div class="fhud r b" id="fBR">fires at quorum · net of fees</div>
   </section>
 
@@ -380,7 +390,7 @@ const Field = {
       this.nodes["s:"+s.name] = {x: cx + Math.cos(a)*w*(narrow ? .30 : .37), y: cy + Math.sin(a)*h*.41, label: s.name, src: s, ph: i*1.7}; });
     const en = ag.filter(a => a.enabled), aa = this.ring(en.length, .62);
     en.forEach((a,i) => { const ang = aa[i];
-      this.nodes["a:"+a.name] = {x: cx + Math.cos(ang)*w*(narrow ? .2 : .19), y: cy + Math.sin(ang)*h*.31, agent: a, ph: i}; });
+      this.nodes["a:"+a.name] = {x: cx + Math.cos(ang)*w*(narrow ? .2 : .19), y: cy + Math.sin(ang)*h*(narrow ? .26 : .31), agent: a, ph: i}; });
     for (const k in this.nodes) if (hot[k]) this.nodes[k].hot = hot[k];
     this.flows = [];
   },
@@ -390,7 +400,8 @@ const Field = {
     return s ? [s, a, this.core] : [a, this.core]; },
   spawn(agent, color, n=1, speed=1){ const p = this.path(agent); if (!p) return;
     for (let i=0;i<n;i++) this.flows.push({p, t: -i*.06, v: (.004+.004*Math.random())*speed, c: color, w: 1+Math.random()*1.4}); },
-  burst(kind, text){ this.bursts.push({kind, text, t: 0}); if (kind === "fire") this.coreHot = performance.now(); },
+  burst(kind, text){ this.bursts.push({kind, text, t: 0});
+    if (kind === "fire") { this.coreHot = performance.now(); this.jetT = performance.now(); } },
   frame(now){
     requestAnimationFrame(this.frame.bind(this));
     if (!this.cv.isConnected) return;
@@ -451,7 +462,42 @@ const Field = {
     // near side of the disk crossing in front of the shadow
     g.strokeStyle = "rgba(170,255,185,.5)"; g.lineWidth = 2.6; g.shadowBlur = 12;
     g.beginPath(); g.ellipse(cx, cy, hr*2.05, hr*2.05*sy*.34, 0, Math.PI*.04, Math.PI*.96); g.stroke();
-    g.shadowBlur = 0; g.lineWidth = 1; g.globalCompositeOperation = "source-over";
+    g.shadowBlur = 0; g.lineWidth = 1;
+    // relativistic jets: a faint breathing beam from each pole, blazing when Jev fires
+    const jet = .05 + .03*pulse + .9*Math.exp(-(now - (this.jetT || -1e9))/1500);
+    for (const dir of [-1, 1]){ const y0 = cy + dir*hr*.9, y1 = dir < 0 ? 0 : h;
+      const jg = g.createLinearGradient(0, y0, 0, y1);
+      jg.addColorStop(0, `rgba(190,255,200,${Math.min(.9, jet).toFixed(3)})`); jg.addColorStop(.35, `rgba(57,255,20,${(jet*.45).toFixed(3)})`);
+      jg.addColorStop(1, "rgba(57,255,20,0)"); g.fillStyle = jg;
+      g.beginPath(); g.moveTo(cx - hr*.07, y0); g.lineTo(cx + hr*.07, y0); g.lineTo(cx + hr*.42, y1); g.lineTo(cx - hr*.42, y1); g.closePath(); g.fill();
+      g.strokeStyle = `rgba(235,255,240,${Math.min(.8, jet*1.2).toFixed(3)})`; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(cx, y0); g.lineTo(cx, cy + dir*Math.min(h*.5, hr*(2 + 10*jet))); g.stroke(); }
+    // Einstein ring: light from behind the hole, bent into a faint circle
+    g.strokeStyle = `rgba(57,255,20,${(.05 + .03*Math.sin(this.t*.8)).toFixed(3)})`; g.lineWidth = 1;
+    g.beginPath(); g.arc(cx, cy, hr*2.75, 0, 7); g.stroke();
+    // consensus ring: one segment per enabled agent, lit by how it votes on the market Jev holds now
+    const J = S && S.jev, en = S ? S.enabled : [];
+    if (J && en.length){ const vs = {}; (J.votes || []).forEach(v => vs[v.agent] = v);
+      const n = en.length, span = Math.PI*2/n, rr = hr*1.24;
+      g.lineCap = "round"; g.font = `600 ${Math.max(9, hr*.11)|0}px 'Share Tech Mono', monospace`; g.textAlign = "center";
+      en.forEach((name, i) => { const v = vs[name], a0 = -Math.PI/2 + i*span + .09, a1 = a0 + span - .18;
+        let col = "rgba(20,60,32,.9)", glowc = null;
+        if (v && v.p_yes !== null && v.p_yes !== undefined) {
+          if (v.p_yes > J.prior + .02) { col = C.yes; glowc = C.yes; } else if (v.p_yes < J.prior - .02) { col = C.no; glowc = C.no; } else col = "#2E6B45"; }
+        g.strokeStyle = col; g.lineWidth = 3.2; g.shadowColor = glowc || "transparent"; g.shadowBlur = glowc ? 12 : 0;
+        g.beginPath(); g.arc(cx, cy, rr, a0, a1); g.stroke(); g.shadowBlur = 0;
+        const am = (a0 + a1)/2; g.fillStyle = glowc ? col : "rgba(95,167,122,.7)";
+        g.fillText((LABEL[name] || name).slice(0, 2), cx + Math.cos(am)*rr*1.17, cy + Math.sin(am)*rr*1.17 + 3); });
+      g.lineCap = "butt"; g.textAlign = "left";
+      // Jev's live call, inside the horizon
+      const act = String(J.action || "").toUpperCase(), acol = J.action === "fire" ? C.yes : J.action === "veto" ? C.veto : "#8FE3AE";
+      g.textAlign = "center"; g.fillStyle = "rgba(95,167,122,.85)"; g.font = `600 ${Math.max(9, hr*.12)|0}px 'Share Tech Mono', monospace`;
+      g.fillText("JEV", cx, cy - hr*.34);
+      g.fillStyle = acol; g.shadowColor = acol; g.shadowBlur = 14; g.font = `700 ${Math.max(16, hr*.34)|0}px 'Chakra Petch', sans-serif`;
+      g.fillText(act, cx, cy + hr*.1); g.shadowBlur = 0;
+      g.fillStyle = "rgba(184,247,207,.8)"; g.font = `${Math.max(9, hr*.12)|0}px 'Share Tech Mono', monospace`;
+      g.fillText(`${fmt(J.effective_agree,1)}/${J.quorum} · ${sgn(J.edge_cents,1)}`, cx, cy + hr*.36); g.textAlign = "left"; }
+    g.globalCompositeOperation = "source-over";
     // edges: source -> agent -> core
     for (const k in this.nodes){ const n = this.nodes[k];
       if (k.startsWith("a:")) { for (const s of n.agent.sources || []) { const sn = this.nodes["s:"+s]; if (!sn) continue;
@@ -493,9 +539,8 @@ const Field = {
     this.bursts = this.bursts.filter(b => b.t < 1);
     for (const b of this.bursts){ b.t += RM ? .03 : .012; const col = b.kind === "fire" ? C.yes : b.kind === "veto" ? C.veto : "#6FBF8C";
       g.strokeStyle = col; g.globalAlpha = 1 - b.t; g.lineWidth = 2;
-      g.beginPath(); g.ellipse(cx, cy, R*.17 + b.t*R*.8, (R*.17 + b.t*R*.8)*sy, 0, 0, 7); g.stroke();
-      g.fillStyle = col; g.font = "700 15px 'Chakra Petch', sans-serif"; g.textAlign = "center";
-      g.fillText(b.text, cx, cy + h*.115 + b.t*18); g.textAlign = "left"; g.globalAlpha = 1; g.lineWidth = 1; }
+      g.beginPath(); g.ellipse(cx, cy, hr*1.3 + b.t*R*.8, (hr*1.3 + b.t*R*.8)*sy, 0, 0, 7); g.stroke();
+      g.globalAlpha = 1; g.lineWidth = 1; }
     if (this.ticks % 15 === 0) $("fTL").innerHTML = `VORTEX · decision field · jev core<br>particles ${this.vortex.length + this.flows.length} · ticks ${this.ticks} · agents ${S ? S.enabled.length : 0}`;
     if (this.ticks % 30 === 0) $("fTR").innerHTML = `replay ${Replay.i}/${Replay.lines.length}<br>fps ${this.fps}`;
   }
@@ -514,7 +559,7 @@ const Replay = {
     renderLog(l);
     if (l.agent === "jev") Field.burst(l.kind, `${l.kind.toUpperCase()} ${short(l.ticker)}`);
     else { Field.spawn(l.agent, l.kind === "flag" ? C.veto : (FAM[famOf(l.agent)] || C.cyan), l.kind === "vote" ? 4 : 2, 1.6); markSource(l.agent); }
-    $("fBL").textContent = `${hhmm(l.ts)} · ${l.kind} · ${l.agent} · ${short(l.ticker)}`; }
+    $("fBL").innerHTML = `${hhmm(l.ts)} · <span class="k-${l.kind}">${l.kind.toUpperCase()}</span> · ${esc(l.agent)} · ${esc(short(l.ticker))}`; }
 };
 
 /* ---------- panels ---------- */
@@ -526,8 +571,8 @@ function renderTop(){
   $("day").textContent = `${fmt(S.go_no_go.days_running,1)}`;
   $("crumb").textContent = `/series/${S.series.length} › /jev`;
   $("rec").textContent = S.mode;
-  $("h1").textContent = `${S.series.length} SERIES · ${S.enabled.length} AGENTS · ONE RULE`;
-  $("h2").textContent = `JEV FIRES ONLY WHEN ${S.rule.quorum} FAMILIES AGREE`;
+  $("mission").innerHTML = `<span class="ml"><b>${S.series.length}</b> series · <b>${S.enabled.length}</b> agents · one rule: jev fires only when <b>${S.rule.quorum}</b> families agree · shadow mode · no orders</span>` +
+    `<span class="ms"><b>${S.rule.quorum}</b>-family rule · <b>${S.enabled.length}</b> agents · shadow</span>`;
   $("fBR").textContent = `fires at ${S.rule.quorum} families · edge ≥ ${S.rule.min_edge_cents}c net of fees`;
 }
 
@@ -641,7 +686,8 @@ function renderBook(){
 function renderPnl(){
   const s = S.summary, el = $("pnlNum");
   tween(el, s.total_pnl_cents, v => sgn(v,1)); el.classList.toggle("neg", s.total_pnl_cents < 0);
-  $("ghostV").textContent = `${sgn(s.total_pnl_cents,1)} / contract · ${s.resolved_fired} settled`;
+  $("ghostN").textContent = sgn(s.total_pnl_cents,1); $("ghost").classList.toggle("neg", s.total_pnl_cents < 0);
+  $("ghostV").textContent = `shadow p&l · per contract · ${s.resolved_fired} settled · ${s.fired} fired`;
   const ci = s.pnl_ci95_cents;
   $("pnlKv").innerHTML = [["trades", `${s.fired} fired · ${s.resolved_fired} settled`], ["win rate", s.win_rate === null ? "—" : fmt(s.win_rate*100,1,"%")],
     ["mean / expected", `${sgn(s.mean_pnl_cents,2)} / ${sgn(s.mean_expected_edge_cents,2)}`], ["95% ci · by event", ci ? `${fmt(ci[0],1)} to ${fmt(ci[1],1)}` : "—"],
