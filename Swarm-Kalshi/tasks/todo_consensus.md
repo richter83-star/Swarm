@@ -36,6 +36,8 @@ mode before it ever places an order.
 - [x] `python -m consensus.hud` — agent tiles, Jev rail + gates, decision tape, consensus matrix, shadow P&L, go/no-go meter; labelled SHADOW
 - [x] v2 animated HUD to the WHALE-OS reference: vortex field with source→agent→Jev particle flow, log replay, sources latency, inspector + vote bars, reliability, live book, candles, drift-vs-noise fan, Bayes, matrix, trades_out, tail -f, stat tiles
 
+- [x] Gate funnel (24h by market + last cycle), hold-reason Pareto, and per-market decision strands in the field (spin, zoom, inspect); runner writes per-cycle gate stops to status.json
+
 ## Phase E — Live (only after the gate passes)
 - [ ] Route Jev `fire` decisions through `risk_manager` sizing + global trade guard in `bot_runner`, demo first
 

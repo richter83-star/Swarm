@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS decisions (
 );
 CREATE INDEX IF NOT EXISTS ix_decisions_ticker ON decisions(ticker);
 CREATE INDEX IF NOT EXISTS ix_decisions_action ON decisions(action, resolved_at);
+CREATE INDEX IF NOT EXISTS ix_decisions_created ON decisions(created_at);
+CREATE INDEX IF NOT EXISTS ix_decisions_ticker_created ON decisions(ticker, created_at);
 CREATE TABLE IF NOT EXISTS agent_runs (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     ts         REAL    NOT NULL,
@@ -174,6 +176,24 @@ class DecisionLedger:
             rows = self._conn.execute(
                 "SELECT payload, outcome, pnl_cents FROM decisions ORDER BY id DESC LIMIT ?",
                 (int(limit),),
+            ).fetchall()
+        out = []
+        for payload, outcome, pnl in rows:
+            d = json.loads(payload)
+            d["outcome"] = outcome
+            d["pnl_cents"] = pnl
+            out.append(d)
+        return out
+
+    def latest_per_ticker(self, since: float, limit: int = 400) -> List[Dict[str, Any]]:
+        """Each market's most recent decision since ``since``, newest first.
+        One row per market, so markets the recorder samples more often don't count twice."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload, outcome, pnl_cents FROM decisions WHERE id IN "
+                "(SELECT MAX(id) FROM decisions WHERE created_at >= ? GROUP BY ticker) "
+                "ORDER BY id DESC LIMIT ?",
+                (float(since), int(limit)),
             ).fetchall()
         out = []
         for payload, outcome, pnl in rows:

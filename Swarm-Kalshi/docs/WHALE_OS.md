@@ -57,6 +57,26 @@ The HISTORY agent re-reads `calibration.json` when it changes (checked every
 Config: `config/whale_os.yaml`. Data: `data/whale_os/` (ledger.db,
 reliability.db, status.json, calibration.json). All of it is gitignored.
 
+## Reading the gate panels
+
+Jev checks its gates in a fixed order: rules veto, enough voters, a majority
+side, quorum, an executable quote, net edge after fees. Every decision records
+the first gate it failed, and the HUD reads that back (`consensus/funnel.py`):
+
+- **GATE FUNNEL**: how many markets reached each gate. 24H counts each market
+  once, at its latest decision; LAST CYCLE is the most recent 5-minute pass.
+  The red number is how many each gate removed.
+- **HOLD REASONS**: why Jev didn't fire, largest first, with the running total.
+  Vetoes are split by rule. The bright rows are the few reasons that cover 80%
+  of holds: that is the constraint worth looking at before changing any rule.
+- **Strands in the field**: one per market (latest decision, 24h). Length =
+  gates cleared; white = fire, green/amber = held leaning YES/NO, red = veto.
+  Drag to spin, ctrl+scroll or pinch to zoom (strike labels appear past 2.2x),
+  hover or tap a strand for its decision.
+
+These panels describe Jev's behaviour, not its edge. A funnel that fires more
+often is not better unless the settled P&L says so.
+
 ## Go / no-go before any live capital
 
 - At least ~400 resolved fired markets (one per market; repeats don't count)

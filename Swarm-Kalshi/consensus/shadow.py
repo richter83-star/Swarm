@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from consensus.agents import Agent, MarketContext, build_agents
 from consensus.aggregator import ConsensusConfig, ConsensusEngine
 from consensus.data_sources import KalshiPublic, parse_ts, snapshot_from_market, source_stats
+from consensus.funnel import stop_of
 from consensus.ledger import DecisionLedger
 from consensus.reliability import ReliabilityStore
 from consensus.schema import AgentVote, Decision
@@ -56,7 +57,7 @@ class ShadowRunner:
         self.engine = engine or ConsensusEngine(
             ConsensusConfig.from_dict(settings.consensus), reliability=self.reliability, clock=clock)
         self.agents = agents if agents is not None else build_agents(settings.agents)
-        self._last_recorded: Dict[str, Tuple[str, Optional[str], float]] = {}
+        self._last_recorded: Dict[str, Tuple[str, Optional[str], str, float]] = {}
         # settlement bookkeeping (in memory; after a restart every open ticker is checked once)
         self._close_at: Dict[str, float] = {}
         self._last_check: Dict[str, float] = {}
@@ -92,9 +93,11 @@ class ShadowRunner:
 
     def _should_record(self, d: Decision) -> bool:
         prev = self._last_recorded.get(d.ticker)
-        if prev is None or prev[0] != d.action or prev[1] != d.side:
+        # a new row whenever the call, the side or the gate that stopped it changes,
+        # so the HUD's per-market funnel is never an hour stale
+        if prev is None or prev[:3] != (d.action, d.side, stop_of(d.action, d.reasons)[0]):
             return True
-        return d.created_at - prev[2] >= self.s.record_interval_s
+        return d.created_at - prev[3] >= self.s.record_interval_s
 
     def evaluate(self, raw: Dict[str, Any], now: float, budget: Dict[str, int]) -> Decision:
         snap = snapshot_from_market(raw, now)
@@ -123,7 +126,8 @@ class ShadowRunner:
         decision = self.engine.decide(snap, votes)
         if self._should_record(decision):
             self.ledger.record(decision)
-            self._last_recorded[decision.ticker] = (decision.action, decision.side, decision.created_at)
+            self._last_recorded[decision.ticker] = (decision.action, decision.side,
+                                                     stop_of(decision.action, decision.reasons)[0], decision.created_at)
         self.ledger.record_agent_runs(runs)
         if decision.action != "veto":        # untradeable markets say nothing about skill
             self.reliability.record_votes(votes, mid / 100.0)
@@ -176,6 +180,7 @@ class ShadowRunner:
         budget = {"expensive": int(self.s.max_expensive_calls_per_cycle)}
         markets = self.discover(t0)
         counts = {"fire": 0, "hold": 0, "veto": 0}
+        stops: Dict[str, int] = {}
         errors = 0
         fired: List[str] = []
         for raw in markets:
@@ -186,6 +191,8 @@ class ShadowRunner:
                 log.warning("evaluate %s failed: %s", raw.get("ticker"), exc)
                 continue
             counts[d.action] = counts.get(d.action, 0) + 1
+            stop = stop_of(d.action, d.reasons)[0]
+            stops[stop] = stops.get(stop, 0) + 1
             if d.fired:
                 fired.append(f"{d.ticker} {d.side} @{d.price_cents}c edge {d.edge_cents:.1f}c")
         settled = self.settle(self.clock())
@@ -196,6 +203,7 @@ class ShadowRunner:
             "cycle_seconds": round(self.clock() - t0, 2),
             "markets": len(markets),
             "counts": counts,
+            "stops": stops,
             "fired": fired,
             "settled": settled,
             "errors": errors,

@@ -13,6 +13,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from consensus.agents import REGISTRY
+from consensus import funnel as gate_funnel
 from consensus.ledger import DecisionLedger
 from consensus.reliability import ReliabilityStore
 from consensus.settings import WhaleOSSettings
@@ -21,6 +22,7 @@ GO_NO_GO_MIN_RESOLVED = 400
 GO_NO_GO_MIN_EVENTS = 100      # independent events: strikes of one event share one outcome
 FAN_MIN_RESOLVED = 10
 FAN_PATHS = 120
+STRANDS_MAX = 400               # markets drawn as strands in the field (latest decision each, 24h)
 
 # Which public sources feed which agent (drawn as edges on the FIELD).
 AGENT_SOURCES = {
@@ -265,6 +267,10 @@ def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
                        "outcome": d.get("outcome"), "created_at": d["created_at"]})
 
     first_ts = ledger.first_ts()
+    latest = ledger.latest_per_ticker(day_ago, limit=20000)
+    gates = gate_funnel.summarize(latest, int(cfg.get("min_voters", 4)), float(cfg.get("quorum", 4)),
+                                  float(cfg.get("min_edge_cents", 2.0)), status.get("stops"))
+    gates["strands"] = [gate_funnel.strand(d) for d in latest[:STRANDS_MAX]]
     return {
         "mode": settings.mode.upper(),
         "generated_at": now,
@@ -296,6 +302,7 @@ def build_state(settings: WhaleOSSettings, ledger: DecisionLedger,
         "hourly": {"votes": votes_hourly, **hourly},
         "series": settings.series,
         "calibration": _calibration(settings, now),
+        "gates": gates,
         "markets_tape": [{"ticker": t, "mid": d["market_mid_cents"], "action": d["action"]}
                          for t, d in list(latest_by_ticker.items())[:40]],
     }
